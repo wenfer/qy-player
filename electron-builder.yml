@@ -1,0 +1,100 @@
+appId: com.qyplayer.app
+productName: QY Player
+copyright: Copyright © 2025 QY Player Team
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - resources/**/*
+extraResources:
+  - from: out
+    to: out
+# 使用本地已安装的 Electron，避免网络下载
+electronDist: node_modules/electron/dist
+# 镜像源配置（国内环境加速）
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+
+# Linux 通用配置
+linux:
+  category: AudioVideo
+  maintainer: QY Player Team
+  vendor: QY Player Team
+  description: 以 MPV 为内核的本地/在线混合媒体播放器
+  synopsis: MPV-based media player with Jellyfin/Emby support
+  executableName: qy-player
+  icon: build/icons
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: rpm
+      arch:
+        - x64
+    - target: pacman
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+    - target: tar.xz
+      arch:
+        - x64
+
+# Debian/Ubuntu/Deepin 专用配置
+deb:
+  packageName: qy-player
+  priority: optional
+  depends:
+    - mpv
+    - libmpv1
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+  recommends:
+    - libappindicator3-1
+
+# RedHat/CentOS/Fedora/openSUSE 专用配置
+rpm:
+  packageName: qy-player
+  depends:
+    - mpv
+    - libmpv
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - libXtst
+    - xdg-utils
+    - at-spi2-core
+    - libuuid
+    - libsecret
+
+# Arch Linux 专用配置
+pacman:
+  packageName: qy-player
+  depends:
+    - mpv
+    - gtk3
+    - libnotify
+    - nss
+    - libxss
+    - libxtst
+    - xdg-utils
+    - at-spi2-core
+    - util-linux-libs
+    - libsecret
+
+# AppImage 专用配置
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=QY Player
+Name[zh_CN]=QY 播放器
+Comment=Media player with Jellyfin/Emby poster wall support
+Comment[zh_CN]=支持 Jellyfin/Emby 海报墙的媒体播放器
+Exec=qy-player %U
+Icon=qy-player
+Type=Application
+Categories=AudioVideo;Player;Video;
+Keywords=video;media;player;jellyfin;emby;mpv;
+StartupNotify=true
+Terminal=false
+MimeType=video/mp4;video/x-matroska;video/x-msvideo;video/quicktime;video/x-ms-wmv;video/webm;
