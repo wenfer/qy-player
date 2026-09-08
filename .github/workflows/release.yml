@@ -27,7 +27,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm
+          # rpm: needed for the rpm target; libarchive-tools: provides bsdtar for the pacman target
+          sudo apt-get install -y rpm libarchive-tools
 
       - name: Build and package
         run: npm run dist:all
