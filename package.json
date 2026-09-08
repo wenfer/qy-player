@@ -1,11 +1,15 @@
 {
   "name": "qy-player",
   "version": "1.0.0",
-  "description": "以 MPV 为内核的本地/在线混合媒体播放器",
+  "description": "专为老版本 Linux (Deepin 20.9 / Debian 10, glibc 2.28) 开发的 MPV 内核桌面播放器，支持 Jellyfin/Emby",
   "main": "./out/main.cjs",
   "author": "QY Player Team",
   "license": "MIT",
-  "homepage": "https://github.com/qy-player/qy-player",
+  "homepage": "https://github.com/wenfer/qy-player",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:wenfer/qy-player.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.js",
