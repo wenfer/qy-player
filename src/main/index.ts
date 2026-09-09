@@ -5,6 +5,7 @@ import { registerIpcHandlers, playbackStateManager } from './ipc';
 import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
 import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
+import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 
 let mainWindow: BrowserWindow | null = null;
@@ -134,17 +135,48 @@ app.whenReady().then(() => {
   // Register global shortcuts from the persisted user config (defaults for
   // anything unset), and allow the renderer to re-apply edited bindings.
   let shortcutOverrides: ShortcutOverrides = {};
+  let mpvBindingOverrides: MpvBindingOverrides = {};
   try {
-    const saved = createStorage(getDatabase()).getConfig('shortcuts');
+    const storage = createStorage(getDatabase());
+    const saved = storage.getConfig('shortcuts');
     if (saved) shortcutOverrides = JSON.parse(saved);
+    const savedMpv = storage.getConfig('mpv-shortcuts');
+    if (savedMpv) mpvBindingOverrides = JSON.parse(savedMpv);
   } catch {
     // Corrupt config -> fall back to defaults
   }
   registerGlobalShortcuts(window, player, shortcutOverrides);
+  // Always (re)write the generated mpv input.conf so custom bindings load
+  // even on the very first player start after an edit.
+  try {
+    writeMpvInputConf(mpvBindingOverrides);
+  } catch {
+    // Filesystem issue -> bundled defaults still apply
+  }
 
   ipcMain.handle(IPC_CHANNELS.SHORTCUTS.APPLY, (_event, overrides: ShortcutOverrides) => {
     unregisterGlobalShortcuts();
     return registerGlobalShortcuts(window, player, overrides || {});
+  });
+
+  // MPV bindings: validate, rewrite the generated input.conf and hot-reload
+  // it in the running player (falls back to "next launch" when not ready).
+  ipcMain.handle(IPC_CHANNELS.SHORTCUTS.APPLY_MPV, async (_event, overrides: MpvBindingOverrides) => {
+    const conflicts = findMpvBindingConflicts(overrides || {});
+    if (conflicts.length > 0) {
+      return { ok: false as const, conflicts };
+    }
+    writeMpvInputConf(overrides || {});
+    let hotReloaded = false;
+    if (player.isReady()) {
+      try {
+        await player.setProperty('input-conf', getGeneratedConfPath());
+        hotReloaded = true;
+      } catch {
+        // Runtime reload unsupported -> applies on next player start
+      }
+    }
+    return { ok: true as const, hotReloaded };
   });
 
   app.on('activate', () => {

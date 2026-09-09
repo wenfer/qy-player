@@ -227,6 +227,11 @@ export class PlayerCore extends EventEmitter {
     await this.ipc.setProperty('window-scale', scale);
   }
 
+  async setProperty(name: string, value: string | number | boolean): Promise<void> {
+    if (!this.ipc) throw new Error('Player not started');
+    await this.ipc.setProperty(name, value);
+  }
+
   async cycleSubtitle(): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
     await this.ipc.command('cycle', 'sub');

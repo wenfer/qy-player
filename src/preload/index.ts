@@ -87,6 +87,8 @@ const electronAPI = {
   // Shortcuts
   applyShortcuts: (overrides: Record<string, string>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY, overrides),
+  applyMpvShortcuts: (overrides: Record<string, string>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY_MPV, overrides),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

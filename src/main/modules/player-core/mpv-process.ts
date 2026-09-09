@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdirSync, existsSync, rmSync } from 'fs';
+import { getGeneratedConfPath } from '../ui-shell/mpv-bindings';
 
 export interface MpvOptions {
   socketPath?: string;
@@ -46,7 +47,11 @@ export class MpvProcessManager extends EventEmitter {
     // bottom-bar OSC when the script is missing.
     // The input conf layers volume-wheel/double-click-fullscreen on top of
     // mpv defaults; only included when the file exists (dev + packaged).
-    const inputConfPath = join(__dirname, '..', 'resources', 'mpv-input.conf');
+    // Prefer the generated conf (user-customized bindings); fall back to
+    // the bundled defaults when it has never been written.
+    const bundledInputConf = join(__dirname, '..', 'resources', 'mpv-input.conf');
+    const generatedConf = getGeneratedConfPath();
+    const inputConfPath = existsSync(generatedConf) ? generatedConf : bundledInputConf;
     const uoscPath = join(__dirname, '..', 'resources', 'uosc.lua');
     const configDir = join(__dirname, '..', 'resources', 'mpv-config');
     const hasUosc = existsSync(uoscPath);

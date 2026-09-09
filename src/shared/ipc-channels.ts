@@ -40,5 +40,6 @@ export const IPC_CHANNELS = {
   },
   SHORTCUTS: {
     APPLY: 'shortcuts:apply',
+    APPLY_MPV: 'shortcuts:apply-mpv',
   },
 } as const;
