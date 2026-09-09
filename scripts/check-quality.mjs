@@ -12,14 +12,15 @@
  * entry there requires human approval (plan.md 16.7).
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { extname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const SCANNABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
 /**
  * scope meanings:
- * - 'prod':  only flagged inside src/ (production logic)
- * - 'tests': only flagged inside tests/
+ * - 'prod':  only flagged in production trees (files under a src/ root)
+ * - 'tests': only flagged in test trees (files under a tests/ root)
  * - 'all':   flagged everywhere (src/, tests/, scripts/)
  */
 export const RULES = [
@@ -44,25 +45,32 @@ export const RULES = [
   {
     id: 'test-skip-only',
     scope: 'tests',
-    pattern: /\.(skip|only|todo|fails)\s*\(/,
-    message: 'Skipped/only/todo tests are forbidden (.skip/.only/.todo/.fails)',
+    // Scoped to vitest/jest receivers so unrelated `.skip(1)`-style calls
+    // (e.g. queue.skip(1)) do not produce false positives.
+    pattern: /\b(?:describe|it|test|suite|beforeEach|afterEach|beforeAll|afterAll)\.(?:skip|only|todo|fails)\b|\b(?:xit|fit|xdescribe|fdescribe)\b/,
+    message: 'Skipped/only/todo tests are forbidden (describe/it/test .skip/.only/.todo/.fails)',
   },
   {
     id: 'empty-catch',
     scope: 'all',
+    // \s spans newlines, so multi-line empty catches are detected.
     pattern: /catch\s*(\([^)]*\))?\s*\{\s*\}/,
     message: 'Empty catch blocks are forbidden',
   },
   {
     id: 'stub-not-implemented',
     scope: 'prod',
-    pattern: /not\s+implemented|尚未实现|未实现/,
+    // Only flagged in throw statements to avoid false positives on
+    // descriptive string content elsewhere.
+    pattern: /throw\b[^\n]*\bnot\s+implemented\b|throw\b[^\n]*(?:尚未实现|未实现)/i,
     message: 'Unimplemented stubs are forbidden in production code',
   },
   {
     id: 'permanent-todo',
     scope: 'prod',
-    pattern: /\b(TODO|FIXME|XXX)\b/,
+    // Only TODO markers inside comments (// /* or JSDoc * continuation);
+    // identifiers like TODO_LIST do not trigger.
+    pattern: /(?:\/\/|\/\*|\*)\s*[^\n]*?\b(?:TODO|FIXME|XXX)\b/,
     message: 'Permanent TODO/FIXME markers are forbidden in production code',
   },
 ];
@@ -77,14 +85,20 @@ export const DEFAULT_IGNORES = [
   /tests[\\/]fixtures[\\/]/,
 ];
 
-function classify(absPath) {
-  const parts = absPath.split(sep);
-  if (parts.includes('tests')) return 'tests';
-  if (parts.includes('src')) return 'prod';
+/**
+ * Classify by the FIRST path segment relative to the scanned root, so nested
+ * directories cannot flip the domain (src/tests/x.ts stays prod, and
+ * tests/fixtures/src/x.ts stays tests).
+ */
+function classify(root, file) {
+  const rel = relative(root, file);
+  const firstSegment = rel.split(sep)[0];
+  if (firstSegment === 'tests') return 'tests';
+  if (firstSegment === 'src') return 'prod';
   return 'other';
 }
 
-function walk(dir, files) {
+function walk(dir, files, root) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -95,16 +109,20 @@ function walk(dir, files) {
   for (const entry of entries) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
-      walk(fullPath, files);
-    } else if (entry.isFile() && SCANNABLE_EXTENSIONS.has(entry.name.slice(entry.name.lastIndexOf('.')))) {
-      files.push(fullPath);
+      walk(fullPath, files, root);
+    } else if (entry.isFile() && SCANNABLE_EXTENSIONS.has(extname(entry.name))) {
+      files.push({ file: fullPath, root });
     }
   }
 }
 
-function ruleAppliesTo(rule, absPath) {
+function lineAt(content, index) {
+  return content.slice(0, index).split('\n').length;
+}
+
+function ruleAppliesTo(rule, domain) {
   if (rule.scope === 'all') return true;
-  return classify(absPath) === rule.scope;
+  return domain === rule.scope;
 }
 
 /**
@@ -114,31 +132,34 @@ function ruleAppliesTo(rule, absPath) {
 export function scanFiles(roots, options = {}) {
   const ignore = options.ignore ?? DEFAULT_IGNORES;
   const collected = [];
-  for (const root of roots) walk(root, collected);
+  for (const root of roots) walk(root, collected, resolve(root));
 
   const violations = [];
-  let filesScanned = 0;
-  for (const file of collected) {
+  const seenFiles = new Set();
+  for (const { file, root } of collected) {
     if (ignore.some((re) => re.test(file))) continue;
-    filesScanned += 1;
+    seenFiles.add(file);
     const content = readFileSync(file, 'utf-8');
     const lines = content.split('\n');
+    const domain = classify(root, file);
     for (const rule of RULES) {
-      if (!ruleAppliesTo(rule, file)) continue;
-      for (let i = 0; i < lines.length; i++) {
-        if (rule.pattern.test(lines[i])) {
-          violations.push({
-            ruleId: rule.id,
-            file,
-            line: i + 1,
-            message: rule.message,
-            snippet: lines[i].trim().slice(0, 120),
-          });
-        }
+      if (!ruleAppliesTo(rule, domain)) continue;
+      const global = new RegExp(rule.pattern.source, 'g');
+      let match;
+      while ((match = global.exec(content)) !== null) {
+        const line = lineAt(content, match.index);
+        violations.push({
+          ruleId: rule.id,
+          file,
+          line,
+          message: rule.message,
+          snippet: (lines[line - 1] ?? '').trim().slice(0, 120),
+        });
+        if (match.index === global.lastIndex) global.lastIndex += 1; // guard against zero-length loops
       }
     }
   }
-  return { violations, filesScanned };
+  return { violations, filesScanned: seenFiles.size };
 }
 
 function printReport(violations) {
@@ -150,8 +171,9 @@ function printReport(violations) {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split(sep).pop());
-if (isMain) {
+const thisFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? resolve(process.argv[1]) : '';
+if (thisFile === invokedFile) {
   const roots = process.argv.slice(2);
   if (roots.length === 0) roots.push('src', 'tests', 'scripts');
   for (const root of roots) {

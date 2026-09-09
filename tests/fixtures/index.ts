@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * Minimal, offline fixtures for phase-2 quality tests (QYP2-001).
@@ -83,11 +83,16 @@ export const CLEAN_SAMPLES: SampleFile[] = [
 /** Create an isolated temp tree with the given samples; returns its root. */
 export function createSampleTree(samples: SampleFile[]): string {
   const root = mkdtempSync(join(tmpdir(), 'qy-quality-'));
-  for (const sample of samples) {
-    const abs = join(root, sample.path);
-    const dir = abs.slice(0, abs.lastIndexOf('/')) || root;
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(abs, sample.content, 'utf-8');
+  try {
+    for (const sample of samples) {
+      const abs = join(root, sample.path);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, sample.content, 'utf-8');
+    }
+  } catch (error) {
+    // Never leak a half-written tree when a sample path is malformed.
+    rmSync(root, { recursive: true, force: true });
+    throw error;
   }
   return root;
 }
