@@ -46,7 +46,11 @@ function Kbd({ children }: { children: React.ReactNode }) {
 /** Display form for Electron accelerators: "CommandOrControl+Shift+Q" -> "Ctrl+Shift+Q". */
 function formatAccelerator(acc: string): string {
   const isMac = /mac/i.test(navigator.platform);
-  return acc.replace(/CommandOrControl|CmdOrCtrl/g, isMac ? 'Cmd' : 'Ctrl');
+  return acc
+    .replace(/CommandOrControl|CmdOrCtrl/g, isMac ? 'Cmd' : 'Ctrl')
+    .replace(/MediaPlayPause/g, '⏯')
+    .replace(/MediaNextTrack/g, '⏭')
+    .replace(/MediaPreviousTrack/g, '⏮');
 }
 
 type Recording = { scope: 'global' | 'mpv'; id: string } | null;
@@ -277,7 +281,7 @@ export default function ShortcutsPage() {
           ))}
         </div>
         <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
-          提示：多媒体键（播放/暂停、快进、后退）无法在应用内录制，保持系统默认即可；若提示被占用，说明组合键已被其他应用注册。
+          提示：⏯ / ⏭ / ⏮ 是键盘上的多媒体按键（笔记本键盘或带播放控制键的键盘），系统级按键无法在应用内重新录制；若提示被占用，说明组合键已被其他应用注册。
         </p>
       </section>
 
