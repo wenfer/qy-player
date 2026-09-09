@@ -108,6 +108,20 @@ Evidence:
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes（1C/2R/3O/2N）：Critical（session-only 迁移丢凭据，已加 isPersistent 守卫）、R2（迁移包 try/catch 脱敏日志不阻断启动）、R3（转码 token 不再过 IPC：主进程 header 缓存 + opaque sessionId，renderer 已无 headers 传递）、O4/O6/N8 已修；O5（COALESCE 阻断凭据删除路径）延后——当前无删除凭据功能，待 QYP2-013 设置页重构时加显式通道；② 越界文件（待追认）：Settings/index.tsx、server-images.ts、use-play-item.ts、Detail/index.tsx（为满足 Checkpoint A 登录不回归 + token 不过 IPC 的必要改动）；③ 首轮提交信息称 16 cases 当时实为 13，整改后实际 19，以此为准；④ TEST_SERVER 的 accessToken 透传为过渡设计，PlaybackResolver（QYP2-015）接管后移除
 
+### QYP2-006 实现 SourceAdapter 与扫描任务状态机
+
+- [x] **依赖：** QYP2-004
+- [x] **Read first：** 本文第 4、6 节、`src/main/ipc/index.ts`
+- [x] **允许修改：** `src/main/modules/library-sources/types.ts`、`src/main/modules/library-scanner/job-controller.ts`、`src/main/modules/catalog/repository.ts`、`tests/main/library-scanner/job-controller.test.ts`
+- [x] **目标：** 定义 local/WebDAV 共用 adapter、异步有界队列、取消、恢复和扫描事件。
+- [x] **验收：** 状态为 queued/discovering/indexing/enriching/completed/cancelled/failed/interrupted；事件 ≤4Hz；取消/失败不标记 missing。
+- [x] **验证：** `npm test -- --run tests/main/library-scanner/job-controller.test.ts`、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（9 文件 82 测试通过，其中 job-controller 10 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Tests: 全相位完成与 run 持久化（processed/total/finished_at）、60s 节流窗下仅剩相位转换事件（无逐条进度刷屏）、取消后零 index 调用 + 状态 cancelled、失败时错误脱敏（root -> <source>）且条目 availability 不变、resume cursor 传递、cursor 每 50 条持久化、启动恢复非终态 -> interrupted（精确 1 条 + finished_at 非空）、graceful shutdown 严格 interrupted（mid-discovery 同步触发）、runBounded 并发 ≤2、错误脱敏单测
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes（2C/4R/3O）全修复：runBounded settled 屏障（异常后不再启动新任务、drain 后才 reject）、transition 终端守卫（interrupted 不可被覆盖）、markInterrupted 同步 abort、cursor 仅随保留条目前进（maxEntries 裁剪不再导致恢复丢条目）、deleteDirectory 补 AbortSignal、adapter 超时契约写入 JSDoc、恢复/中断测试改为严格断言；② 事件语义：相位转换（每 run ≤5 次）立即送达，同相位进度 tick 合并到 250ms 窗（≤4Hz），终态立即送达不丢失；③ maxEntries 上限 100,000 防病态树，被裁剪条目留待恢复轮处理；④ 二轮验收 Approve，遗留噪声备注：错误屏障 drain 期间已落地 worker 仍会回调 onProgress（进度噪声，不影响状态机）
+
 ### Checkpoint A
 
 - [ ] QYP2-001～005 全部 `[x]`。
