@@ -203,6 +203,101 @@ describe('legacy progress migration (ADR-0001 D4)', () => {
     expect(repo.getUserState(itemId)!.position).toBe(250);
   });
 
+  it('migrates finished rows even when position is 0', () => {
+    const root = makeRoot();
+    const { db, repo, sourceId } = mount(root, {
+      files: [{ itemKey: 'f.mkv', relPath: 'f.mkv' }],
+    });
+    const itemId = repo.listFilesBySource(sourceId)[0].item_id;
+    seedLegacyRow(db, {
+      path: join(root, 'f.mkv'),
+      position: 0,
+      isFinished: true,
+      updatedAt: 1_700_000_000,
+    });
+
+    const result = migrateLegacyProgressForSource(db, sourceId);
+    expect(result.migrated).toBe(1);
+    expect(repo.getUserState(itemId)!.is_finished).toBe(1);
+  });
+
+  it('keeps catalog state on an exact updated_at tie', () => {
+    const root = makeRoot();
+    const { db, repo, sourceId } = mount(root, {
+      files: [{ itemKey: 'g.mkv', relPath: 'g.mkv' }],
+    });
+    const itemId = repo.listFilesBySource(sourceId)[0].item_id;
+    const tieTime = 1_700_000_000;
+    repo.upsertUserState({ itemId, position: 800, duration: 7200 });
+    // Force the catalog row to the same unixepoch second as the legacy row.
+    db.prepare('UPDATE catalog_user_state SET updated_at = ? WHERE item_id = ?').run(tieTime, itemId);
+    seedLegacyRow(db, { path: join(root, 'g.mkv'), position: 50, updatedAt: tieTime });
+
+    const result = migrateLegacyProgressForSource(db, sourceId);
+    expect(result.migrated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(repo.getUserState(itemId)!.position).toBe(800);
+  });
+
+  it('migrates one user state per item when an item has multiple files', () => {
+    const root = makeRoot();
+    const { db, repo, sourceId } = mount(root, {
+      files: [
+        { itemKey: 'multi-a', relPath: 'multi-a.mkv' },
+        { itemKey: 'multi-b', relPath: 'multi-b.mkv' },
+      ],
+    });
+    // Point both files at the same item (e.g. multi-part edition).
+    const itemId = repo.listFilesBySource(sourceId)[0].item_id;
+    const secondFile = repo.listFilesBySource(sourceId)[1].id;
+    db.prepare('UPDATE catalog_files SET item_id = ? WHERE id = ?').run(itemId, secondFile);
+    const link = join(root, 'multi-b.mkv');
+    symlinkSync(join(root, 'multi-a.mkv'), link);
+    seedLegacyRow(db, { path: join(root, 'multi-a.mkv'), position: 300, updatedAt: 1_700_000_000 });
+    seedLegacyRow(db, { path: link, position: 310, updatedAt: 1_700_000_500 });
+
+    const result = migrateLegacyProgressForSource(db, sourceId);
+    expect(result.matched).toBe(1);
+    expect(result.migrated).toBe(1);
+    expect(result.skipped).toBe(1); // the alternate file match was consumed
+    expect(repo.getUserState(itemId)!.position).toBe(300);
+  });
+
+  it('ignores non-local legacy rows entirely', () => {
+    const root = makeRoot();
+    const { db, repo, sourceId } = mount(root, {
+      files: [{ itemKey: 'h.mkv', relPath: 'h.mkv' }],
+    });
+    // A server-side progress row must never enter the local migration scan.
+    db.prepare(
+      `INSERT INTO playback_progress (media_type, server_id, position, duration, is_finished, updated_at)
+       VALUES ('jellyfin', 'server-1', 999, 7200, 0, 1_700_000_000)`
+    ).run();
+
+    const result = migrateLegacyProgressForSource(db, sourceId);
+    expect(result.scanned).toBe(0);
+    expect(result.matched).toBe(0);
+    expect(repo.listFilesBySource(sourceId).length).toBe(1);
+    expect(repo.getUserState(repo.listFilesBySource(sourceId)[0].item_id)).toBeUndefined();
+  });
+
+  it('never matches through paths escaping the source root', () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'outside.mkv'), Buffer.alloc(500));
+    const { db, repo, sourceId } = mount(root, {
+      files: [],
+    });
+    // Simulate corrupted scanner data: relative path escapes the root.
+    const itemId = repo.upsertItem({ sourceId, sourceKey: 'escape', kind: 'movie', title: 'Escape' });
+    repo.upsertFile({ sourceId, itemId, relativePath: '../outside.mkv' });
+    seedLegacyRow(db, { path: join(root, 'outside.mkv'), position: 420, updatedAt: 1_700_000_000 });
+
+    const result = migrateLegacyProgressForSource(db, sourceId);
+    expect(result.matched).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(repo.getUserState(itemId)).toBeUndefined();
+  });
+
   it('returns an empty result for an unknown source', () => {
     const root = makeRoot();
     const { db } = mount(root, { files: [] });

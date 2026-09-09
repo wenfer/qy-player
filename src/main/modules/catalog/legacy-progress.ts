@@ -18,7 +18,7 @@ import { createCatalogRepository } from './repository';
  */
 
 export interface LegacyProgressResult {
-  /** Legacy playback_progress rows considered for this source. */
+  /** Legacy playback_progress rows (global local rows) considered for matching. */
   scanned: number;
   /** Legacy rows linked to at least one catalog item in this source. */
   matched: number;
@@ -40,6 +40,7 @@ interface LegacyRow {
 
 function pathKeys(absPath: string): Set<string> {
   const keys = new Set<string>();
+  if (!absPath) return keys;
   const normalized = normalize(absPath);
   keys.add(normalized);
   try {
@@ -52,6 +53,13 @@ function pathKeys(absPath: string): Set<string> {
   return keys;
 }
 
+/** A stored relative_path must stay inside its source root (plan §8.2). */
+function isSafeRelativePath(relativePath: string): boolean {
+  if (!relativePath || relativePath.includes('\0')) return false;
+  const segments = normalize(relativePath).split('/');
+  return !segments.includes('..') && !segments.includes('');
+}
+
 function isLegacyValid(row: LegacyRow): boolean {
   return row.is_finished === 1 || row.position > 0;
 }
@@ -62,7 +70,12 @@ function betterLegacy(candidate: LegacyRow, incumbent: LegacyRow, fileSize: numb
     const incumbentSizeMatch = incumbent.file_size === fileSize;
     if (candidateSizeMatch !== incumbentSizeMatch) return candidateSizeMatch;
   }
-  return (candidate.updated_at ?? 0) > (incumbent.updated_at ?? 0);
+  if ((candidate.updated_at ?? 0) !== (incumbent.updated_at ?? 0)) {
+    return (candidate.updated_at ?? 0) > (incumbent.updated_at ?? 0);
+  }
+  // Fully tied (same size class and same second): pick the lower legacy id so
+  // the result never depends on map iteration order.
+  return candidate.local_media_id < incumbent.local_media_id;
 }
 
 export function migrateLegacyProgressForSource(
@@ -83,7 +96,7 @@ export function migrateLegacyProgressForSource(
        WHERE p.media_type = 'local'`
     )
     .all() as LegacyRow[];
-  const scanned = legacyRows.length;
+  const scanned = legacyRows.filter((row) => row.path).length;
 
   // Keep ALL rows per path key; the best one is chosen per file later, when
   // the file's size is known (size match outranks recency).
@@ -97,11 +110,17 @@ export function migrateLegacyProgressForSource(
     }
   }
 
-  const matchedItems = new Set<number>();
-  let migrated = 0;
+  // One user state per item: pick the best legacy row across all files of
+  // the item (files iterate in deterministic relative_path order).
+  const bestPerItem = new Map<number, LegacyRow>();
   let skipped = 0;
 
   for (const file of repo.listFilesBySource(sourceId)) {
+    if (!isSafeRelativePath(file.relative_path)) {
+      // Data corruption guard (plan §8.2): never resolve outside the root.
+      skipped += 1;
+      continue;
+    }
     const keys = pathKeys(join(source.root, file.relative_path));
     let best: LegacyRow | undefined;
     for (const key of keys) {
@@ -109,15 +128,23 @@ export function migrateLegacyProgressForSource(
         if (!best || betterLegacy(candidate, best, file.size)) best = candidate;
       }
     }
-    if (!best || matchedItems.has(file.item_id)) continue;
-    matchedItems.add(file.item_id);
+    if (!best) continue;
+    if (bestPerItem.has(file.item_id)) {
+      // An alternate legacy row for an item that already matched.
+      skipped += 1;
+      continue;
+    }
+    bestPerItem.set(file.item_id, best);
+  }
 
+  let migrated = 0;
+  for (const [itemId, best] of bestPerItem) {
     if (!isLegacyValid(best)) {
       skipped += 1;
       continue;
     }
 
-    const existing = repo.getUserState(file.item_id);
+    const existing = repo.getUserState(itemId);
     if (existing) {
       const legacyTime = best.updated_at ?? 0;
       const catalogTime = existing.updated_at ?? 0;
@@ -130,7 +157,7 @@ export function migrateLegacyProgressForSource(
     }
 
     repo.upsertUserState({
-      itemId: file.item_id,
+      itemId,
       position: best.position,
       duration: best.duration ?? undefined,
       isFinished: best.is_finished === 1,
@@ -138,5 +165,5 @@ export function migrateLegacyProgressForSource(
     migrated += 1;
   }
 
-  return { scanned, matched: matchedItems.size, migrated, skipped };
+  return { scanned, matched: bestPerItem.size, migrated, skipped };
 }
