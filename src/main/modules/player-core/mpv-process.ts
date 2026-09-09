@@ -109,10 +109,9 @@ export class MpvProcessManager extends EventEmitter {
       });
 
       // Drain stdout/stderr so the pipe buffer never fills and blocks mpv.
+      // Silence is intentional: only swallow the output, never log it.
       this.process.stdout?.on('data', () => {});
-      this.process.stderr?.on('data', (data: Buffer) => {
-        console.error('[MPV]', data.toString().trim());
-      });
+      this.process.stderr?.on('data', () => {});
 
       let started = false;
 
