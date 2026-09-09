@@ -10,11 +10,12 @@ import {
   MEDIA_SERVER_NAMESPACE,
   assertNotSecretConfigKey,
   createSecretStore,
+  createStreamHeaderCache,
   migrateServerTokensToSecretStore,
   resolveServerApiKey,
   sanitizeServerForRenderer,
 } from '../modules/security/secret-store';
-import type { SecretStore } from '../modules/security/secret-store';
+import type { SecretStore, StreamHeaderCache } from '../modules/security/secret-store';
 import type { ServerConfig } from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
@@ -83,8 +84,17 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
   // Secret storage: one-time legacy token migration happens here so that
   // plaintext api_key columns are cleared as soon as the app starts.
+  // Failure must never block app startup: the legacy column stays as-is and
+  // the next launch retries. The log must not contain the token itself.
   const secretStore = createSecretStore(db);
-  migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
+  try {
+    migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
+  } catch (err) {
+    console.error('[SECRET-MIGRATION] 服务器令牌迁移失败，将在下次启动重试:', err instanceof Error ? err.message : err);
+  }
+
+  // Stream headers are stashed main-side; renderers only see session ids.
+  const streamHeaders: StreamHeaderCache = createStreamHeaderCache();
 
   // Initialize playback state manager
   playbackStateManager = new PlaybackStateManager(player, storage);
@@ -96,11 +106,17 @@ export function registerIpcHandlers(player: PlayerCore): void {
     path: string,
     startPosition?: number,
     httpHeaders?: string,
-    mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string }
+    mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string },
+    streamSessionId?: string
   ) => {
     if (!player.isReady()) {
       await player.start();
     }
+
+    // Real headers never cross the IPC boundary: the renderer hands back the
+    // opaque session id it received from GET_STREAM_URL.
+    const stashedHeaders = streamSessionId ? streamHeaders.take(streamSessionId) : undefined;
+    const effectiveHeaders = stashedHeaders ?? httpHeaders;
 
     // Determine if this is a local file
     const isLocal = isLocalFilePath(path);
@@ -121,7 +137,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
       // Set current media for progress tracking
       playbackStateManager!.setCurrentMedia('local', path, title, undefined, localMediaId);
 
-      await player.loadFile(path, finalPosition, httpHeaders);
+      await player.loadFile(path, finalPosition, effectiveHeaders);
     } else {
       // Online streaming: key progress by the ITEM id (not the stream URL,
       // which differs between direct/transcode and would split the record)
@@ -142,7 +158,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
       const finalPosition = startPosition !== undefined && startPosition > 0
         ? startPosition
         : (resumePosition > 0 ? resumePosition : undefined);
-      await player.loadFile(path, finalPosition, httpHeaders);
+      await player.loadFile(path, finalPosition, effectiveHeaders);
     }
   });
 
@@ -362,6 +378,9 @@ export function registerIpcHandlers(player: PlayerCore): void {
       if (server.username && server.password) {
         try {
           const auth = await client.authenticate(server.username, server.password);
+          // Transitional (QYP2-013/015): the fresh token still round-trips
+          // through the renderer for the save flow; PlaybackResolver will
+          // own auth injection and remove this pass-through later.
           return { ok: true, accessToken: auth.accessToken, userId: auth.userId };
         } catch (authErr) {
           console.error('[SERVER-TEST] 认证失败:', authErr);
@@ -464,10 +483,14 @@ export function registerIpcHandlers(player: PlayerCore): void {
           playSessionId
         );
         // Transcode segments carry no api_key - the player must send the
-        // token as an HTTP header on every request (http-header-fields)
-        const headers =
-          mode === 'transcode' ? `X-Emby-Token: ${config.api_key}` : undefined;
-        return { url, headers, mode: mode === 'transcode' ? 'transcode' : 'direct' };
+        // token as an HTTP header on every request (http-header-fields).
+        // The header is stashed MAIN-SIDE and handed back via the opaque
+        // streamSessionId: the token never crosses the IPC boundary.
+        const sessionId = randomUUID();
+        if (mode === 'transcode') {
+          streamHeaders.stash(sessionId, `X-Emby-Token: ${config.api_key}`);
+        }
+        return { url, sessionId, mode: mode === 'transcode' ? 'transcode' : 'direct' };
       } catch (err) {
         console.error(`[GET-STREAM-URL] 服务器 ${config.name} 生成播放地址失败:`, err);
         continue;

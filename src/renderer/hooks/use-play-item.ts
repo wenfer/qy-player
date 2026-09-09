@@ -71,9 +71,11 @@ export function usePlayItem() {
         playId,
         mediaSource.Id as string,
         'direct'
-      )) as { url: string; headers?: string } | null;
+      )) as { url: string; sessionId?: string } | null;
       if (stream?.url) {
-        await window.electronAPI.playerLoadFile(stream.url, undefined, stream.headers, {
+        // Credentials stay main-side; the renderer passes back the opaque
+        // session id it received from getStreamUrl.
+        await window.electronAPI.playerLoadFile(stream.url, undefined, undefined, {
           mediaType: item.serverType || 'jellyfin',
           mediaId: playId,
           title: resolvedTitle,
@@ -81,7 +83,7 @@ export function usePlayItem() {
           seasonNumber: resolvedSeason,
           episodeNumber: resolvedEpisode,
           mediaSourceId: mediaSource.Id as string,
-        });
+        }, stream.sessionId);
         addToast(`开始播放: ${item.name}`, 'success');
       } else {
         addToast('无法获取播放地址（服务器未响应），请稍后重试', 'error');

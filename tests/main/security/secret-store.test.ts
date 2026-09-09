@@ -21,6 +21,7 @@ import {
   MEDIA_SERVER_NAMESPACE,
   assertNotSecretConfigKey,
   createSecretStore,
+  createStreamHeaderCache,
   formatSecretRef,
   migrateServerTokensToSecretStore,
   parseSecretRef,
@@ -182,6 +183,21 @@ describe('server token migration (plan §8.3)', () => {
     expect(migrateServerTokensToSecretStore(db, storage.getServers(), store)).toBe(0);
   });
 
+  it('does not clear legacy plaintext in session-only mode (no data loss)', () => {
+    const storage = createStorage(db);
+    storage.saveServer({ type: 'jellyfin', name: 'N', baseUrl: 'http://x', isActive: true });
+    db.prepare('UPDATE servers SET api_key = ?').run('precious-plain');
+    // safeStorage unavailable -> secrets are session-only; migration must be
+    // a no-op so the token survives a restart (Critical review finding).
+    const store = createSecretStore(db, { ...xorCipher(), isEncryptionAvailable: () => false });
+    expect(store.isPersistent()).toBe(false);
+
+    const migrated = migrateServerTokensToSecretStore(db, storage.getServers(), store);
+    expect(migrated).toBe(0);
+    const row = db.prepare('SELECT api_key FROM servers').get() as { api_key: string | null };
+    expect(row.api_key).toBe('precious-plain');
+  });
+
   it('keeps plaintext when readback verification fails', () => {
     const storage = createStorage(db);
     storage.saveServer({
@@ -238,5 +254,25 @@ describe('settings channel guard', () => {
   it('blocks secret config keys', () => {
     expect(() => assertNotSecretConfigKey('secret:media-server:1')).toThrow();
     expect(() => assertNotSecretConfigKey('shortcuts')).not.toThrow();
+  });
+});
+
+describe('stream header cache (tokens stay main-side)', () => {
+  it('hands headers back exactly once per session id', () => {
+    const cache = createStreamHeaderCache();
+    cache.stash('s1', 'X-Emby-Token: t1');
+    expect(cache.take('s1')).toBe('X-Emby-Token: t1');
+    expect(cache.take('s1')).toBeUndefined(); // single-use
+    expect(cache.take('unknown')).toBeUndefined();
+  });
+
+  it('evicts the oldest entry beyond the capacity bound', () => {
+    const cache = createStreamHeaderCache(2);
+    cache.stash('a', 'h-a');
+    cache.stash('b', 'h-b');
+    cache.stash('c', 'h-c'); // evicts 'a'
+    expect(cache.take('a')).toBeUndefined();
+    expect(cache.take('b')).toBe('h-b');
+    expect(cache.take('c')).toBe('h-c');
   });
 });

@@ -24,14 +24,16 @@ const electronAPI = {
     path: string,
     startPosition?: number,
     httpHeaders?: string,
-    mediaContext?: MediaContext
+    mediaContext?: MediaContext,
+    streamSessionId?: string
   ) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.PLAYER.LOAD_FILE,
       path,
       startPosition,
       httpHeaders,
-      mediaContext
+      mediaContext,
+      streamSessionId
     ),
   playerControl: (action: string, ...args: unknown[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.CONTROL, action, ...args),

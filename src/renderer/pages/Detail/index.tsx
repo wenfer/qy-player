@@ -191,10 +191,10 @@ export default function Detail() {
 
       const stream = (await window.electronAPI.getStreamUrl(playId!, ms, playMode)) as {
         url: string;
-        headers?: string;
+        sessionId?: string;
       } | null;
       if (stream?.url) {
-        await window.electronAPI.playerLoadFile(stream.url, startPosition, stream.headers, {
+        await window.electronAPI.playerLoadFile(stream.url, startPosition, undefined, {
           mediaType: serverType,
           mediaId: playId!,
           title: targetDetails.Name,
@@ -202,7 +202,7 @@ export default function Detail() {
           seasonNumber: targetDetails.ParentIndexNumber,
           episodeNumber: targetDetails.IndexNumber,
           mediaSourceId: ms,
-        });
+        }, stream.sessionId);
         addToast(
           playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
           'success'

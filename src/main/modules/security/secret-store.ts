@@ -86,6 +86,8 @@ export interface SanitizedServer {
 }
 
 export interface SecretStore {
+  /** True when secrets survive a restart; false means session-only mode. */
+  isPersistent(): boolean;
   /** Persists (encrypted) or holds session-only; throws if readback fails. */
   setSecret(namespace: string, key: string, value: string): void;
   getSecret(namespace: string, key: string): string | null;
@@ -151,6 +153,8 @@ export function createSecretStore(
   };
 
   const store: SecretStore = {
+    isPersistent: () => cipher.isEncryptionAvailable(),
+
     setSecret(namespace, key, value) {
       validateNamespace(namespace);
       validateKey(key);
@@ -233,6 +237,9 @@ export function sanitizeServerForRenderer(
   },
   store: SecretStore
 ): SanitizedServer {
+  // Same resolution order as resolveServerApiKey so the UI flag can never
+  // claim a login that the API-key resolution cannot back up.
+  const resolvable = resolveServerApiKey(server, store) !== null;
   return {
     id: server.id,
     type: server.type,
@@ -241,7 +248,7 @@ export function sanitizeServerForRenderer(
     username: server.username,
     user_id: server.user_id,
     is_active: server.is_active,
-    hasCredential: store.hasSecret(MEDIA_SERVER_NAMESPACE, String(server.id)) || !!server.api_key,
+    hasCredential: resolvable,
   };
 }
 
@@ -266,6 +273,9 @@ export function migrateServerTokensToSecretStore(
   servers: Array<{ id: number; api_key?: string }>,
   store: SecretStore
 ): number {
+  // Session-only mode: moving the token out of the legacy column would lose
+  // it on restart. Keep plaintext until a persistent store is available.
+  if (!store.isPersistent()) return 0;
   let migrated = 0;
   for (const server of servers) {
     if (!server.api_key) continue;
@@ -275,6 +285,36 @@ export function migrateServerTokensToSecretStore(
     migrated += 1;
   }
   return migrated;
+}
+
+/**
+ * Bounded cache for stream request headers (e.g. X-Emby-Token) so tokens
+ * never cross the IPC boundary: the renderer receives only an opaque session
+ * id and the main process attaches the real headers when loading the file.
+ */
+export interface StreamHeaderCache {
+  stash(sessionId: string, headers: string): void;
+  take(sessionId: string): string | undefined;
+}
+
+export function createStreamHeaderCache(maxEntries = 16): StreamHeaderCache {
+  const entries = new Map<string, { headers: string; createdAt: number }>();
+  return {
+    stash(sessionId, headers) {
+      if (entries.size >= maxEntries) {
+        // FIFO: drop the oldest stashed session.
+        const oldest = entries.keys().next().value;
+        if (oldest !== undefined) entries.delete(oldest);
+      }
+      entries.set(sessionId, { headers, createdAt: Date.now() });
+    },
+    take(sessionId) {
+      const entry = entries.get(sessionId);
+      if (!entry) return undefined;
+      entries.delete(sessionId); // single-use: headers live as long as needed
+      return entry.headers;
+    },
+  };
 }
 
 /** app_config keys under this prefix must never cross the IPC boundary. */
