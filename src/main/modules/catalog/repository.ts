@@ -273,6 +273,12 @@ export function createCatalogRepository(db: Database.Database) {
         .all(itemId) as CatalogFileRow[];
     },
 
+    listFilesBySource(sourceId: number): CatalogFileRow[] {
+      return db
+        .prepare('SELECT * FROM catalog_files WHERE source_id = ? ORDER BY relative_path')
+        .all(sourceId) as CatalogFileRow[];
+    },
+
     // -- Streams ------------------------------------------------------------
 
     /** Replace the stream set of a file atomically (probe result is authoritative). */
