@@ -42,4 +42,19 @@ export const IPC_CHANNELS = {
     APPLY: 'shortcuts:apply',
     APPLY_MPV: 'shortcuts:apply-mpv',
   },
+  // Phase 2 unified catalog domain (handlers land in QYP2-008+; the channel
+  // names are part of the QYP2-002 contract and must not be renamed).
+  CATALOG: {
+    SOURCE_LIST: 'catalog:source-list',
+    SOURCE_TEST: 'catalog:source-test',
+    SOURCE_SAVE: 'catalog:source-save',
+    SOURCE_REMOVE: 'catalog:source-remove',
+    SOURCE_HEALTH: 'catalog:source-health',
+    SCAN_START: 'catalog:scan-start',
+    SCAN_CANCEL: 'catalog:scan-cancel',
+    SCAN_EVENTS: 'catalog:scan-events',
+    LIST: 'catalog:list',
+    GET: 'catalog:get',
+    SEARCH: 'catalog:search',
+  },
 } as const;

@@ -97,3 +97,7 @@ export interface MediaItem {
   episodeNumber?: number;
   seriesName?: string;
 }
+
+// ---- Phase 2 unified catalog & action contracts ----
+export * from './catalog';
+export * from './actions';
