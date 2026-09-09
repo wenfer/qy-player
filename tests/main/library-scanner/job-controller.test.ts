@@ -226,34 +226,35 @@ describe('scan job controller (QYP2-006)', () => {
     repo.updateScanRun(completedId, { status: 'completed' });
 
     const recovered = repo.recoverInterruptedScanRuns();
-    expect(recovered).toBeGreaterThanOrEqual(1);
-    expect(repo.getScanRun(runId)!.status).toBe('interrupted');
+    expect(recovered).toBe(1);
+    const interrupted = repo.getScanRun(runId)!;
+    expect(interrupted.status).toBe('interrupted');
+    expect(interrupted.finished_at).not.toBeNull();
     expect(repo.getScanRun(completedId)!.status).toBe('completed');
   });
 
   it('marks a running job interrupted on graceful shutdown', async () => {
     const { repo, sourceId, root } = makeEnv();
-    const controller = new ScanJobController({
+    let controller!: ScanJobController;
+    const adapter = makeAdapter(entriesOf(['a.mkv', 'b.mkv']), {
+      // Interrupt synchronously mid-discovery: the strict outcome must be
+      // `interrupted`, never overwritten to cancelled/completed (review R6).
+      afterFirst: () => {
+        controller.markInterrupted();
+        return Promise.resolve();
+      },
+    });
+    controller = new ScanJobController({
       repo,
-      adapter: makeAdapter(entriesOf(['a.mkv', 'b.mkv']), {
-        afterFirst: (signal) =>
-          new Promise<void>((resolve) => {
-            signal.addEventListener('abort', () => resolve(), { once: true });
-          }),
-      }),
+      adapter,
       driver: { index: async () => {} },
       sourceId,
       root,
       eventIntervalMs: 10,
     });
-    const startPromise = controller.start();
-    await new Promise((r) => setTimeout(r, 20));
-    // Graceful shutdown records `interrupted`; the abort lets traversal unwind.
-    controller.markInterrupted();
-    controller.cancel();
-    const runId = await startPromise;
+    const runId = await controller.start();
     const run = repo.getScanRun(runId)!;
-    expect(['interrupted', 'cancelled']).toContain(run.status);
+    expect(run.status).toBe('interrupted');
   });
 
   it('bounds worker concurrency in runBounded', async () => {

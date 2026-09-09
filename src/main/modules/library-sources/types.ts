@@ -61,6 +61,9 @@ export interface DeleteResult {
 
 export interface SourceAdapter {
   readonly kind: SourceKind;
+  // Implementation contract: every method must honor the AbortSignal AND
+  // enforce its own timeout (network sources abort themselves on timeout,
+  // plan §16.4) - the controller does not add timeouts around adapters.
   testConnection(signal: AbortSignal): Promise<SourceCapabilities>;
   /**
    * Traverse one directory level. `relativePath` '' means the source root.
@@ -71,7 +74,7 @@ export interface SourceAdapter {
   stat(locator: MediaLocator, signal: AbortSignal): Promise<SourceStat>;
   open(locator: MediaLocator, signal: AbortSignal): Promise<ReadableResource>;
   /** Only for sources whose capabilities allow deletion (plan §14.2). */
-  deleteDirectory?(locator: MediaLocator, precondition: DeletePrecondition): Promise<DeleteResult>;
+  deleteDirectory?(locator: MediaLocator, precondition: DeletePrecondition, signal: AbortSignal): Promise<DeleteResult>;
 }
 
 /** Per-entry work the scanner drives through the job controller. */

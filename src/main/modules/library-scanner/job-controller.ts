@@ -34,7 +34,12 @@ export function sanitizeScanError(message: string, root: string): string {
   return withoutRoot.slice(0, 300);
 }
 
-/** Run a worker over all items with at most `concurrency` in flight. */
+/** Run a worker over all items with at most `concurrency` in flight.
+ *
+ * Error barrier: once one worker fails, no new tasks are launched; the
+ * promise rejects only after in-flight work has drained, so the controller
+ * can transition to `failed` knowing no side effects are still pending.
+ */
 export async function runBounded<T>(
   items: T[],
   concurrency: number,
@@ -44,10 +49,18 @@ export async function runBounded<T>(
 ): Promise<void> {
   let next = 0;
   let active = 0;
+  let settled = false;
   await new Promise<void>((resolve, reject) => {
+    const settle = (err?: unknown): void => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err instanceof Error ? err : new Error(String(err)));
+      else resolve();
+    };
     const launch = (): void => {
+      if (settled) return;
       if (signal.aborted) {
-        if (active === 0) resolve();
+        if (active === 0) settle();
         return;
       }
       while (active < concurrency && next < items.length) {
@@ -57,14 +70,18 @@ export async function runBounded<T>(
           .then(() => {
             active -= 1;
             onProgress?.();
-            launch();
+            if (settled) {
+              if (active === 0) settle();
+            } else {
+              launch();
+            }
           })
           .catch((err: unknown) => {
             active -= 1;
-            reject(err instanceof Error ? err : new Error(String(err)));
+            settle(err);
           });
       }
-      if (next >= items.length && active === 0) resolve();
+      if (next >= items.length && active === 0) settle();
     };
     launch();
   });
@@ -127,10 +144,11 @@ export class ScanJobController {
     this.abortController.abort();
   }
 
-  /** Graceful-shutdown hook: persist the run as interrupted, no error. */
+  /** Graceful-shutdown hook: record interrupted and stop all work. */
   markInterrupted(): void {
     if (this.runId !== null && !this.finished) {
       this.transition('interrupted');
+      this.abortController.abort();
     }
   }
 
@@ -165,19 +183,21 @@ export class ScanJobController {
     // Phase 1: discovering (traversal is the adapter's job).
     this.transition('discovering');
     const entries: SourceEntry[] = [];
-    let cursor = startCursor || null;
+    let cursor: string | null = startCursor || null;
     for await (const entry of this.adapter.list(startCursor, this.signal)) {
       throwIfAborted(this.signal);
+      // Beyond the cap, entries are not retained and the cursor is NOT
+      // advanced: a resumed run must still be able to reach them (R3).
       if (entries.length < this.maxEntries) {
         entries.push(entry);
-      }
-      cursor = entry.relativePath;
-      this.processed += 1;
-      // Persist the resume cursor every 50 entries so an interrupted run
-      // can re-enter traversal close to where it stopped.
-      if (this.processed % 50 === 0) {
-        this.repo.updateScanRun(this.runId!, { cursor });
-        this.emit('discovering', { processed: this.processed });
+        cursor = entry.relativePath;
+        this.processed += 1;
+        // Persist the resume cursor every 50 entries so an interrupted run
+        // can re-enter traversal close to where it stopped.
+        if (this.processed % 50 === 0) {
+          this.repo.updateScanRun(this.runId!, { cursor });
+          this.emit('discovering', { processed: this.processed });
+        }
       }
     }
     this.repo.updateScanRun(this.runId!, {
@@ -226,7 +246,11 @@ export class ScanJobController {
    * ticks are coalesced to at most one per eventIntervalMs (<= 4Hz).
    */
   private transition(status: ScanRunStatus, extra: { message?: string } = {}): void {
-    if (this.runId === null) return;
+    // Terminal guard: once finished (e.g. interrupted), no state may
+    // overwrite the recorded outcome (review C2).
+    if (this.runId === null || this.finished) return;
+    // Phase transitions are emitted immediately on purpose: a run has at
+    // most 5 of them, far below the 4Hz progress cap (review O7).
     const patch: Parameters<CatalogRepository['updateScanRun']>[1] = { status };
     if (status === 'failed' && extra.message) patch.error = extra.message;
     if (isTerminal(status)) patch.finishedAt = Math.floor(Date.now() / 1000);
