@@ -7,7 +7,6 @@ import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './modules/ui-shell/shortcuts';
 
 let mainWindow: BrowserWindow | null = null;
-let isQuitting = false;
 const player = new PlayerCore();
 
 // time-pos fires several times per second; forwarding every tick causes
@@ -100,14 +99,10 @@ function createWindow(): BrowserWindow {
     mainWindow?.show();
   });
 
-  // Minimize to tray instead of closing
-  mainWindow.on('close', (event) => {
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow?.hide();
-    }
-  });
-
+  // Closing the window quits the app. The tray icon is only a shortcut for
+  // show/hide while running - on DEs without appindicator support the tray
+  // icon is invisible, and hide-on-close would orphan the process with no
+  // way back.
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -147,12 +142,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', async () => {
-  // Don't quit on Linux - stay in tray
-});
-
-app.on('before-quit', () => {
-  isQuitting = true;
+app.on('window-all-closed', () => {
+  // Quit on all platforms: a hidden zombie process confuses users, and
+  // Linux tray icons are unreliable (invisible on GNOME without appindicator)
+  app.quit();
 });
 
 app.on('will-quit', async () => {
