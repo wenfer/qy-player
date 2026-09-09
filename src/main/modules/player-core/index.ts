@@ -54,13 +54,20 @@ export class PlayerCore extends EventEmitter {
     this.ipc.observeProperty('eof-reached');
 
     this.ipc.on('property-change:time-pos', (data) => {
-      this.state.currentTime = typeof data === 'number' ? data : 0;
-      this.emit('time-pos', this.state.currentTime);
+      // null = no file loaded (initial observe / fired again on unload at
+      // quit). Keeping the last real position is critical: the disconnect
+      // save fires right after this event, and writing 0 here would
+      // overwrite the whole session's progress with 0.
+      if (typeof data !== 'number') return;
+      this.state.currentTime = data;
+      this.emit('time-pos', data);
     });
 
     this.ipc.on('property-change:duration', (data) => {
-      this.state.duration = typeof data === 'number' ? data : 0;
-      this.emit('duration', this.state.duration);
+      // Same null-on-unload rule as time-pos
+      if (typeof data !== 'number' || data <= 0) return;
+      this.state.duration = data;
+      this.emit('duration', data);
     });
 
     this.ipc.on('property-change:pause', (data) => {
