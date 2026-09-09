@@ -144,7 +144,8 @@ export function scanFiles(roots, options = {}) {
     const domain = classify(root, file);
     for (const rule of RULES) {
       if (!ruleAppliesTo(rule, domain)) continue;
-      const global = new RegExp(rule.pattern.source, 'g');
+      // Preserve original flags (e.g. i) in addition to global matching.
+      const global = new RegExp(rule.pattern.source, 'g' + rule.pattern.flags.replace(/g/g, ''));
       let match;
       while ((match = global.exec(content)) !== null) {
         const line = lineAt(content, match.index);

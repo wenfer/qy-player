@@ -115,6 +115,17 @@ describe('quality floor guard (check-quality.mjs)', () => {
     expect(ignored.violations).toEqual([]);
   });
 
+  it('preserves rule flags when matching globally (case-insensitive stub)', () => {
+    const violations = violationFor([
+      {
+        path: 'src/stub-cased.ts',
+        content: 'export function later(): never {\n  throw new Error("Not Implemented");\n}\n',
+        ruleId: 'stub-not-implemented',
+      },
+    ]);
+    expect(violations.map((v) => v.ruleId)).toContain('stub-not-implemented');
+  });
+
   it('scope: skip rules only apply to tests', () => {
     const violations = violationFor([
       {

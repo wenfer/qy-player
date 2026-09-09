@@ -48,7 +48,8 @@ Evidence:
   - Commands: `npm test -- --run`（4 文件 17 测试全部通过，含 14 个 floor-guard 用例）；`npm run typecheck`（两套 tsconfig 零错误）；`git diff --check`（零错误）；`npm run quality`（见 Review notes）
   - Tests: `tests/quality/floor-guard.test.ts` 证明每类禁止模式均能被检出（含行号与 scope 规则）；`tests/{main,shared,renderer}/smoke.test.ts` 证明三个目录均可发现（shared 冒烟验证 `@shared` alias，renderer 验证 jsdom 环境）；fixtures 全部为离线字符串样本，无凭据
   - Result: 通过。仓库主扫描时发现 8 处**既有**空 catch（`scripts/cdp-play.mjs`/`cdp-test.mjs`，非本任务引入），修复超出本任务允许文件清单，见 Review notes
-  - Review notes: ① 新增了 3 个冒烟测试文件（允许清单外，但为验收“三目录可发现”的最小证明，记录备查）；② `tests/` 目前不在 tsconfig include 内（一期既有基线），测试暂未经 tsc 检查，建议在 QYP2-002 时一并处理；③ `scripts/cdp-*.mjs` 的 8 处空 catch 待人工批准后修复（推荐下一任务顺手修复，脚本为调试工具，可将 catch 改为带注释处理）；④ `DEFAULT_IGNORES` 含 checker 自身与其测试文件，属审计内豁免
+  - Review notes: ① 新增了 3 个冒烟测试文件（允许清单外，但为验收“三目录可发现”的最小证明，已由独立子代理评审两轮，待人工追认）；② `tests/` 目前不在 tsconfig include 内（一期既有基线），测试暂未经 tsc 检查，建议在 QYP2-002 时一并处理；③ `scripts/cdp-*.mjs` 的 8 处空 catch 待人工批准后修复；④ `DEFAULT_IGNORES` 含 checker 自身与其测试文件，属审计内豁免；⑤ 协议层矛盾：todo.md 不在允许清单但协议强制要求写 Evidence，待人工裁决；
+  - 评审记录: 第一轮子代理评审 Approve（3 Optional/2 Nit）；第二轮更严格 Request changes（4R/2O/4N）；提交 76a1ae9 整改后第三轮验收 **Approve**（10/10 解决，新发现 1 项 Optional flags 传递缺陷已当场修复并加回归测试，20/20 通过）；R3/R4 两项协议层问题待人工裁决
 
 ### QYP2-002 定义统一 Catalog 与 IPC 类型
 
