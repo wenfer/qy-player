@@ -77,7 +77,8 @@ Evidence:
   - Commands: `npm test -- --run`（6 文件 42 测试通过，含 7 个 migration 集成用例）；`npm run typecheck`（零错误）；`git diff --check`；`npm run quality`（仍仅报 cdp 既有 8 处空 catch，待批准修复）
   - Tests: 空库全链、v4 fixture 升级（legacy 行/CHECK 保留、webdav 拒绝）、重复打开幂等、FK 级联删除、四组 unique 键、library_sources 凭据根拒绝、upsert 不置空语义（title/year/duration）、replaceStreams 原子替换
   - Result: 通过
-  - Review notes: ① 基础设施修复（超出允许清单，已记录）：测试脚本切换为 `ELECTRON_RUN_AS_NODE=1 electron -r scripts/electron-node-polyfill.cjs`（better-sqlite3 原生模块按 Electron ABI 109 编译，系统 Node 24 无法加载；polyfill 桥接 Node 16 缺失的 webcrypto 表面）；② migration 005 尚未发布，提交前修正了同一 migration 内的结构（catalog_items 增加 season/episode 列与索引），未触碰 001–004；③ repository 为首个切片，QYP2-004 扩充 legacy 进度迁移；④ metadata_revision 仅由元数据层（QYP2-022）维护，catalog upsert 不触碰
+  - Review notes: ① 基础设施修复（超出允许清单，已记录）：测试脚本切换为 `ELECTRON_RUN_AS_NODE=1 electron -r scripts/electron-node-polyfill.cjs`（better-sqlite3 原生模块按 Electron ABI 109 编译，系统 Node 24 无法加载；polyfill 桥接 Node 16 缺失的 webcrypto 表面）；② migration 005 尚未发布，提交前修正了同一 migration 内的结构（catalog_items 增加 season/episode 列与索引），未触碰 001–004；③ repository 为首个切片，QYP2-004 扩充 legacy 进度迁移；④ metadata_revision 仅由元数据层（QYP2-022）维护，catalog upsert 不触碰；
+  - 评审记录: 首轮子代理评审 Request changes（upsertItem 季集列与 upsertFile stat 列缺 COALESCE、CatalogItemRow 缺字段、测试覆盖缺口；同时确认 001–004 逐字未动、polyfill 不进生产包）；提交 b827f87 整改后二轮验收 **Approve**（4/4 解决，42 测试通过）
 
 ### QYP2-004 实现 Repository 与旧进度兼容
 
