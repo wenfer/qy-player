@@ -102,6 +102,38 @@ export interface StreamInput {
   details?: Record<string, string | number | boolean>;
 }
 
+export interface StreamRow {
+  id: number;
+  file_id: number;
+  stream_index: number;
+  kind: 'video' | 'audio' | 'subtitle';
+  codec: string | null;
+  language: string | null;
+  title: string | null;
+}
+
+export type ScanRunStatus =
+  | 'queued'
+  | 'discovering'
+  | 'indexing'
+  | 'enriching'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+  | 'interrupted';
+
+export interface ScanRunRow {
+  id: number;
+  source_id: number;
+  status: ScanRunStatus;
+  cursor: string | null;
+  processed_count: number | null;
+  total_count: number | null;
+  error: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
 export type CatalogRepository = ReturnType<typeof createCatalogRepository>;
 
 export function createCatalogRepository(db: Database.Database) {
@@ -351,6 +383,73 @@ export function createCatalogRepository(db: Database.Database) {
         .prepare('SELECT item_id FROM catalog_external_ids WHERE provider = ? AND external_id = ?')
         .get(provider, externalId) as { item_id: number } | undefined;
       return row?.item_id;
+    },
+
+    // -- Scan runs -----------------------------------------------------------
+
+    createScanRun(sourceId: number): number {
+      const result = db
+        .prepare("INSERT INTO scan_runs (source_id, status) VALUES (?, 'queued')")
+        .run(sourceId);
+      return Number(result.lastInsertRowid);
+    },
+
+    updateScanRun(
+      id: number,
+      patch: {
+        status?: ScanRunStatus;
+        cursor?: string | null;
+        processedCount?: number;
+        totalCount?: number | null;
+        error?: string | null;
+        finishedAt?: number | null;
+      }
+    ): void {
+      const sets: string[] = [];
+      const values: Array<string | number | null> = [];
+      if (patch.status !== undefined) {
+        sets.push('status = ?');
+        values.push(patch.status);
+      }
+      if (patch.cursor !== undefined) {
+        sets.push('cursor = ?');
+        values.push(patch.cursor);
+      }
+      if (patch.processedCount !== undefined) {
+        sets.push('processed_count = ?');
+        values.push(patch.processedCount);
+      }
+      if (patch.totalCount !== undefined) {
+        sets.push('total_count = ?');
+        values.push(patch.totalCount);
+      }
+      if (patch.error !== undefined) {
+        sets.push('error = ?');
+        values.push(patch.error);
+      }
+      if (patch.finishedAt !== undefined) {
+        sets.push('finished_at = ?');
+        values.push(patch.finishedAt);
+      }
+      if (sets.length === 0) return;
+      sets.push('updated_at = unixepoch()');
+      db.prepare(`UPDATE scan_runs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
+    },
+
+    getScanRun(id: number): ScanRunRow | undefined {
+      return db.prepare('SELECT * FROM scan_runs WHERE id = ?').get(id) as ScanRunRow | undefined;
+    },
+
+    /** Startup recovery: anything non-terminal becomes interrupted (plan §6.1). */
+    recoverInterruptedScanRuns(): number {
+      const result = db
+        .prepare(
+          `UPDATE scan_runs
+           SET status = 'interrupted', finished_at = unixepoch(), updated_at = unixepoch()
+           WHERE status IN ('queued', 'discovering', 'indexing', 'enriching')`
+        )
+        .run();
+      return result.changes;
     },
   };
 }
