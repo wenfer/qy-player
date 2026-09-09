@@ -43,6 +43,12 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Display form for Electron accelerators: "CommandOrControl+Shift+Q" -> "Ctrl+Shift+Q". */
+function formatAccelerator(acc: string): string {
+  const isMac = /mac/i.test(navigator.platform);
+  return acc.replace(/CommandOrControl|CmdOrCtrl/g, isMac ? 'Cmd' : 'Ctrl');
+}
+
 type Recording = { scope: 'global' | 'mpv'; id: string } | null;
 
 export default function ShortcutsPage() {
@@ -144,7 +150,7 @@ export default function ShortcutsPage() {
     async (def: ShortcutDef) => {
       if (!captured) return;
       if (await applyGlobal({ ...globalRef.current, [def.id]: captured })) {
-        addToast(`已更新「${def.label}」为 ${captured}`, 'success');
+        addToast(`已更新「${def.label}」为 ${formatAccelerator(captured)}`, 'success');
       }
       setRecording(null);
       setCaptured(null);
@@ -182,7 +188,7 @@ export default function ShortcutsPage() {
       <span className="text-xs text-muted-foreground">
         {captured ? '按确认保存' : '请按下新的按键…'}
       </span>
-      {captured && <Kbd>{captured}</Kbd>}
+      {captured && <Kbd>{formatAccelerator(captured)}</Kbd>}
       <span className="text-[10px] text-muted-foreground">Esc 取消</span>
       <button
         onClick={() => (scope === 'global'
@@ -244,7 +250,7 @@ export default function ShortcutsPage() {
                 renderRecordingControls('global', def.id)
               ) : (
                 <div className="flex items-center gap-2">
-                  <Kbd>{globalOverrides[def.id] || def.defaultAccelerator}</Kbd>
+                  <Kbd>{formatAccelerator(globalOverrides[def.id] || def.defaultAccelerator)}</Kbd>
                   {!def.fixed && (
                     <button
                       onClick={() => { setRecording({ scope: 'global', id: def.id }); setCaptured(null); }}
