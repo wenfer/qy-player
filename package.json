@@ -27,10 +27,10 @@
     "dist:appimage": "npm run build && ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --linux appimage",
     "dist:pacman": "npm run build && ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --linux pacman",
     "dist:tar": "npm run build && electron-builder --linux tar.gz tar.xz",
-    "test": "vitest",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron -r ./scripts/electron-node-polyfill.cjs node_modules/vitest/vitest.mjs",
     "quality": "node scripts/check-quality.mjs",
-    "test:main": "vitest run tests/main",
-    "test:render": "vitest run tests/renderer",
+    "test:main": "ELECTRON_RUN_AS_NODE=1 electron -r ./scripts/electron-node-polyfill.cjs node_modules/vitest/vitest.mjs run tests/main",
+    "test:render": "ELECTRON_RUN_AS_NODE=1 electron -r ./scripts/electron-node-polyfill.cjs node_modules/vitest/vitest.mjs run tests/renderer",
     "postinstall": "electron-builder install-app-deps"
   },
   "devDependencies": {

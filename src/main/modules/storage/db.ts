@@ -97,6 +97,160 @@ const MIGRATIONS = [
   ALTER TABLE watch_history ADD COLUMN season_number INTEGER;
   ALTER TABLE watch_history ADD COLUMN episode_number INTEGER;
   `,
+
+  // Migration 005: Phase-2 unified catalog schema (ADR-0001, plan §5).
+  // Append-only: never edits 001-004; legacy tables and CHECKs stay intact.
+  `
+  CREATE TABLE IF NOT EXISTS library_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK(kind IN ('local', 'webdav')),
+    name TEXT NOT NULL,
+    -- Root must never embed credentials ('@' rejects userinfo at the DB level).
+    root TEXT NOT NULL CHECK(instr(root, '@') = 0),
+    secret_ref TEXT,
+    read_only INTEGER NOT NULL DEFAULT 1,
+    options TEXT,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS catalog_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES library_sources(id) ON DELETE CASCADE,
+    source_key TEXT NOT NULL,
+    parent_id INTEGER REFERENCES catalog_items(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('movie', 'series', 'season', 'episode', 'video')),
+    title TEXT,
+    year INTEGER,
+    season_number INTEGER,
+    episode_number INTEGER,
+    availability TEXT NOT NULL DEFAULT 'online' CHECK(availability IN ('online', 'offline', 'missing')),
+    metadata_revision INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(source_id, source_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_catalog_items_parent ON catalog_items(parent_id);
+  CREATE INDEX IF NOT EXISTS idx_catalog_items_source_kind ON catalog_items(source_id, kind);
+  CREATE INDEX IF NOT EXISTS idx_catalog_items_episode
+    ON catalog_items(parent_id, season_number, episode_number);
+
+  CREATE TABLE IF NOT EXISTS catalog_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES library_sources(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+    relative_path TEXT NOT NULL,
+    size INTEGER,
+    mtime INTEGER,
+    fingerprint TEXT,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(source_id, relative_path)
+  );
+  CREATE INDEX IF NOT EXISTS idx_catalog_files_item ON catalog_files(item_id);
+
+  CREATE TABLE IF NOT EXISTS catalog_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL REFERENCES catalog_files(id) ON DELETE CASCADE,
+    stream_index INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('video', 'audio', 'subtitle')),
+    codec TEXT,
+    language TEXT,
+    title TEXT,
+    channels INTEGER,
+    width INTEGER,
+    height INTEGER,
+    fps REAL,
+    bitrate INTEGER,
+    details TEXT,
+    UNIQUE(file_id, stream_index)
+  );
+
+  CREATE TABLE IF NOT EXISTS catalog_external_ids (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    item_id INTEGER NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+    UNIQUE(provider, external_id, item_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_catalog_external_ids_lookup ON catalog_external_ids(provider, external_id);
+
+  CREATE TABLE IF NOT EXISTS catalog_user_state (
+    item_id INTEGER PRIMARY KEY REFERENCES catalog_items(id) ON DELETE CASCADE,
+    position REAL NOT NULL DEFAULT 0,
+    duration REAL,
+    is_finished INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS catalog_subtitles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+    managed_path TEXT NOT NULL,
+    language TEXT,
+    title TEXT,
+    format TEXT,
+    origin TEXT NOT NULL CHECK(origin IN ('sidecar', 'imported')),
+    is_default INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok', 'missing', 'corrupt')),
+    created_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(item_id, managed_path)
+  );
+
+  CREATE TABLE IF NOT EXISTS catalog_metadata_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES catalog_items(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    value TEXT,
+    revision INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(item_id, field, provider)
+  );
+  CREATE INDEX IF NOT EXISTS idx_catalog_meta_src_item ON catalog_metadata_sources(item_id);
+
+  CREATE TABLE IF NOT EXISTS catalog_metadata_overrides (
+    item_id INTEGER PRIMARY KEY REFERENCES catalog_items(id) ON DELETE CASCADE,
+    patch TEXT,
+    base_revision INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS scan_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES library_sources(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK(status IN ('queued', 'discovering', 'indexing', 'enriching', 'completed', 'cancelled', 'failed', 'interrupted')),
+    cursor TEXT,
+    processed_count INTEGER DEFAULT 0,
+    total_count INTEGER,
+    error TEXT,
+    started_at INTEGER DEFAULT (unixepoch()),
+    finished_at INTEGER,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+  CREATE INDEX IF NOT EXISTS idx_scan_runs_source ON scan_runs(source_id, started_at);
+
+  CREATE TABLE IF NOT EXISTS plugin_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plugin TEXT NOT NULL UNIQUE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 100,
+    settings TEXT,
+    secret_ref TEXT,
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS plugin_cache (
+    plugin TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT,
+    etag TEXT,
+    expiry INTEGER,
+    updated_at INTEGER DEFAULT (unixepoch()),
+    PRIMARY KEY (plugin, key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_plugin_cache_expiry ON plugin_cache(expiry);
+  `,
 ];
 
 let dbInstance: Database.Database | null = null;
@@ -108,12 +262,22 @@ export function getDbPath(): string {
 
 export function getDatabase(): Database.Database {
   if (!dbInstance) {
-    const dbPath = getDbPath();
-    dbInstance = new Database(dbPath);
-    dbInstance.pragma('journal_mode = WAL');
-    runMigrations(dbInstance);
+    dbInstance = openDatabaseAtPath(getDbPath());
   }
   return dbInstance;
+}
+
+/**
+ * Open (and migrate) a database at an explicit path. Electron-free so it is
+ * usable from integration tests; getDatabase() wraps this with the singleton.
+ */
+export function openDatabaseAtPath(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  // Required before any catalog FK (ON DELETE CASCADE) is relied on (plan §5).
+  db.pragma('foreign_keys = ON');
+  runMigrations(db);
+  return db;
 }
 
 export function closeDatabase(): void {
@@ -123,7 +287,14 @@ export function closeDatabase(): void {
   }
 }
 
-function runMigrations(db: Database.Database): void {
+/**
+ * Apply pending migrations in order, each in its own transaction so a
+ * mid-migration crash never leaves a half-applied schema.
+ */
+export function runMigrations(
+  db: Database.Database,
+  options: { upTo?: number } = {}
+): void {
   // Create schema_version table if not exists
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -133,8 +304,9 @@ function runMigrations(db: Database.Database): void {
 
   const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number } | undefined;
   const currentVersion = row?.version ?? 0;
+  const target = options.upTo ?? MIGRATIONS.length;
 
-  for (let i = currentVersion; i < MIGRATIONS.length; i++) {
+  for (let i = currentVersion; i < target; i++) {
     const migration = MIGRATIONS[i];
     // Transactional: a mid-migration crash must not leave a half-applied schema
     db.exec(`BEGIN; ${migration}; UPDATE schema_version SET version = ${i + 1}; COMMIT;`);
