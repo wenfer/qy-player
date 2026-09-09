@@ -225,6 +225,28 @@ describe('catalog migrations (005)', () => {
     expect(state.position).toBe(200);
     expect(state.duration).toBe(5000);
 
+    // Episode numbers and file attributes survive partial rescans too.
+    repo.upsertItem({ sourceId, sourceKey: 'e', kind: 'episode', seasonNumber: 1, episodeNumber: 5 });
+    repo.upsertItem({ sourceId, sourceKey: 'e', kind: 'episode' });
+    const episode = repo.getItem(repo.getItemKey(sourceId, 'e')!.id)!;
+    expect(episode.season_number).toBe(1);
+    expect(episode.episode_number).toBe(5);
+
+    const fileId = repo.upsertFile({
+      sourceId,
+      itemId: episode.id,
+      relativePath: 'e.mkv',
+      size: 1234,
+      mtime: 111111,
+      fingerprint: 'e.mkv|1234|111111',
+    });
+    repo.upsertFile({ sourceId, itemId: episode.id, relativePath: 'e.mkv' });
+    const file = repo.listFilesByItem(episode.id)[0];
+    expect(file.id).toBe(fileId);
+    expect(file.size).toBe(1234);
+    expect(file.mtime).toBe(111111);
+    expect(file.fingerprint).toBe('e.mkv|1234|111111');
+
     // metadata_revision is untouched by catalog upserts (owned by QYP2-022).
     expect(item.metadata_revision).toBe(0);
   });

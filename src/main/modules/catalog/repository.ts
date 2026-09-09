@@ -28,6 +28,8 @@ export interface CatalogItemRow {
   kind: CatalogKind;
   title: string | null;
   year: number | null;
+  season_number: number | null;
+  episode_number: number | null;
   availability: 'online' | 'offline' | 'missing';
   metadata_revision: number;
 }
@@ -188,8 +190,8 @@ export function createCatalogRepository(db: Database.Database) {
            kind = excluded.kind,
            title = COALESCE(excluded.title, title),
            year = COALESCE(excluded.year, year),
-           season_number = excluded.season_number,
-           episode_number = excluded.episode_number,
+           season_number = COALESCE(excluded.season_number, season_number),
+           episode_number = COALESCE(excluded.episode_number, episode_number),
            updated_at = unixepoch()`
       ).run(
         input.sourceId,
@@ -247,9 +249,9 @@ export function createCatalogRepository(db: Database.Database) {
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(source_id, relative_path) DO UPDATE SET
            item_id = excluded.item_id,
-           size = excluded.size,
-           mtime = excluded.mtime,
-           fingerprint = excluded.fingerprint,
+           size = COALESCE(excluded.size, size),
+           mtime = COALESCE(excluded.mtime, mtime),
+           fingerprint = COALESCE(excluded.fingerprint, fingerprint),
            updated_at = unixepoch()`
       ).run(
         input.sourceId,
