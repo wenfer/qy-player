@@ -82,13 +82,17 @@ Evidence:
 
 ### QYP2-004 实现 Repository 与旧进度兼容
 
-- [ ] **依赖：** QYP2-003
-- [ ] **Read first：** `src/main/modules/storage/db.ts`、`src/main/modules/playback-state/index.ts`
-- [ ] **允许修改：** `src/main/modules/catalog/repository.ts`、`src/main/modules/catalog/legacy-progress.ts`、`tests/main/catalog/legacy-progress.test.ts`
-- [ ] **目标：** 为 catalog/source/file/metadata/progress 提供参数化 repository；旧 local_media 仅在来源挂载时幂等迁移。
-- [ ] **验收：** null 不覆盖旧值；迁移按 realpath 和更新时间选择；迁移前不删除旧记录；重复执行结果稳定。
-- [ ] **验证：** `npm test -- --run tests/main/catalog/legacy-progress.test.ts`、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-003
+- [x] **Read first：** `src/main/modules/storage/db.ts`、`src/main/modules/playback-state/index.ts`
+- [x] **允许修改：** `src/main/modules/catalog/repository.ts`、`src/main/modules/catalog/legacy-progress.ts`、`tests/main/catalog/legacy-progress.test.ts`
+- [x] **目标：** 为 catalog/source/file/metadata/progress 提供参数化 repository；旧 local_media 仅在来源挂载时幂等迁移。
+- [x] **验收：** null 不覆盖旧值；迁移按 realpath 和更新时间选择；迁移前不删除旧记录；重复执行结果稳定。
+- [x] **验证：** `npm test -- --run tests/main/catalog/legacy-progress.test.ts`、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（7 文件 56 测试通过，含 14 个迁移用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Tests: 有效迁移、幂等（二次运行零写入且 updated_at 不变）、catalog 较新时保留、legacy 较新时应用、无效行跳过、size 匹配优先于时间（经符号链接双路径 fixture）、同 item 多文件单状态、非 local 行排除、offline 文件按 normalize 匹配、未知来源空结果、position0+finished、updated_at 相等 tie、root 逃逸拒绝
+  - Result: 通过
+  - Review notes: ① 首轮评审 7R 全部整改（per-item 匹配重构、isSafeRelativePath 防逃逸、确定性 tie-breaker + 5 个新用例），二轮验收 Approve；② 已知限制（记录备查）：listFilesBySource 全量加载 + 每文件同步 realpath，10k 文件库迁移一次性内存与 IO 放大，为低频操作可接受，若超标再改流式（O1/O2 延后）；③ metadata/subtitles 表访问器按 §16.6 延至 QYP2-010/020/022，避免投机抽象；④ 迁移永不删除旧表记录，旧表为回滚兜底
 
 ### QYP2-005 实现 SecretStore 与配置脱敏
 
