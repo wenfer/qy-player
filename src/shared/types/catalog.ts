@@ -22,12 +22,16 @@ export type MediaRef =
 export function isMediaRef(value: unknown): value is MediaRef {
   if (typeof value !== 'object' || value === null) return false;
   const ref = value as Record<string, unknown>;
-  if (!isNonEmptyString(ref.itemId)) return false;
+  // hasOwnProperty.call instead of Object.hasOwn: keeps the check usable on
+  // the ES2020 lib target and immune to polluted prototypes (plan §16.3).
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(ref, key);
+  if (!hasOwn('itemId') || !isNonEmptyString(ref.itemId)) return false;
+  if (!hasOwn('provider')) return false;
   if (ref.provider === 'catalog') {
-    return isPositiveInt(ref.sourceId);
+    return hasOwn('sourceId') && isPositiveInt(ref.sourceId);
   }
   if (ref.provider === 'jellyfin' || ref.provider === 'emby') {
-    return isPositiveInt(ref.serverId);
+    return hasOwn('serverId') && isPositiveInt(ref.serverId);
   }
   return false;
 }
@@ -120,6 +124,7 @@ export interface ScanProgressEvent {
   total?: number;
   /** Sanitized message; must never contain credentials or full private URLs. */
   message?: string;
+  /** Unix timestamp in milliseconds. */
   at: number;
 }
 
@@ -145,7 +150,10 @@ export interface Page<T> {
 
 /** Clamp an untrusted page query to contract bounds. */
 export function normalizePageQuery(query: PageQuery | undefined): Required<Pick<PageQuery, 'page' | 'pageSize'>> {
-  const page = isPositiveInt(query?.page) ? query.page : 1;
+  // Guard against absurd offsets that would break downstream SQL LIMIT math.
+  const MAX_PAGE_NUMBER = 1_000_000;
+  const rawPage = query?.page;
+  const page = isPositiveInt(rawPage) && rawPage <= MAX_PAGE_NUMBER ? rawPage : 1;
   let pageSize = isPositiveInt(query?.pageSize) ? query.pageSize : DEFAULT_PAGE_SIZE;
   if (pageSize > MAX_PAGE_SIZE) pageSize = MAX_PAGE_SIZE;
   return { page, pageSize };

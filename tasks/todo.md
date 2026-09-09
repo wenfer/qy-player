@@ -53,13 +53,17 @@ Evidence:
 
 ### QYP2-002 定义统一 Catalog 与 IPC 类型
 
-- [ ] **依赖：** QYP2-001
-- [ ] **Read first：** `src/shared/types/index.ts`、`src/shared/ipc-channels.ts`、`src/preload/index.ts`
+- [x] **依赖：** QYP2-001
+- [x] **Read first：** `src/shared/types/index.ts`、`src/shared/ipc-channels.ts`、`src/preload/index.ts`
 - [ ] **允许修改：** `src/shared/types/catalog.ts`、`src/shared/types/actions.ts`、`src/shared/types/index.ts`、`src/shared/ipc-channels.ts`、`tests/shared/catalog-contracts.test.ts`
 - [ ] **目标：** 定义 `MediaRef`、`CatalogItem`、分页、`ActionResult`、source capability、scan event 和结构化错误。
 - [ ] **验收：** MediaRef 包含 source/server owner；列表有默认/最大 page size；ActionResult 成功/失败结构一致；无密码、token、任意路径字段。
-- [ ] **验证：** `npm test -- --run tests/shared/catalog-contracts.test.ts`、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **验证：** `npm test -- --run tests/shared/catalog-contracts.test.ts`、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（5 文件 35 测试通过）；`npm run typecheck`（含新增的 tests/**，两套 tsconfig 零错误）；`git diff --check`（零错误）
+  - Tests: `tests/shared/catalog-contracts.test.ts`（15 用例：MediaRef 判别联合 + isMediaRef 全部拒绝分支 + 原型链伪造拒绝、分页默认/钳制/非有限/溢出页码、ActionResult 成败分支与脱敏性、12 个错误码全量、通道全局唯一与格式、catalog:* 通道表与 plan §4.3 一致）
+  - Result: 通过。附 ADR-0001（Proposed）与二轮评审整改
+  - Review notes: ① 评审二轮提出 2R/3O/3N：R1 原型链防御（已用 hasOwnProperty.call 修复 + 回归测试）、R2 tests 未纳入 tsc（已加入 include，新增 tests/check-quality.d.ts 声明 .mjs 模块契约）；O3 页码上界（已加 1,000,000 钳制 + 边界测试）、O5 错误码全量断言（已补）、N6/N7（已修）；② O4（err() 运行时脱敏扫描）按评审建议延至 QYP2-005/008 落地；③ N8（CatalogItemSummary 无运行时 guard）保留：渲染数据来自可信主进程，guard 随 IPC handler 落地时实现；④ 允许清单外文件：tsconfig.json（R2 要求）、tests/check-quality.d.ts、docs/decisions/0001-*.md（plan §21 强制）、tasks/todo.md（协议强制），均已记录待追认
 
 ### QYP2-003 追加 Catalog 数据库 migration
 

@@ -6,12 +6,7 @@ import {
   isMediaRef,
 } from '@shared/types/catalog';
 import type { MediaRef, CatalogItemSummary } from '@shared/types/catalog';
-import {
-  ERROR_CODES,
-  PAGINATION_CONTRACT,
-  ok,
-  err,
-} from '@shared/types/actions';
+import { ERROR_CODES, ok, err } from '@shared/types/actions';
 import type { ActionResult, StructuredError } from '@shared/types/actions';
 import { IPC_CHANNELS } from '@shared/ipc-channels';
 
@@ -36,12 +31,19 @@ describe('MediaRef contract', () => {
     expect(isMediaRef({ provider: 'webdav', sourceId: 1, itemId: 'x' })).toBe(false); // unknown provider
     expect(isMediaRef({ provider: 'catalog', sourceId: -1, itemId: '' })).toBe(false);
   });
+
+  it('rejects inherited (prototype) properties so polluted prototypes cannot forge a ref', () => {
+    const forged = Object.create({
+      provider: 'catalog',
+      sourceId: 1,
+      itemId: 'injected',
+    });
+    expect(isMediaRef(forged)).toBe(false);
+  });
 });
 
 describe('pagination contract', () => {
   it('matches declared bounds', () => {
-    expect(PAGINATION_CONTRACT.defaultPageSize).toBe(DEFAULT_PAGE_SIZE);
-    expect(PAGINATION_CONTRACT.maxPageSize).toBe(MAX_PAGE_SIZE);
     expect(DEFAULT_PAGE_SIZE).toBe(60);
     expect(MAX_PAGE_SIZE).toBe(200);
   });
@@ -56,6 +58,13 @@ describe('pagination contract', () => {
   it('clamps pageSize to the contract maximum', () => {
     expect(normalizePageQuery({ page: 2, pageSize: 500 }).pageSize).toBe(200);
     expect(normalizePageQuery({ page: 7, pageSize: 60 })).toEqual({ page: 7, pageSize: 60 });
+  });
+
+  it('rejects non-finite and overflowing page numbers', () => {
+    expect(normalizePageQuery({ page: Number.POSITIVE_INFINITY, pageSize: 60 }).page).toBe(1);
+    expect(normalizePageQuery({ page: Number.NaN, pageSize: 60 }).page).toBe(1);
+    expect(normalizePageQuery({ page: Number.MAX_SAFE_INTEGER + 1, pageSize: 60 }).page).toBe(1);
+    expect(normalizePageQuery({ page: 2_000_000, pageSize: 60 }).page).toBe(1);
   });
 });
 
@@ -90,6 +99,7 @@ describe('ActionResult contract', () => {
   });
 
   it('declares the full error code vocabulary', () => {
+    expect([...ERROR_CODES]).toHaveLength(12);
     for (const code of [
       'AUTH_REQUIRED',
       'RATE_LIMITED',
@@ -98,6 +108,11 @@ describe('ActionResult contract', () => {
       'NETWORK_ERROR',
       'INVALID_RESPONSE',
       'CANCELLED',
+      'TIMEOUT',
+      'VALIDATION_FAILED',
+      'CONFLICT',
+      'UNAVAILABLE',
+      'INTERNAL',
     ] as const) {
       expect(ERROR_CODES).toContain(code);
     }

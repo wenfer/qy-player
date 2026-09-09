@@ -5,7 +5,6 @@
  * failures carry a structured, sanitized error — never raw exceptions,
  * credentials or private URLs.
  */
-import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from './catalog';
 
 export const ERROR_CODES = [
   'AUTH_REQUIRED',
@@ -56,9 +55,3 @@ export function err<T = never>(
     },
   };
 }
-
-/** Re-declared here to keep actions.ts self-contained for contract tests. */
-export const PAGINATION_CONTRACT = {
-  defaultPageSize: DEFAULT_PAGE_SIZE,
-  maxPageSize: MAX_PAGE_SIZE,
-} as const;
