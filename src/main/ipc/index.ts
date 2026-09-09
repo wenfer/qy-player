@@ -6,6 +6,15 @@ import { PlayerCore } from '../modules/player-core';
 import { getDatabase, createStorage, closeDatabase } from '../modules/storage/db';
 import { PlaybackStateManager } from '../modules/playback-state';
 import { createClient } from '../modules/online-connector';
+import {
+  MEDIA_SERVER_NAMESPACE,
+  assertNotSecretConfigKey,
+  createSecretStore,
+  migrateServerTokensToSecretStore,
+  resolveServerApiKey,
+  sanitizeServerForRenderer,
+} from '../modules/security/secret-store';
+import type { SecretStore } from '../modules/security/secret-store';
 import type { ServerConfig } from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
@@ -17,17 +26,6 @@ function isLocalFilePath(path: string): boolean {
 function extractTitleFromPath(path: string): string {
   // Replace common separators with spaces
   return basename(path, extname(path)).replace(/[._]/g, ' ').trim();
-}
-
-function describeNetworkError(err: unknown): string {
-  const e = err as { code?: string; message?: string };
-  const code = e?.code || '';
-  if (code === 'ECONNREFUSED') return '连接被拒绝，请确认服务器地址和端口';
-  if (code === 'ETIMEDOUT' || e?.message?.includes('timeout')) return '连接超时，请检查网络';
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return '无法解析地址，请检查服务器地址';
-  if (code === 'ECONNRESET') return '连接被重置';
-  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return '网络不可达，请检查 IP 地址';
-  return e?.message ? `连接失败: ${e.message}` : '无法连接到服务器';
 }
 
 interface ActiveServer {
@@ -46,25 +44,47 @@ interface ActiveServer {
  * Single source of truth for iterating active, logged-in servers.
  * Every online handler must use this instead of hand-rolling the loop,
  * so auth checks and error handling stay consistent.
+ * API keys come from the SecretStore; the plaintext column is legacy only.
  */
-function getActiveServerClients(storage: ReturnType<typeof createStorage>): ActiveServer[] {
+function getActiveServerClients(
+  storage: ReturnType<typeof createStorage>,
+  secretStore: SecretStore
+): ActiveServer[] {
   return storage
     .getServers()
-    .filter((s) => s.is_active && s.api_key && s.user_id)
-    .map((config) => ({
-      config,
+    .filter((s) => s.is_active && s.user_id)
+    .map((server) => ({ server, apiKey: resolveServerApiKey(server, secretStore) }))
+    .filter((entry): entry is { server: typeof entry.server; apiKey: string } => entry.apiKey !== null)
+    .map(({ server, apiKey }) => ({
+      config: { ...server, api_key: apiKey },
       client: createClient({
-        type: config.type as 'jellyfin' | 'emby',
-        baseUrl: config.base_url,
-        apiKey: config.api_key,
-        userId: config.user_id,
+        type: server.type as 'jellyfin' | 'emby',
+        baseUrl: server.base_url,
+        apiKey,
+        userId: server.user_id,
       }),
     }));
+}
+
+function describeNetworkError(err: unknown): string {
+  const e = err as { code?: string; message?: string };
+  const code = e?.code || '';
+  if (code === 'ECONNREFUSED') return '连接被拒绝，请确认服务器地址和端口';
+  if (code === 'ETIMEDOUT' || e?.message?.includes('timeout')) return '连接超时，请检查网络';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return '无法解析地址，请检查服务器地址';
+  if (code === 'ECONNRESET') return '连接被重置';
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return '网络不可达，请检查 IP 地址';
+  return e?.message ? `连接失败: ${e.message}` : '无法连接到服务器';
 }
 
 export function registerIpcHandlers(player: PlayerCore): void {
   const db = getDatabase();
   const storage = createStorage(db);
+
+  // Secret storage: one-time legacy token migration happens here so that
+  // plaintext api_key columns are cleared as soon as the app starts.
+  const secretStore = createSecretStore(db);
+  migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
 
   // Initialize playback state manager
   playbackStateManager = new PlaybackStateManager(player, storage);
@@ -130,15 +150,17 @@ export function registerIpcHandlers(player: PlayerCore): void {
   playbackStateManager.setOnProgressSaved(async (payload) => {
     if (payload.mediaType !== 'jellyfin' && payload.mediaType !== 'emby') return;
 
-    const servers = storage.getServers().filter((s) => s.is_active && s.type === payload.mediaType && s.api_key && s.user_id);
+    const servers = storage.getServers().filter((s) => s.is_active && s.type === payload.mediaType && s.user_id);
     if (servers.length === 0) return;
 
     for (const server of servers) {
+      const apiKey = resolveServerApiKey(server, secretStore);
+      if (!apiKey) continue;
       try {
         const client = createClient({
           type: server.type as 'jellyfin' | 'emby',
           baseUrl: server.base_url,
-          apiKey: server.api_key,
+          apiKey,
           userId: server.user_id,
         });
         await client.reportProgress(
@@ -297,21 +319,39 @@ export function registerIpcHandlers(player: PlayerCore): void {
     return storage.getContinueWatching(limit);
   });
 
-  // Settings handlers
+  // Settings handlers (secret config keys never cross the IPC boundary)
   ipcMain.handle(IPC_CHANNELS.SETTINGS.GET, (_event, key: string) => {
+    assertNotSecretConfigKey(key);
     return storage.getConfig(key);
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.SET, (_event, key: string, value: unknown) => {
+    assertNotSecretConfigKey(key);
     storage.setConfig(key, JSON.stringify(value));
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.GET_SERVERS, () => {
-    return storage.getServers();
+    return storage.getServers().map((server) => sanitizeServerForRenderer(server, secretStore));
   });
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS.SAVE_SERVER, (_event, server) => {
-    return storage.saveServer(server);
+  ipcMain.handle(IPC_CHANNELS.SETTINGS.SAVE_SERVER, (_event, server: ServerConfig) => {
+    // The API key goes to the SecretStore, never into the DB column. When no
+    // key is provided (editing without re-auth), the existing secret and any
+    // legacy column value are left untouched.
+    const id = storage.saveServer({
+      id: server.id,
+      type: server.type,
+      name: server.name ?? '',
+      baseUrl: server.baseUrl,
+      username: server.username,
+      userId: server.userId,
+      isActive: server.isActive,
+    });
+    if (server.apiKey) {
+      // Throws on readback failure; nothing is cleared before that.
+      secretStore.setSecret(MEDIA_SERVER_NAMESPACE, String(id), server.apiKey);
+    }
+    return id;
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.TEST_SERVER, async (_event, server: ServerConfig & { password?: string }) => {
@@ -346,7 +386,8 @@ export function registerIpcHandlers(player: PlayerCore): void {
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_LIBRARIES, async (_event) => {
     const results = [];
     for (const serverConfig of storage.getServers().filter((s) => s.is_active)) {
-      if (!serverConfig.api_key || !serverConfig.user_id) {
+      const apiKey = resolveServerApiKey(serverConfig, secretStore);
+      if (!apiKey || !serverConfig.user_id) {
         results.push({
           serverId: serverConfig.id,
           serverName: serverConfig.name,
@@ -361,7 +402,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
         const client = createClient({
           type: serverConfig.type as 'jellyfin' | 'emby',
           baseUrl: serverConfig.base_url,
-          apiKey: serverConfig.api_key,
+          apiKey,
           userId: serverConfig.user_id,
         });
         const views = await client.getViews();
@@ -388,7 +429,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEMS, async (_event, parentId: string, options?: unknown) => {
-    for (const { config, client } of getActiveServerClients(storage)) {
+    for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         return await client.getItems(parentId, options as Record<string, unknown>);
       } catch (err) {
@@ -400,7 +441,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, async (_event, itemId: string) => {
-    for (const { config, client } of getActiveServerClients(storage)) {
+    for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         return await client.getItemDetails(itemId);
       } catch (err) {
@@ -413,7 +454,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_STREAM_URL, async (_event, itemId: string, mediaSourceId: string, mode?: 'direct' | 'transcode') => {
-    for (const { config, client } of getActiveServerClients(storage)) {
+    for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         const playSessionId = randomUUID();
         const url = client.getStreamingUrl(
@@ -438,7 +479,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_CONTINUE_WATCHING, async () => {
     const results = [];
-    for (const { config, client } of getActiveServerClients(storage)) {
+    for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         const items = await client.getContinueWatching();
         results.push(...items.map((item) => ({ ...item, serverId: config.id, serverType: config.type })));
@@ -451,7 +492,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.SEARCH, async (_event, query: string, type?: string) => {
     const results = [];
-    for (const { config, client } of getActiveServerClients(storage)) {
+    for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         const items = await client.getItems(undefined, {
           searchTerm: query,

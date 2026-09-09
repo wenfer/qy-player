@@ -563,20 +563,23 @@ export function createStorage(db: Database.Database): Storage {
       if (server.id) {
         db.prepare(`
           UPDATE servers SET
-            type = ?, name = ?, base_url = ?, api_key = ?,
+            type = ?, name = ?, base_url = ?,
+            -- api_key never receives new plaintext (SecretStore owns it);
+            -- COALESCE only preserves whatever legacy value remains.
+            api_key = COALESCE(?, api_key),
             username = ?, user_id = ?, is_active = ?
           WHERE id = ?
         `).run(
-          server.type, server.name, server.baseUrl, server.apiKey ?? null,
+          server.type, server.name, server.baseUrl, null,
           server.username ?? null, server.userId ?? null, server.isActive ? 1 : 0, server.id
         );
         return server.id;
       } else {
         const result = db.prepare(`
           INSERT INTO servers (type, name, base_url, api_key, username, user_id, is_active)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, NULL, ?, ?, ?)
         `).run(
-          server.type, server.name, server.baseUrl, server.apiKey ?? null,
+          server.type, server.name, server.baseUrl,
           server.username ?? null, server.userId ?? null, server.isActive ? 1 : 0
         );
         return Number(result.lastInsertRowid);

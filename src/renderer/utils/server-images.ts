@@ -9,7 +9,6 @@ export interface ServerEntry {
   name: string;
   type: string;
   base_url: string;
-  api_key?: string;
   user_id?: string;
   is_active: number;
 }

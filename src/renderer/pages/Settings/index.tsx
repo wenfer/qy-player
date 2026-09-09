@@ -15,7 +15,8 @@ interface SavedServer {
   type: string;
   name: string;
   base_url: string;
-  api_key?: string;
+  /** True when a usable credential exists in the main-process SecretStore. */
+  hasCredential?: boolean;
   username?: string;
   user_id?: string;
   is_active: number;
@@ -144,9 +145,9 @@ export default function Settings() {
         }
         apiKey = auth.accessToken;
         userId = auth.userId;
-      } else if (editingServer?.api_key) {
-        // Editing without new password: keep existing credentials
-        apiKey = editingServer.api_key;
+      } else if (editingServer?.user_id && editingServer?.hasCredential) {
+        // Editing without a new password: the main process keeps the stored
+        // secret; the token itself never round-trips through the renderer.
         userId = editingServer.user_id;
       } else {
         // Either new server without credentials, or editing a server that
@@ -226,7 +227,7 @@ export default function Settings() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm">{server.name}</span>
-                  {server.api_key ? (
+                  {server.hasCredential ? (
                     <span
                       className="flex items-center gap-0.5 text-[10px] text-emerald-500"
                       title="已登录"
