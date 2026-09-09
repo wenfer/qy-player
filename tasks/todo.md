@@ -96,13 +96,17 @@ Evidence:
 
 ### QYP2-005 实现 SecretStore 与配置脱敏
 
-- [ ] **依赖：** QYP2-003
-- [ ] **Read first：** `src/main/ipc/index.ts`、`src/preload/index.ts`、`src/main/modules/storage/db.ts`
-- [ ] **允许修改：** `src/main/modules/security/secret-store.ts`、`src/main/modules/storage/db.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/security/secret-store.test.ts`
-- [ ] **目标：** 为 WebDAV、TMDB、豆瓣和现有服务器 token 提供 namespace SecretStore；普通查询只返回 `hasCredential`。
-- [ ] **验收：** safeStorage 可用时加密保存；不可用时默认会话保存；旧 token 写入/回读成功后才清空；日志/返回值无秘密。
-- [ ] **验证：** `npm test -- --run tests/main/security/secret-store.test.ts`、`npm run typecheck`；对源码与日志做 secret grep。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-003
+- [x] **Read first：** `src/main/ipc/index.ts`、`src/preload/index.ts`、`src/main/modules/storage/db.ts`
+- [x] **允许修改：** `src/main/modules/security/secret-store.ts`、`src/main/modules/storage/db.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/security/secret-store.test.ts`
+- [x] **目标：** 为 WebDAV、TMDB、豆瓣和现有服务器 token 提供 namespace SecretStore；普通查询只返回 `hasCredential`。
+- [x] **验收：** safeStorage 可用时加密保存；不可用时默认会话保存；旧 token 写入/回读成功后才清空；日志/返回值无秘密。
+- [x] **验证：** `npm test -- --run tests/main/security/secret-store.test.ts`、`npm run typecheck`；对源码与日志做 secret grep。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（8 文件 72 测试通过，其中本模块 19 用例）；`npm run typecheck`（零错误）；`git diff --check`；secret grep：`grep -rn api_key src/renderer` 无消费点、secret-store 无 console 输出
+  - Tests: 加密持久化不落明文、命名空间隔离、ref 解析、非法 ns/key 拒绝、会话回退不落盘且新实例不可见、回读验证失败即删除并拒写、token 迁移成功后清列 + 幂等 + 回读失败保明文 + session-only 模式不动 legacy 列、header 缓存单次消费与 FIFO 淘汰、脱敏投影无凭据、settings 通道拒绝 secret: 键
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes（1C/2R/3O/2N）：Critical（session-only 迁移丢凭据，已加 isPersistent 守卫）、R2（迁移包 try/catch 脱敏日志不阻断启动）、R3（转码 token 不再过 IPC：主进程 header 缓存 + opaque sessionId，renderer 已无 headers 传递）、O4/O6/N8 已修；O5（COALESCE 阻断凭据删除路径）延后——当前无删除凭据功能，待 QYP2-013 设置页重构时加显式通道；② 越界文件（待追认）：Settings/index.tsx、server-images.ts、use-play-item.ts、Detail/index.tsx（为满足 Checkpoint A 登录不回归 + token 不过 IPC 的必要改动）；③ 首轮提交信息称 16 cases 当时实为 13，整改后实际 19，以此为准；④ TEST_SERVER 的 accessToken 透传为过渡设计，PlaybackResolver（QYP2-015）接管后移除
 
 ### Checkpoint A
 
