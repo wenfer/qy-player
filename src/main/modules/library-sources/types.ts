@@ -1,5 +1,7 @@
 import type { SourceCapabilities, SourceKind } from '../../../shared/types';
 
+export type { SourceCapabilities, SourceKind };
+
 /**
  * Shared contracts for media source adapters (plan §4.2).
  *
