@@ -155,6 +155,61 @@ describe('root containment', () => {
   });
 });
 
+  it('rejects a symlink that points outside the root, allows inside links', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'qy-outside2-'));
+    tmpRoots.push(outside);
+    writeFileSync(join(outside, 'secret.mkv'), 'SECRET_CONTENT');
+    write('inside-target.mkv', 'INSIDE_CONTENT');
+    symlinkSync(join(outside, 'secret.mkv'), join(root, 'evil.mkv'));
+    symlinkSync(join(root, 'inside-target.mkv'), join(root, 'good.mkv'));
+    const created = createLocalSourceFromSelection(db, root);
+    const { adapter } = getAdapterForSource(db, created.sourceId);
+    const signal = new AbortController().signal;
+
+    // Outside symlink: realpath redirect escapes the root -> rejected.
+    await expect(
+      adapter.stat({ sourceId: created.sourceId, relativePath: 'evil.mkv' }, signal)
+    ).rejects.toThrow(/越界/);
+    await expect(
+      adapter.open({ sourceId: created.sourceId, relativePath: 'evil.mkv' }, signal)
+    ).rejects.toThrow(/越界/);
+
+    // Inside symlink: realpath stays inside the root -> playable.
+    const st = await adapter.stat(
+      { sourceId: created.sourceId, relativePath: 'good.mkv' },
+      signal
+    );
+    expect(st.size).toBe('INSIDE_CONTENT'.length);
+  });
+
+  it('rejects stat/open on directories', async () => {
+    mkdirSync(join(root, 'adir'));
+    const created = createLocalSourceFromSelection(db, root);
+    const { adapter } = getAdapterForSource(db, created.sourceId);
+    const signal = new AbortController().signal;
+    await expect(
+      adapter.stat({ sourceId: created.sourceId, relativePath: 'adir' }, signal)
+    ).rejects.toThrow(/目录/);
+  });
+
+  it('keeps containment working for a root of /', () => {
+    const adapter = LocalSourceAdapter.fromSource(1, '/');
+    expect(adapter.resolveInside('etc/hostname')).toBe('/etc/hostname');
+    expect(adapter.resolveInside('../../etc/passwd')).toBe('/etc/passwd');
+  });
+
+  it('accepts legal dot-segment paths that normalize inside the root', async () => {
+    write('show/e01.mkv');
+    const created = createLocalSourceFromSelection(db, root);
+    const { adapter } = getAdapterForSource(db, created.sourceId);
+    const signal = new AbortController().signal;
+    const st = await adapter.stat(
+      { sourceId: created.sourceId, relativePath: 'show/../show/e01.mkv' },
+      signal
+    );
+    expect(st.supportsRange).toBe(true);
+  });
+
 describe('stat/open', () => {
   it('stats regular files and opens readable streams', async () => {
     write('media/movie.mkv', 'FAKE_VIDEO_BYTES');

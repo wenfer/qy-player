@@ -70,11 +70,26 @@ export async function checkSourceHealth(
   sourceId: number,
   signal: AbortSignal = new AbortController().signal
 ): Promise<'ok' | 'degraded' | 'offline' | 'auth-required' | 'unscanned'> {
-  const { adapter } = getAdapterForSource(db, sourceId);
+  let adapter: SourceAdapter;
+  try {
+    ({ adapter } = getAdapterForSource(db, sourceId));
+  } catch (err) {
+    console.error('[SOURCE-HEALTH] 来源不存在或类型不支持:', err instanceof Error ? err.message : err);
+    return 'offline';
+  }
   try {
     await adapter.testConnection(signal);
     return 'ok';
-  } catch {
-    return 'offline';
+  } catch (err) {
+    // Distinguish access-class failures (offline) from unexpected ones
+    // (degraded) so the UI can suggest the right remediation.
+    const code = (err as { code?: string })?.code;
+    console.error(
+      `[SOURCE-HEALTH] 来源 ${sourceId} 健康检查失败:`,
+      err instanceof Error ? err.message : String(err)
+    );
+    return code === 'ENOENT' || code === 'EACCES' || code === 'EPERM' ? 'offline' : 'degraded';
   }
 }
+
+// Deferred to QYP2-012: WebDAV adapter factory joins getAdapterForSource.

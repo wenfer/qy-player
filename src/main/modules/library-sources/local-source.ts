@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
-import { opendir } from 'node:fs/promises';
+import { lstat, opendir } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import type { MediaLocator, ReadableResource, SourceAdapter, SourceEntry, SourceStat } from './types';
 import type { SourceCapabilities } from '../../../shared/types';
@@ -60,6 +60,14 @@ export class LocalSourceAdapter implements SourceAdapter {
    * Resolve a relative path strictly inside the root; no escapes, ever.
    * Public: it is the only sanctioned way to turn stored relative paths
    * into absolute ones.
+   *
+   * Two-layer defense:
+   * 1. String-level containment against the canonical root (cheap, catches
+   *    every path without I/O).
+   * 2. A realpath re-check of the final target: if the root (or an ancestor)
+   *    was swapped for a symlink AFTER creation, the real location is
+   *    exposed here and rejected (TOCTOU defense). Missing targets fall
+   *    back to the string-level result (nothing to follow yet).
    */
   resolveInside(relativePath: string): string {
     if (relativePath.includes('\0')) {
@@ -68,11 +76,25 @@ export class LocalSourceAdapter implements SourceAdapter {
     if (isAbsolute(relativePath)) {
       throw new Error(`非法路径（绝对路径不允许）: ${this.insideLabel(relativePath)}`);
     }
-    const normalized = resolve(this.root, relativePath);
-    if (normalized !== this.root && !normalized.startsWith(this.root + sep)) {
+    // Root may be "/" (ends with the separator); keep "/" itself intact and
+    // strip a trailing sep from longer roots so prefix checks keep working.
+    const effectiveRoot = this.root === sep ? sep : this.root.endsWith(sep) ? this.root.slice(0, -1) : this.root;
+    const prefixBase = effectiveRoot.endsWith(sep) ? effectiveRoot : effectiveRoot + sep;
+    const normalized = resolve(effectiveRoot, relativePath);
+    if (normalized !== effectiveRoot && !normalized.startsWith(prefixBase)) {
       throw new Error(`路径越界: ${this.insideLabel(relativePath)}`);
     }
-    return normalized;
+    try {
+      const real = realpathSync.native(normalized);
+      if (real !== effectiveRoot && !real.startsWith(prefixBase)) {
+        throw new Error(`路径越界（symlink 重定向）: ${this.insideLabel(relativePath)}`);
+      }
+      return real;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('路径越界')) throw err;
+      // ENOENT and friends: the string-level check already passed.
+      return normalized;
+    }
   }
 
   async testConnection(_signal: AbortSignal): Promise<SourceCapabilities> {
@@ -100,27 +122,41 @@ export class LocalSourceAdapter implements SourceAdapter {
     if (signal.aborted) return;
     const dir = await opendir(abs);
 
-    for await (const dirent of dir) {
-      if (signal.aborted) return;
-      // Symlinks are never followed: report them as non-directories so the
-      // recursive scanner will not descend through them (plan §7).
-      const isDirectory = dirent.isDirectory() && !dirent.isSymbolicLink();
-      const entryRelative = `${prefix}${dirent.name}`;
-      let size: number | undefined;
-      let mtimeMs: number | undefined;
-      try {
-        const st = lstatSync(join(abs, dirent.name));
-        size = st.size;
-        mtimeMs = st.mtimeMs;
-      } catch {
-        // Entry vanished between readdir and lstat: yield with unknown size.
+    try {
+      for await (const dirent of dir) {
+        if (signal.aborted) return;
+        // Symlinks are never followed: report them as non-directories so the
+        // recursive scanner will not descend through them (plan §7).
+        const isDirectory = dirent.isDirectory() && !dirent.isSymbolicLink();
+        const entryRelative = `${prefix}${dirent.name}`;
+        let size: number | undefined;
+        let mtimeMs: number | undefined;
+        // Async lstat keeps the event loop free on large dirs (plan §16.4).
+        try {
+          const st = await lstat(join(abs, dirent.name));
+          size = st.size;
+          mtimeMs = st.mtimeMs;
+        } catch (err) {
+          // Entry vanished between readdir and lstat: yield with unknown size.
+          const code = (err as { code?: string })?.code;
+          console.error(
+            '[LOCAL-SOURCE] 条目 lstat 失败（可能已被移动或删除）:',
+            entryRelative,
+            code ?? (err instanceof Error ? err.message : String(err))
+          );
+        }
+        yield {
+          relativePath: entryRelative,
+          isDirectory,
+          size,
+          mtime: mtimeMs,
+        };
       }
-      yield {
-        relativePath: entryRelative,
-        isDirectory,
-        size,
-        mtime: mtimeMs,
-      };
+    } finally {
+      // The async iterator closes the handle on normal completion, early
+      // return and throws; a defensive close with error swallowing covers
+      // Node-version differences in fd handling (review O9).
+      await dir.close().catch(() => undefined);
     }
   }
 
@@ -129,6 +165,12 @@ export class LocalSourceAdapter implements SourceAdapter {
     const abs = this.resolveInside(locator.relativePath);
     if (signal.aborted) throw new Error('已取消');
     const st = lstatSync(abs); // throws ENOENT for missing files
+    // Live symlinks were already redirected to their real target by
+    // resolveInside (and rejected when that escapes the root); broken
+    // symlinks land here as-is and must not be opened.
+    if (st.isSymbolicLink()) {
+      throw new Error('不支持符号链接条目（目标缺失或已损坏）');
+    }
     if (st.isDirectory()) {
       throw new Error('不能对目录执行 stat（应为媒体文件）');
     }
@@ -150,7 +192,10 @@ export class LocalSourceAdapter implements SourceAdapter {
     if (locator.sourceId !== this.sourceId) {
       throw new Error('locator 不属于当前来源');
     }
-    if (!locator.relativePath || locator.relativePath.includes('..')) {
+    // No '..' / absolute checks here: resolveInside() is the single place
+    // that validates path shapes, and it must accept legal segments like
+    // 'a/../b' (normalized before the containment check).
+    if (!locator.relativePath) {
       throw new Error('locator 缺少有效相对路径');
     }
   }
