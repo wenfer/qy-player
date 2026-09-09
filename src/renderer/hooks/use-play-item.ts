@@ -20,6 +20,11 @@ export function usePlayItem() {
 
       // Container items (Series/Season/Folder) have no direct MediaSources -
       // resolve a playable child (first episode, or first playable file).
+      // Keep the episode's own numbering/series context for watch history.
+      let resolvedTitle = (detailsRecord?.Name as string) || item.name;
+      let resolvedSeriesName = detailsRecord?.SeriesName as string | undefined;
+      let resolvedSeason = detailsRecord?.ParentIndexNumber as number | undefined;
+      let resolvedEpisode = detailsRecord?.IndexNumber as number | undefined;
       if (!mediaSource && (item.type === 'Series' || item.type === 'Season')) {
         const eps = (await window.electronAPI.getItems(item.id, {
           includeItemTypes: 'Episode',
@@ -33,6 +38,10 @@ export function usePlayItem() {
         if (first && epMs?.[0]) {
           playId = first.Id as string;
           mediaSource = epMs[0];
+          resolvedTitle = (first.Name as string) || resolvedTitle;
+          resolvedSeriesName = (item.type === 'Series' ? item.name : (first.SeriesName as string)) || item.name;
+          resolvedSeason = (first.ParentIndexNumber as number) ?? resolvedSeason;
+          resolvedEpisode = (first.IndexNumber as number) ?? resolvedEpisode;
         }
       }
       if (!mediaSource) {
@@ -49,6 +58,7 @@ export function usePlayItem() {
         if (playable && playMs?.[0]) {
           playId = playable.Id as string;
           mediaSource = playMs[0];
+          resolvedTitle = (playable.Name as string) || resolvedTitle;
         }
       }
 
@@ -66,10 +76,10 @@ export function usePlayItem() {
         await window.electronAPI.playerLoadFile(stream.url, undefined, stream.headers, {
           mediaType: item.serverType || 'jellyfin',
           mediaId: playId,
-          title: (detailsRecord?.Name as string) || item.name,
-          seriesName: detailsRecord?.SeriesName as string | undefined,
-          seasonNumber: detailsRecord?.ParentIndexNumber as number | undefined,
-          episodeNumber: detailsRecord?.IndexNumber as number | undefined,
+          title: resolvedTitle,
+          seriesName: resolvedSeriesName,
+          seasonNumber: resolvedSeason,
+          episodeNumber: resolvedEpisode,
           mediaSourceId: mediaSource.Id as string,
         });
         addToast(`开始播放: ${item.name}`, 'success');

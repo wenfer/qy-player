@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { History, Trash2, Play, Clock, Film, X } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import { getServerMap, buildImageUrl, findServerByType } from '../../utils/server-images';
 
 interface HistoryRecord {
   media_type: string;
@@ -15,6 +16,8 @@ interface HistoryRecord {
   series_name?: string;
   season_number?: number;
   episode_number?: number;
+  /** Computed at load time from the owning server - not stored in the DB. */
+  imageUrl?: string;
 }
 
 function formatDuration(seconds: number): string {
@@ -52,8 +55,24 @@ export default function HistoryPage() {
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await window.electronAPI.getRecentlyPlayed(100);
-      setRecords(data as HistoryRecord[]);
+      const [data, serverMap] = await Promise.all([
+        window.electronAPI.getRecentlyPlayed(100),
+        getServerMap(),
+      ]);
+      const servers = [...serverMap.values()];
+      // Online items: resolve the image from the owning server on the fly
+      // (no tag needed - the server returns its current primary image).
+      const mapped = (data as HistoryRecord[]).map((r) => {
+        if (r.media_type === 'local') return { ...r, imageUrl: undefined };
+        const server = findServerByType(servers, r.media_type);
+        return {
+          ...r,
+          imageUrl: server
+            ? buildImageUrl(serverMap, server.id, r.media_type, r.media_id, 'Primary', undefined, 200)
+            : undefined,
+        };
+      });
+      setRecords(mapped);
     } catch (err) {
       addToast(`加载历史记录失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
     } finally {
@@ -170,9 +189,9 @@ export default function HistoryPage() {
                   onClick={() => handleClickTitle(record)}
                   className="relative w-20 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0 focus-ring"
                 >
-                  {record.poster_url ? (
+                  {record.imageUrl ? (
                     <img
-                      src={record.poster_url}
+                      src={record.imageUrl}
                       alt=""
                       className="w-full h-full object-cover"
                       loading="lazy"
