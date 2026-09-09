@@ -1,5 +1,6 @@
 import { globalShortcut, BrowserWindow } from 'electron';
 import { PlayerCore } from '../player-core';
+import { GLOBAL_SHORTCUTS, type ShortcutDef } from '../../../shared/shortcut-defs';
 
 const ASPECT_RATIOS = [
   { value: 'auto', label: '自动' },
@@ -9,52 +10,55 @@ const ASPECT_RATIOS = [
   { value: '1:1', label: '1:1' },
 ];
 
-export function registerGlobalShortcuts(mainWindow: BrowserWindow, player: PlayerCore): void {
-  // MediaPlayPause - toggle play/pause
-  globalShortcut.register('MediaPlayPause', () => {
-    if (player.isReady()) {
-      player.togglePause().catch(() => {
-        // Ignore errors when no media loaded
-      });
-    }
-  });
+/** actionId -> accelerator, persisted in app_config under the "shortcuts" key. */
+export interface ShortcutOverrides {
+  [id: string]: string;
+}
 
-  // MediaNextTrack - next episode (placeholder, would need playlist logic)
-  globalShortcut.register('MediaNextTrack', () => {
-    if (player.isReady()) {
-      // For now just seek forward 30s
-      player.seek(30, 'relative').catch(() => {});
-    }
-  });
-
-  // MediaPreviousTrack - previous / seek back
-  globalShortcut.register('MediaPreviousTrack', () => {
-    if (player.isReady()) {
-      player.seek(-30, 'relative').catch(() => {});
-    }
-  });
-
-  // Ctrl+Shift+Q - show/hide main window
-  globalShortcut.register('CommandOrControl+Shift+Q', () => {
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-
-  // Ctrl+Shift+A - cycle display aspect ratio (works while MPV is playing)
+export function registerGlobalShortcuts(
+  mainWindow: BrowserWindow,
+  player: PlayerCore,
+  overrides: ShortcutOverrides = {}
+): { failed: string[] } {
   let aspectIndex = 0;
-  globalShortcut.register('CommandOrControl+Shift+A', () => {
-    if (!player.isReady()) return;
-    aspectIndex = (aspectIndex + 1) % ASPECT_RATIOS.length;
-    const ratio = ASPECT_RATIOS[aspectIndex];
-    player
-      .setAspectRatio(ratio.value)
-      .then(() => player.showText(`画面比例: ${ratio.label}`))
-      .catch(() => {});
-  });
+
+  const handlers: Record<string, () => void> = {
+    togglePause: () => {
+      if (player.isReady()) player.togglePause().catch(() => {});
+    },
+    seekForward: () => {
+      if (player.isReady()) player.seek(30, 'relative').catch(() => {});
+    },
+    seekBack: () => {
+      if (player.isReady()) player.seek(-30, 'relative').catch(() => {});
+    },
+    toggleWindow: () => {
+      if (mainWindow.isVisible()) mainWindow.hide();
+      else {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    },
+    cycleAspect: () => {
+      if (!player.isReady()) return;
+      aspectIndex = (aspectIndex + 1) % ASPECT_RATIOS.length;
+      const ratio = ASPECT_RATIOS[aspectIndex];
+      player
+        .setAspectRatio(ratio.value)
+        .then(() => player.showText(`画面比例: ${ratio.label}`))
+        .catch(() => {});
+    },
+  };
+
+  const failed: string[] = [];
+  for (const def of GLOBAL_SHORTCUTS as ShortcutDef[]) {
+    const accelerator = overrides[def.id] || def.defaultAccelerator;
+    const action = handlers[def.id];
+    if (!action) continue;
+    const ok = globalShortcut.register(accelerator, action);
+    if (!ok) failed.push(def.id);
+  }
+  return { failed };
 }
 
 export function unregisterGlobalShortcuts(): void {

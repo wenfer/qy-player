@@ -6,6 +6,7 @@ import Search from './pages/Search';
 import Local from './pages/Local';
 import LibraryBrowse from './pages/LibraryBrowse';
 import History from './pages/History';
+import Shortcuts from './pages/Shortcuts';
 import Navigation from './components/Navigation';
 import PlayerControls from './components/PlayerControls';
 import ToastContainer from './components/Toast';
@@ -26,6 +27,7 @@ function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />
             <Route path="/history" element={<History />} />
+            <Route path="/shortcuts" element={<Shortcuts />} />
           </Routes>
         </main>
         <PlayerControls />

@@ -38,4 +38,7 @@ export const IPC_CHANNELS = {
     EXIT_PLAYER_MODE: 'window:exit-player-mode',
     SET_FULLSCREEN: 'window:set-fullscreen',
   },
+  SHORTCUTS: {
+    APPLY: 'shortcuts:apply',
+  },
 } as const;

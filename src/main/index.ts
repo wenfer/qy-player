@@ -2,9 +2,10 @@ import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import { resolve } from 'path';
 import { PlayerCore } from './modules/player-core';
 import { registerIpcHandlers, playbackStateManager } from './ipc';
-import { closeDatabase } from './modules/storage/db';
+import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
 import { createTray, destroyTray } from './modules/ui-shell/tray';
-import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './modules/ui-shell/shortcuts';
+import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
+import { IPC_CHANNELS } from '../shared/ipc-channels';
 
 let mainWindow: BrowserWindow | null = null;
 const player = new PlayerCore();
@@ -130,8 +131,21 @@ app.whenReady().then(() => {
   // Create system tray
   createTray(window);
 
-  // Register global shortcuts
-  registerGlobalShortcuts(window, player);
+  // Register global shortcuts from the persisted user config (defaults for
+  // anything unset), and allow the renderer to re-apply edited bindings.
+  let shortcutOverrides: ShortcutOverrides = {};
+  try {
+    const saved = createStorage(getDatabase()).getConfig('shortcuts');
+    if (saved) shortcutOverrides = JSON.parse(saved);
+  } catch {
+    // Corrupt config -> fall back to defaults
+  }
+  registerGlobalShortcuts(window, player, shortcutOverrides);
+
+  ipcMain.handle(IPC_CHANNELS.SHORTCUTS.APPLY, (_event, overrides: ShortcutOverrides) => {
+    unregisterGlobalShortcuts();
+    return registerGlobalShortcuts(window, player, overrides || {});
+  });
 
   app.on('activate', () => {
     if (mainWindow === null) {

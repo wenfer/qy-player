@@ -83,6 +83,10 @@ const electronAPI = {
   exitPlayerMode: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.EXIT_PLAYER_MODE),
   setFullscreen: (fullscreen: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_FULLSCREEN, fullscreen),
+
+  // Shortcuts
+  applyShortcuts: (overrides: Record<string, string>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY, overrides),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
