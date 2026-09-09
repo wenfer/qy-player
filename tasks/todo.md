@@ -161,6 +161,20 @@ Evidence:
 - [ ] **验证：** `npm test -- --run tests/renderer/settings/local-source.test.tsx`、`npm run typecheck`、键盘手工验证。
 - [ ] **Evidence：** 待填写
 
+### QYP2-007 实现本地 SourceAdapter
+
+- [x] **依赖：** QYP2-006
+- [x] **Read first：** 本文第 7 节、`src/main/modules/subtitle-engine/scanner.ts`
+- [x] **允许修改：** `src/main/modules/library-sources/local-source.ts`、`src/main/modules/catalog/source-service.ts`、`tests/main/library-sources/local-source.test.ts`
+- [x] **目标：** 通过已选择目录创建 source，提供异步 list/stat/open 和 root containment。
+- [x] **验收：** 只保存可读规范化根目录；默认不跟随 symlink；移除 source 不删除媒体；禁止任意 renderer 路径。
+- [x] **验证：** `npm test -- --run tests/main/library-sources/local-source.test.ts`、隔离临时目录手工测试。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（10 文件 98 测试通过，其中 local-source 16 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Tests: symlink 选择路径规范化为 realpath、相对/缺失/非目录拒绝、depth-1 遍历与相对路径拼接、symlink 目录不作为目录上报且外部内容不可达、abort 中途停止、四类逃逸拒绝（../、绝对路径、NUL、多级 ..）、合法嵌套与点段路径、root=/ 边界、outside-symlink open 拒绝 + inside-symlink 可播、目录 stat 拒绝、移除来源只删索引文件仍在、不可读目录报错不假成功
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes（1C/5R）：resolveInside 改为双层防护（字符串前缀 + realpath 复检，防 root 被换 symlink 的 TOCTOU）；symlink 策略统一为「realpath 重定向后仍在 root 内即可播、逃逸即拒绝、断链拒绝」；assertOwnLocator 不再误杀合法点段路径；root=/ 前缀检查特判；lstat 改异步；checkSourceHealth 空 catch 改为错误分类（offline vs degraded）+ 脱敏日志；② 遗留（非阻塞，评审认可）：resolveInside/stat 内同步 realpath/lstat 属单路径安全关卡，非批量 IO；open 的 signal 中途取消行为未显式测试（createReadStream signal 在 Node 16 可用，留给 016 播放链路回归覆盖）；③ 二轮验收 Approve
+
 ### QYP2-009 实现本地增量扫描与媒体分类
 
 - [ ] **依赖：** QYP2-006、QYP2-007
