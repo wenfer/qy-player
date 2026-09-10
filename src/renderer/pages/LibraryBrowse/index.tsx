@@ -23,6 +23,7 @@ interface RawItem {
 // Renderer consumes the shared resolution contract (QYP2-015/016).
 import type { PlaybackResolution } from '../../../shared/types/catalog';
 import SubtitleManager from '../Detail/SubtitleManager';
+import MetadataEditor from '../Detail/MetadataEditor';
 
 interface ResolvedPlayback {
   ok: boolean;
@@ -90,6 +91,8 @@ function CatalogItemDetailView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -248,6 +251,24 @@ function CatalogItemDetailView({
         {playing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
         {progress && !progress.isFinished && progress.position > 30 ? `续播 ${formatTime(progress.position)}` : '立即播放'}
       </button>
+      <button
+        ref={editButtonRef}
+        type="button"
+        onClick={() => setEditorOpen(true)}
+        className="w-full mt-2 flex items-center justify-center px-3 py-2 border border-border rounded-lg hover:bg-accent transition-colors focus-ring text-xs text-muted-foreground hover:text-foreground"
+      >
+        编辑元数据
+      </button>
+      <MetadataEditor
+        itemId={Number(item.ref.itemId)}
+        open={editorOpen}
+        onClose={() => {
+          setEditorOpen(false);
+          // Dialog close returns focus to the opener (a11y).
+          editButtonRef.current?.focus();
+          load();
+        }}
+      />
 
       {/* QYP2-021: sidecar + imported subtitles, one list; playback
           injection happens main-side after loadFile. Containers (series/

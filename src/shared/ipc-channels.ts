@@ -69,4 +69,11 @@ export const IPC_CHANNELS = {
     REMOVE: 'subtitles:remove',
     SET_DEFAULT: 'subtitles:set-default',
   },
+  METADATA: {
+    GET: 'metadata:get',
+    SAVE: 'metadata:save',
+    RESTORE: 'metadata:restore',
+    PICK_IMAGE: 'metadata:pick-image',
+    IMPORT_IMAGES: 'metadata:import-images',
+  },
 } as const;

@@ -116,6 +116,15 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.REMOVE, itemId, rowId),
   setDefaultSubtitle: (itemId: number, rowId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.SET_DEFAULT, itemId, rowId),
+  // Metadata editor (QYP2-023)
+  getMetadataFields: (itemId: number) => ipcRenderer.invoke(IPC_CHANNELS.METADATA.GET, itemId),
+  saveMetadataEdits: (itemId: number, patches: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.METADATA.SAVE, itemId, patches),
+  restoreMetadataFields: (itemId: number, fields?: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.METADATA.RESTORE, itemId, fields),
+  pickImageFile: () => ipcRenderer.invoke(IPC_CHANNELS.METADATA.PICK_IMAGE),
+  importImages: (itemId: number, inputs: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.METADATA.IMPORT_IMAGES, itemId, inputs),
   resolvePlayback: (ref: unknown, options?: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.RESOLVE, ref, options),
   probeItem: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.PROBE_ITEM, input),

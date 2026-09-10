@@ -103,4 +103,5 @@ export interface MediaItem {
 export * from './catalog';
 export * from './media-info';
 export * from './subtitles';
+export * from './metadata-editor';
 export * from './actions';

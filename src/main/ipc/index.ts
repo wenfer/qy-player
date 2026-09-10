@@ -69,6 +69,13 @@ import {
   cleanupTempFiles,
   type ImportSubtitleInput,
 } from '../modules/media-operations/subtitle-service';
+import {
+  describeItemFields,
+  importItemImages,
+  restoreManualFields,
+  saveManualEdits,
+  type ManualPatch,
+} from '../modules/metadata/editor-service';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -824,6 +831,8 @@ function registerCatalogHandlers(
     repo: catalogRepo,
     managedRoot: subtitleManagedRoot,
   });
+  // Metadata editor (QYP2-023): images live under <userData>/images/.
+  const metadataImagesDir = join(app.getPath('userData'), 'images');
   try {
     cleanupTempFiles(subtitleManagedRoot, new Set(catalogRepo.listAllSubtitlePaths()));
   } catch {
@@ -1121,6 +1130,46 @@ function registerCatalogHandlers(
   ipcMain.handle(IPC_CHANNELS.SUBTITLES.SET_DEFAULT, (_event, itemId: number, rowId: number) => {
     return subtitleService.setDefault(itemId, rowId);
   });
+
+  // ---- Metadata editor (QYP2-023, plan §14.1) ----
+  ipcMain.handle(IPC_CHANNELS.METADATA.GET, (_event, itemId: number) => {
+    if (!Number.isInteger(itemId) || itemId <= 0) {
+      return err('VALIDATION_FAILED', '条目 ID 无效');
+    }
+    if (!catalogRepo.getItem(itemId)) return err('NOT_FOUND', '条目不存在');
+    return ok({ itemId, fields: describeItemFields(catalogRepo, itemId) });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.METADATA.SAVE, (_event, itemId: number, patches: ManualPatch[]) => {
+    if (!Array.isArray(patches) || patches.length === 0 || patches.length > 32) {
+      return err('VALIDATION_FAILED', '补丁数量无效');
+    }
+    return ok(saveManualEdits(catalogRepo, itemId, patches));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.METADATA.RESTORE, (_event, itemId: number, fields?: string[]) => {
+    if (!Number.isInteger(itemId) || itemId <= 0) {
+      return err('VALIDATION_FAILED', '条目 ID 无效');
+    }
+    return ok(restoreManualFields(catalogRepo, itemId, fields));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.METADATA.PICK_IMAGE, async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      title: '选择图片',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.METADATA.IMPORT_IMAGES,
+    (_event, itemId: number, inputs: Array<{ kind: 'poster' | 'fanart'; sourcePath: string }>) => {
+      return importItemImages(catalogRepo, itemId, metadataImagesDir, inputs);
+    }
+  );
 
   // Push channel: renderers subscribe through preload (single dispatcher per
   // sender) and receive ScanProgressEvent payloads (<= 4Hz by controller).

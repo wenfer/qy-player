@@ -208,6 +208,144 @@ export function validateEditableValue(field: string, value: MetadataValue): stri
 }
 
 // ---------------------------------------------------------------------------
+// Field description (QYP2-023 GET payload)
+// ---------------------------------------------------------------------------
+
+/** Per-field winner + provenance for the editor UI. */
+export function describeItemFields(
+  repo: EditorRepoSurface,
+  itemId: number
+): Array<{
+  field: string;
+  winner: { provider: string; revision: number; value: MetadataValue } | null;
+  providers: Array<{ provider: string; revision: number; value: MetadataValue }>;
+}> {
+  const store = loadItemStore(repo, itemId);
+  const result: Array<{
+    field: string;
+    winner: { provider: string; revision: number; value: MetadataValue } | null;
+    providers: Array<{ provider: string; revision: number; value: MetadataValue }>;
+  }> = [];
+  const fields = new Set([...Object.keys(store), ...Object.keys(EDITABLE_FIELDS)]);
+  fields.add('poster');
+  fields.add('fanart');
+  for (const field of fields) {
+    const winner = winnerFor(store, field);
+    const slots = store[field] ?? {};
+    result.push({
+      field,
+      winner: winner ? { provider: winner.provider, revision: winner.revision, value: winner.value } : null,
+      providers: (Object.entries(slots) as Array<[string, { value: MetadataValue; revision: number }]>).map(
+        ([provider, slot]) => ({ provider, revision: slot.revision, value: slot.value })
+      ),
+    });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Image import (§14.1: 本地海报/背景图到受管缓存)
+// ---------------------------------------------------------------------------
+
+export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+
+export interface ImportImageInput {
+  kind: 'poster' | 'fanart';
+  /** Local file chosen through the system picker. */
+  sourcePath: string;
+}
+
+export type ImageImportResult =
+  | { ok: true; imported: Array<{ kind: string; managedPath: string }> }
+  | { ok: false; code: 'ITEM_NOT_FOUND' | 'INVALID_INPUT' | 'IO_ERROR'; message: string };
+
+/** Import local poster/fanart images into the managed cache (no uploads,
+ * no NFO writes; the managed path is recorded as a manual metadata slot). */
+export function importItemImages(
+  repo: EditorRepoSurface,
+  itemId: number,
+  imagesDir: string,
+  inputs: ImportImageInput[]
+): ImageImportResult {
+  if (!Number.isInteger(itemId) || itemId <= 0 || !repo.getItem(itemId)) {
+    return { ok: false, code: 'ITEM_NOT_FOUND', message: '条目不存在' };
+  }
+  if (!Array.isArray(inputs) || inputs.length === 0 || inputs.length > 4) {
+    return { ok: false, code: 'INVALID_INPUT', message: '一次最多导入 4 张图片' };
+  }
+  for (const input of inputs) {
+    const ext = extnamePath(input.sourcePath).toLowerCase();
+    if (!IMAGE_EXTS.has(ext)) {
+      return { ok: false, code: 'INVALID_INPUT', message: '仅支持 JPG / PNG / WebP 图片' };
+    }
+    if (input.sourcePath.includes('\0')) {
+      return { ok: false, code: 'INVALID_INPUT', message: '路径包含非法字符' };
+    }
+    let stat;
+    try {
+      stat = statSyncPath(input.sourcePath);
+    } catch {
+      return { ok: false, code: 'INVALID_INPUT', message: '图片文件不存在或不可读' };
+    }
+    if (!stat.isFile()) {
+      return { ok: false, code: 'INVALID_INPUT', message: '图片路径不是文件' };
+    }
+    if (stat.size > IMAGE_MAX_BYTES) {
+      return { ok: false, code: 'INVALID_INPUT', message: '图片超过 20 MiB 上限' };
+    }
+    if (input.kind !== 'poster' && input.kind !== 'fanart') {
+      return { ok: false, code: 'INVALID_INPUT', message: '图片类型无效' };
+    }
+  }
+
+  const dir = joinPath(imagesDir, String(itemId));
+  try {
+    mkdirPath(dir);
+  } catch {
+    return { ok: false, code: 'IO_ERROR', message: '创建图片目录失败' };
+  }
+
+  const imported: Array<{ kind: string; managedPath: string }> = [];
+  for (const input of inputs) {
+    const ext = extnamePath(input.sourcePath).toLowerCase();
+    const tempPath = joinPath(dir, `.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+    const finalPath = joinPath(dir, `${input.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+    try {
+      copyPath(input.sourcePath, tempPath);
+      renamePath(tempPath, finalPath);
+    } catch {
+      try {
+        rmPath(tempPath);
+      } catch {
+        // nothing to clean
+      }
+      return { ok: false, code: 'IO_ERROR', message: '图片复制失败' };
+    }
+    try {
+      // The managed path rides the provider store as a manual slot so the
+      // provenance/revision machinery applies to images too.
+      repo.upsertMetadataSource(itemId, input.kind, 'manual', finalPath);
+    } catch {
+      try {
+        rmPath(finalPath);
+      } catch {
+        // best effort
+      }
+      return { ok: false, code: 'IO_ERROR', message: '图片记录写入失败' };
+    }
+    imported.push({ kind: input.kind, managedPath: finalPath });
+  }
+  return { ok: true, imported };
+}
+
+// Minimal fs/path indirection so tests can stub them (same module surface).
+import { extname as extnamePath } from 'path';
+import { join as joinPath } from 'path';
+import { copyFileSync as copyPath, existsSync, mkdirSync as mkdirPath, renameSync as renamePath, rmSync as rmPath, statSync as statSyncPath } from 'fs';
+void existsSync;
+
+// ---------------------------------------------------------------------------
 // Service operations
 // ---------------------------------------------------------------------------
 
