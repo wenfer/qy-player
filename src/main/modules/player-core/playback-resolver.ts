@@ -111,13 +111,15 @@ export function findCatalogItemId(
     return repo.getFileByPath(parsed.sourceId, parsed.relativePath)?.item_id ?? null;
   }
   if (mediaType === 'local' && mediaId) {
+    // Nested sources (one root inside another) need every candidate
+    // tried, not just the first prefix hit.
     for (const source of repo.listSources()) {
       if (source.kind !== 'local') continue;
       const root = source.root.endsWith('/') ? source.root : `${source.root}/`;
-      if (mediaId.startsWith(root)) {
-        const relative = mediaId.slice(root.length);
-        return repo.getFileByPath(source.id, relative)?.item_id ?? null;
-      }
+      if (!mediaId.startsWith(root)) continue;
+      const relative = mediaId.slice(root.length);
+      const found = repo.getFileByPath(source.id, relative)?.item_id;
+      if (found !== undefined) return found;
     }
   }
   return null;

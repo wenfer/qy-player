@@ -14,6 +14,42 @@ export interface PlayerState {
   isFullscreen: boolean;
 }
 
+/**
+ * sub-add argument builder (QYP2-021): only select/auto — both exist on
+ * mpv 0.29; 'cached' is 0.33+ and must not be sent (older mpv rejects it).
+ */
+export function buildSubAddArgs(path: string, flag?: 'select' | 'auto'): string[] {
+  return ['sub-add', path, ...(flag ? [flag] : [])];
+}
+
+/**
+ * Resolve once mpv signals file-loaded (QYP2-021): sub-add before the
+ * demuxer is ready fails on older mpv, so injection waits for this event.
+ * False on timeout (the caller may still attempt a best-effort injection).
+ */
+export async function waitForFileLoadedEvent(
+  ipc: EventEmitter,
+  timeoutMs = 5000
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const onEvent = (msg: { event?: string }): void => {
+      if (msg.event === 'file-loaded') {
+        cleanup();
+        resolve(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(false);
+    }, timeoutMs);
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      ipc.off('event', onEvent);
+    };
+    ipc.on('event', onEvent);
+  });
+}
+
 export class PlayerCore extends EventEmitter {
   private processManager: MpvProcessManager;
   private ipc: MpvIpcClient | null = null;
@@ -239,8 +275,13 @@ export class PlayerCore extends EventEmitter {
 
   async addSubtitle(path: string, flag?: 'select' | 'auto'): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
-    // Flags exist on mpv 0.29 (select/auto); 'cached' is 0.33+ and unused.
-    await this.ipc.command('sub-add', path, ...(flag ? [flag] : []));
+    await this.ipc.command(...buildSubAddArgs(path, flag));
+  }
+
+  /** Wait for mpv's file-loaded event (see waitForFileLoadedEvent). */
+  async waitForFileLoaded(timeoutMs?: number): Promise<boolean> {
+    if (!this.ipc) return false;
+    return waitForFileLoadedEvent(this.ipc, timeoutMs);
   }
 
   async setSubtitleDelay(delaySeconds: number): Promise<void> {

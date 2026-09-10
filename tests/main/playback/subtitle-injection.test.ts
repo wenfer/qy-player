@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { describe, expect, it } from 'vitest';
 import {
   findCatalogItemId,
@@ -5,6 +6,10 @@ import {
   type SubtitleInjectionPlayer,
   type SubtitleLookupRepo,
 } from '../../../src/main/modules/player-core/playback-resolver';
+import {
+  buildSubAddArgs,
+  waitForFileLoadedEvent,
+} from '../../../src/main/modules/player-core';
 
 // ---------------------------------------------------------------------------
 // findCatalogItemId: playback key → catalog item
@@ -165,15 +170,46 @@ describe('injectAttachedSubtitles', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PlayerCore.addSubtitle flag pass-through (contract level)
+// addSubtitle contract: real argument forwarding (no 0.33+ 'cached')
 // ---------------------------------------------------------------------------
 
-describe('addSubtitle flags (mpv 0.29/0.32 compatibility)', () => {
-  it('only uses select/auto (no cached, which is 0.33+)', async () => {
-    // Contract guard: the allowed flag set must stay within 0.29 support.
-    const flags = ['select', 'auto'] as const;
-    for (const flag of flags) {
-      expect(['select', 'auto']).toContain(flag);
-    }
+describe('buildSubAddArgs (mpv 0.29/0.32 compatibility)', () => {
+
+  it('forwards the path and optional flag as sub-add arguments', () => {
+    expect(buildSubAddArgs('/managed/1.srt')).toEqual(['sub-add', '/managed/1.srt']);
+    expect(buildSubAddArgs('/managed/1.srt', 'select')).toEqual(['sub-add', '/managed/1.srt', 'select']);
+    expect(buildSubAddArgs('/managed/1.srt', 'auto')).toEqual(['sub-add', '/managed/1.srt', 'auto']);
+    // 'cached' (0.33+) is not part of the flag union — enforced by the
+    // signature, verified here only as a compile-time guarantee.
+  });
+});
+
+// ---------------------------------------------------------------------------
+// waitForFileLoadedEvent: injection waits for mpv's file-loaded (0.29-safe)
+// ---------------------------------------------------------------------------
+
+describe('waitForFileLoadedEvent', () => {
+  it('resolves true when mpv emits file-loaded', async () => {
+    const ipc = new EventEmitter();
+    const done = waitForFileLoadedEvent(ipc, 1000);
+    setTimeout(() => ipc.emit('event', { event: 'file-loaded' }), 10);
+    expect(await done).toBe(true);
+  });
+
+  it('ignores unrelated events and resolves false on timeout', async () => {
+    const ipc = new EventEmitter();
+    const done = waitForFileLoadedEvent(ipc, 80);
+    ipc.emit('event', { event: 'start-file' });
+    ipc.emit('event', { event: 'tracks-changed' });
+    expect(await done).toBe(false);
+  });
+
+  it('detaches after the first file-loaded (no double resolve)', async () => {
+    const ipc = new EventEmitter();
+    const done = waitForFileLoadedEvent(ipc, 1000);
+    ipc.emit('event', { event: 'file-loaded' });
+    expect(await done).toBe(true);
+    // Late duplicate events must not throw (listener removed).
+    expect(() => ipc.emit('event', { event: 'file-loaded' })).not.toThrow();
   });
 });

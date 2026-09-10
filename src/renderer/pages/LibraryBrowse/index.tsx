@@ -250,8 +250,11 @@ function CatalogItemDetailView({
       </button>
 
       {/* QYP2-021: sidecar + imported subtitles, one list; playback
-          injection happens main-side after loadFile. */}
-      <SubtitleManager itemId={Number(item.ref.itemId)} />
+          injection happens main-side after loadFile. Containers (series/
+          season) carry no media file, so subtitles make no sense there. */}
+      {(item.kind === 'movie' || item.kind === 'episode') && (
+        <SubtitleManager itemId={Number(item.ref.itemId)} />
+      )}
 
       {seriesItem && seasons.length > 0 && (
         <div className="mt-8">

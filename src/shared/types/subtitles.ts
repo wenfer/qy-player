@@ -28,3 +28,31 @@ export interface ImportSubtitleRequest {
   title?: string;
   isDefault?: boolean;
 }
+
+/**
+ * Wire-row (snake_case from catalog_subtitles) → camelCase contract.
+ * Shared so the renderer (and later metadata UI) never duplicates this.
+ */
+export function toSubtitleAttachmentInfo(row: {
+  id: number;
+  item_id: number;
+  managed_path: string;
+  language: string | null;
+  title: string | null;
+  format: string;
+  origin: string;
+  is_default: number;
+  status: string;
+}): SubtitleAttachmentInfo {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    managedPath: row.managed_path,
+    language: row.language,
+    title: row.title,
+    format: row.format,
+    origin: row.origin === 'imported' ? 'imported' : 'sidecar',
+    isDefault: row.is_default === 1,
+    status: row.status === 'missing' || row.status === 'corrupt' ? row.status : 'ok',
+  };
+}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, Star, Trash2, Captions, AlertTriangle } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import { toSubtitleAttachmentInfo, type SubtitleAttachmentInfo } from '../../../shared/types/subtitles';
+
 
 /**
  * Subtitle manager for catalog items (QYP2-021, plan §13): sidecar and
@@ -8,28 +10,7 @@ import { useToastStore } from '../../stores/toast-store';
  * optimistic updates with rollback on failure.
  */
 
-interface ManagerSubtitle {
-  id: number;
-  language: string | null;
-  title: string | null;
-  format: string;
-  origin: 'sidecar' | 'imported';
-  isDefault: boolean;
-  status: 'ok' | 'missing' | 'corrupt';
-}
-
-/** Wire rows (snake_case) → component model (camelCase). */
-function toModel(row: Record<string, unknown>): ManagerSubtitle {
-  return {
-    id: row.id as number,
-    language: (row.language as string | null) ?? null,
-    title: (row.title as string | null) ?? null,
-    format: row.format as string,
-    origin: row.origin as 'sidecar' | 'imported',
-    isDefault: row.is_default === 1,
-    status: (row.status as ManagerSubtitle['status']) ?? 'ok',
-  };
-}
+type ManagerSubtitle = SubtitleAttachmentInfo;
 
 export default function SubtitleManager({ itemId }: { itemId: number }) {
   const addToast = useToastStore((s) => s.addToast);
@@ -42,9 +23,9 @@ export default function SubtitleManager({ itemId }: { itemId: number }) {
     try {
       const result = (await window.electronAPI.listSubtitles(itemId)) as {
         ok: boolean;
-        data?: Array<Record<string, unknown>>;
+        data?: Array<Parameters<typeof toSubtitleAttachmentInfo>[0]>;
       };
-      setSubtitles(result.ok && result.data ? result.data.map(toModel) : []);
+      setSubtitles(result.ok && result.data ? result.data.map(toSubtitleAttachmentInfo) : []);
     } catch {
       setSubtitles([]);
     } finally {
@@ -194,10 +175,10 @@ export default function SubtitleManager({ itemId }: { itemId: number }) {
                 <button
                   type="button"
                   onClick={() => handleSetDefault(row)}
-                  disabled={busyId === row.id}
-                  className="p-0.5 text-muted-foreground hover:text-primary rounded focus-ring"
+                  disabled={busyId === row.id || row.status !== 'ok'}
+                  className="p-0.5 text-muted-foreground hover:text-primary rounded focus-ring disabled:opacity-40"
                   aria-label={`设为默认字幕 ${row.language ?? row.id}`}
-                  title="设为默认"
+                  title={row.status !== 'ok' ? '字幕文件不可用，无法设为默认' : '设为默认'}
                 >
                   <Star size={11} />
                 </button>
