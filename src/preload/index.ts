@@ -110,6 +110,7 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, itemId, serverId),
   resolvePlayback: (ref: unknown, options?: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.RESOLVE, ref, options),
+  probeItem: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.PROBE_ITEM, input),
   getStreamUrl: (itemId: string, mediaSourceId: string, mode?: 'direct' | 'transcode') =>
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_STREAM_URL, itemId, mediaSourceId, mode),
   getContinueWatching: () => ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_CONTINUE_WATCHING),

@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
     CONTROL: 'player:control',
     GET_STATE: 'player:get-state',
     GET_TRACKS: 'player:get-tracks',
+    PROBE_ITEM: 'player:probe-item',
     ON_STATE_CHANGE: 'player:on-state-change',
   },
   LIBRARY: {

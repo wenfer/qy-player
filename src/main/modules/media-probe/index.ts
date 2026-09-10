@@ -23,6 +23,8 @@ export interface ProbeRequest {
   target: string;
   /** Content version fingerprint; a change invalidates the cache entry. */
   fingerprint: string;
+  /** Raw 'Key: Value' header lines (main-side only, never logged). */
+  httpHeaders?: string[];
   signal?: AbortSignal;
 }
 
@@ -157,10 +159,10 @@ export class MediaProbeService {
 
   private async runEntry(entry: QueueEntry): Promise<void> {
     if (entry.cancelled) return;
-    const { status, info, message } = await runMpvProbe(
-      entry.request.target,
-      this.runnerDeps
-    );
+    const { status, info, message } = await runMpvProbe(entry.request.target, {
+      ...this.runnerDeps,
+      ...(entry.request.httpHeaders ? { httpHeaders: entry.request.httpHeaders } : {}),
+    });
     if (entry.cancelled) return; // caller aborted mid-run: discard entirely
     const outcome: MediaProbeOutcome = {
       status,

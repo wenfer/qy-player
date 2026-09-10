@@ -61,6 +61,8 @@ import {
   resolvePlayback,
   ResolverError,
 } from '../modules/player-core/playback-resolver';
+import { mediaProbeService } from '../modules/media-probe';
+import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
   isCatalogSearchQuery,
@@ -308,6 +310,56 @@ export function registerIpcHandlers(player: PlayerCore): void {
         }
         console.error('[PLAYBACK-RESOLVE] 解析失败:', e instanceof Error ? e.message : e);
         return err('INTERNAL', '解析播放地址失败');
+      }
+    }
+  );
+
+  // QYP2-019: technical-info probe. Reuses the resolver so credentialed
+  // targets (WebDAV Basic / transcode tokens) keep their headers main-side;
+  // the renderer only sees the probe outcome. Failures must never block
+  // playback — this channel is purely informational.
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYER.PROBE_ITEM,
+    async (_event, input: ProbeItemInput): Promise<ActionResult<unknown>> => {
+      if (!input || typeof input !== 'object' || !isMediaRef(input.ref)) {
+        return err('VALIDATION_FAILED', '探测引用不合法');
+      }
+      const mode = input.mode === 'transcode' ? 'transcode' : 'direct';
+      try {
+        const resolution = await resolvePlayback(
+          {
+            db,
+            storage,
+            secretStore,
+            streamHeaders,
+            getResumePosition: (mediaType: string, mediaId: string) =>
+              playbackStateManager!.getResumePosition(mediaType, mediaId),
+            createOnlineClient: createClient,
+          },
+          { ref: input.ref, mode }
+        );
+        // take() is single-use; a later playback resolve stashes fresh
+        // headers, so consuming the probe's own session is safe.
+        const stashedHeaders = resolution.streamSessionId
+          ? streamHeaders.take(resolution.streamSessionId)
+          : undefined;
+        const outcome = await mediaProbeService.probe({
+          target: resolution.url,
+          fingerprint: input.fingerprint ?? resolution.mediaContext.mediaId,
+          ...(stashedHeaders ? { httpHeaders: [stashedHeaders] } : {}),
+        });
+        return ok(outcome);
+      } catch (e) {
+        if (e instanceof ResolverError) {
+          if (e.code === 'SERVER_NOT_FOUND' || e.code === 'ITEM_NOT_FOUND') {
+            return err('NOT_FOUND', e.message);
+          }
+          if (e.code === 'NO_CREDENTIAL') {
+            return err('AUTH_REQUIRED', e.message);
+          }
+          return err('UNAVAILABLE', e.message, { retryable: true });
+        }
+        return err('INTERNAL', '探测技术信息失败');
       }
     }
   );

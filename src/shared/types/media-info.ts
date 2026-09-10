@@ -46,6 +46,20 @@ export interface MediaProbeInfo {
   unsupported: string[];
 }
 
+/** QYP2-019: renderer asks for technical info of a resolvable MediaRef. */
+export interface ProbeItemInput {
+  ref: {
+    provider: string;
+    serverId?: number;
+    itemId?: string;
+    sourceId?: number;
+    mediaId?: string;
+  };
+  mode?: 'direct' | 'transcode';
+  /** Content version for the probe cache (e.g. size / RunTimeTicks). */
+  fingerprint?: string;
+}
+
 export interface MediaProbeOutcome {
   status: ProbeStatus;
   /** Version fingerprint the probe was keyed against (size:mtime / etag). */

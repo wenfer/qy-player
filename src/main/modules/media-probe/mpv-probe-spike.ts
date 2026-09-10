@@ -42,7 +42,11 @@ export function resolveMpvBinary(homeDir?: string): string {
  * - --no-config: no user scripts, no input conf, no mpv.conf
  * - --hwdec=no: software decode only (plan §10 + AGENTS.md)
  */
-export function buildProbeArgs(socketPath: string, target: string): string[] {
+export function buildProbeArgs(
+  socketPath: string,
+  target: string,
+  httpHeaders?: string[]
+): string[] {
   return [
     `--input-ipc-server=${socketPath}`,
     '--idle',
@@ -50,6 +54,9 @@ export function buildProbeArgs(socketPath: string, target: string): string[] {
     '--vo=null',
     '--ao=null',
     '--hwdec=no',
+    // Credentialed targets (WebDAV Basic / transcode tokens) need the same
+    // headers playback uses; they travel main-side only, never the renderer.
+    ...(httpHeaders ?? []).map((header) => `--http-header-fields=${header}`),
     target,
   ];
 }
@@ -210,6 +217,8 @@ export interface ProbeDeps {
   mpvBinary?: string;
   socketDir?: string;
   timeoutMs?: number;
+  /** Raw 'Key: Value' header lines for network targets (main-side only). */
+  httpHeaders?: string[];
   spawnFn?: (binary: string, args: string[]) => ProbeSpawn;
 }
 
@@ -345,7 +354,7 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
     // ignore
   }
   const binary = deps.mpvBinary ?? resolveMpvBinary();
-  const args = buildProbeArgs(socketPath, deps.target);
+  const args = buildProbeArgs(socketPath, deps.target, deps.httpHeaders);
   const spawnFn = deps.spawnFn ?? spawnProbeProcess;
 
   let spawned: ProbeSpawn;

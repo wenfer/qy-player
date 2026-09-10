@@ -2,6 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Play, Star, Calendar, Clock, ChevronLeft, Film, Users, Clapperboard, Tv } from 'lucide-react';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
+import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
+import ProgressSummary from './ProgressSummary';
+import type { MediaProbeOutcome, ProbeItemInput } from '../../../shared/types/media-info';
 import { useToastStore } from '../../stores/toast-store';
 import { getServerMap } from '../../utils/server-images';
 import { usePlayerStore } from '../../stores/player-store';
@@ -71,6 +74,10 @@ export default function Detail() {
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // QYP2-019: technical-info probe state (non-blocking; never gates playback)
+  const [probeRequest, setProbeRequest] = useState<ProbeItemInput | null>(null);
+  const [probePhase, setProbePhase] = useState<ProbePhase>('idle');
+  const [probeOutcome, setProbeOutcome] = useState<MediaProbeOutcome | null>(null);
 
   const serverType = type || 'jellyfin';
   const serverId = Number(serverIdParam);
@@ -123,6 +130,55 @@ export default function Detail() {
   useEffect(() => {
     loadDetails();
   }, [loadDetails]);
+
+  // Probe lifecycle: distinct terminal states (QYP2-018 contract); failures
+  // are rendered, never thrown, and never gate the play buttons.
+  const runProbe = useCallback(async () => {
+    if (!probeRequest) return;
+    setProbePhase('probing');
+    setProbeOutcome(null);
+    try {
+      const result = (await window.electronAPI.probeItem(probeRequest)) as {
+        ok: boolean;
+        data?: MediaProbeOutcome;
+      };
+      if (!result.ok || !result.data) {
+        setProbePhase('offline');
+        return;
+      }
+      const outcome = result.data;
+      setProbeOutcome(outcome.status === 'cancelled' ? null : outcome);
+      setProbePhase(
+        outcome.status === 'cancelled'
+          ? 'idle'
+          : outcome.status === 'offline'
+            ? 'offline'
+            : outcome.status === 'timeout'
+              ? 'timeout'
+              : outcome.status === 'no-mpv'
+                ? 'no-mpv'
+                : outcome.status
+      );
+    } catch {
+      setProbePhase('offline');
+    }
+  }, [probeRequest]);
+
+  // Only playable types carry technical info + progress.
+  useEffect(() => {
+    if (!details || (details.Type !== 'Movie' && details.Type !== 'Episode')) {
+      setProbeRequest(null);
+      setProbePhase('idle');
+      setProbeOutcome(null);
+      return;
+    }
+    const size = details.MediaSources?.[0] as { Size?: number } | undefined;
+    setProbeRequest({
+      ref: { provider: serverType, serverId: Number.isInteger(serverId) ? serverId : undefined, itemId: details.Id },
+      mode: 'direct',
+      fingerprint: `${details.RunTimeTicks ?? 0}:${size?.Size ?? 0}`,
+    });
+  }, [details, serverType, serverId]);
 
   // Playback goes through the unified resolver (QYP2-015): one MediaRef
   // in, one ready-to-load payload out. Series/Season containers resolve to
@@ -344,6 +400,20 @@ export default function Detail() {
             {/* Overview */}
             {details.Overview && (
               <p className="text-muted-foreground leading-relaxed mt-6 text-sm max-w-2xl">{details.Overview}</p>
+            )}
+
+            {/* Last position: honest resume wording; finished ≠ 继续播放 */}
+            {(details.Type === 'Movie' || details.Type === 'Episode') && (
+              <ProgressSummary
+                mediaType={serverType}
+                mediaId={details.Id}
+                durationHint={details.RunTimeTicks ? details.RunTimeTicks / 10000000 : undefined}
+              />
+            )}
+
+            {/* Technical info: probe 中/失败/离线独立状态，永不阻塞播放 */}
+            {(details.Type === 'Movie' || details.Type === 'Episode') && (
+              <MediaInfoPanel request={probeRequest} onProbe={runProbe} outcome={probeOutcome} phase={probePhase} />
             )}
 
             {/* Cast */}

@@ -50,6 +50,8 @@ export interface MpvRunnerDeps {
   spikeFn?: SpikeFn;
   mpvBinary?: string;
   timeoutMs?: number;
+  /** Raw 'Key: Value' header lines; main-side only, never the renderer. */
+  httpHeaders?: string[];
 }
 
 /**
@@ -66,6 +68,7 @@ export async function runMpvProbe(
       target,
       ...(deps.mpvBinary !== undefined ? { mpvBinary: deps.mpvBinary } : {}),
       ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
+      ...(deps.httpHeaders !== undefined ? { httpHeaders: deps.httpHeaders } : {}),
     });
     const info = toMediaProbeInfo(result);
     return hasUsableFields(info)
