@@ -500,13 +500,18 @@ Evidence:
 
 ### QYP2-022 实现 metadata override 服务
 
-- [ ] **依赖：** QYP2-010、QYP2-011
-- [ ] **Read first：** 本文第 9、14 节、`src/main/modules/catalog/repository.ts`
-- [ ] **允许修改：** `src/main/modules/metadata/editor-service.ts`、`src/main/modules/metadata/metadata-merger.ts`、`src/main/modules/catalog/repository.ts`、`tests/main/metadata/metadata-editor.test.ts`
-- [ ] **目标：** 实现白名单字段 patch、字段锁定、revision 冲突和逐字段恢复。
-- [ ] **验收：** 输入长度/范围校验；stale revision 返回冲突差异；刮削/扫描不覆盖锁定字段；不写回 NFO。
-- [ ] **验证：** 成功、非法字段、并发冲突、恢复和重刮削测试。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-010、QYP2-011
+- [x] **Read first：** 本文第 9、14 节、`src/main/modules/catalog/repository.ts`
+- [x] **允许修改：** `src/main/modules/metadata/editor-service.ts`、`src/main/modules/metadata/metadata-merger.ts`、`src/main/modules/catalog/repository.ts`、`tests/main/metadata/metadata-editor.test.ts`
+- [x] **目标：** 实现白名单字段 patch、字段锁定、revision 冲突和逐字段恢复。
+- [x] **验收：** 输入长度/范围校验；stale revision 返回冲突差异；刮削/扫描不覆盖锁定字段；不写回 NFO。
+- [x] **验证：** 成功、非法字段、并发冲突、恢复和重刮削测试。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（32 文件 379 测试通过，本任务 14 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 实现：16 字段白名单（恰合 §14.1 清单）+ 逐形状校验（文本帽 300/5000、year 1888-2100、rating 0-10、premiered 真日历校验 2021-13-99/2021-02-30 拒绝、数组/演员/外部 id 上限）；批次先全量校验再写（非法→整批不写）；冲突→整批不写并逐字段返回 {field, expectedRevision, current winner}（无静默 LWW）；恢复=删 manual 行（source 值重新 winner）；重扫不覆盖锁定（applyProviderFields manual-skip 已测）；无 fs 依赖零 NFO 写回；与当前 source winner 等值的写入按 no-op 处理（不静默锁定）
+  - Review notes: 评审 Request changes → REQUIRED 3 项全修（expectedRevision 必填否则 VALIDATION_FAILED；ITEM_NOT_FOUND 类型化预检替代裸 SqliteError；loadItemStore 三条容错分支补测）；OPTIONAL 修 3（真日历日期、同值 no-op、updatedAt 透传）；NIT 记录：批次逐条 autocommit（崩溃留半批，QYP2-023 可加事务）、castList/idList 额外属性未归一化
+  - 越界（待追认）：repository.ts +5 行 deleteMetadataSource（在允许清单内）
+  - Result: 通过
 
 ### QYP2-023 开发详情页元数据编辑器
 
