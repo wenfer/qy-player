@@ -199,6 +199,20 @@ Evidence:
 - [ ] **验证：** `npm test -- --run tests/main/library-scanner/local-scan.test.ts`；10,000 项 synthetic fixture 记录基线。
 - [ ] **Evidence：** 待填写
 
+### QYP2-009 实现本地增量扫描与媒体分类
+
+- [x] **依赖：** QYP2-006、QYP2-007
+- [x] **Read first：** 计划第 6 节、QYP2-006 的 adapter contract、job-controller.ts、repository.ts
+- [x] **允许修改：** `local-scanner.ts`、`classifier.ts`、`tests/main/library-scanner/local-scan.test.ts`
+- [x] **目标：** 发现视频/NFO/sidecar，识别电影、series、season、episode、普通 video，并按 path/size/mtime 增量更新。
+- [x] **验收：** S01E02/1x02/多集/Season 0；过滤 sample/extras；第二次无变化不重复 enrichment；完整成功扫描后才标 missing。
+- [x] **验证：** `npm test -- --run tests/main/library-scanner/local-scan.test.ts`（32 用例）；10,000 项 synthetic fixture 基线。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（13 文件 138 测试通过，本任务 32 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Baseline: 10,000 项 synthetic（200 剧 × 50 集）完整扫描 ~6.8s（门限 <60s，纯同步 SQLite + DFS fake adapter，无网络 I/O）
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：Critical（walkSourceTree 把 startPath 同时当遍历根与 resume cursor——cursor 为文件时遍历空目录，resume 语义完全失效；已改为恒从根遍历 + 内存态跳过 + cursor 失效回退全量）、availability 批量事务化（repo.setAvailabilityBulk，防崩溃留下混合状态）、测试 tmp 目录泄漏（afterAll→afterEach）、sample/extras 起始锚定（防误伤 The Interview 2014 / The Sample 2023 等真标题——未检出的 extras 仍经主文件大小规则正确挂到电影条目）、YEAR 尾部边界（Movie 2019.mkv）、episodeTitle 剥离 release tag；二轮验收 Approve；② enrich 钩子当前语义 = 幂等收尾（首个调用 flush 尾部电影分组），QYP2-010 换成真实 NFO 解析时已由指纹门禁保证不变文件不重复解析；③ 已知限制（记录）：同名著同年不同目录的电影合并为一个 item（sourceKey 仅 title+year，ADR-0001 语义下合理，人工修正后续可解）；mtime 取整用 Math.floor，适配器精度变化需 bump 指纹格式（已注释）；missing 30 天保留策略清理属后续任务；④ 越界文件（待追认）：ipc/index.ts（SCAN_START 接入递归 wrapper + finalize 钩子，替换 basic driver）、repository.ts（listItemsBySource、setAvailabilityBulk、CatalogItemRow/CatalogFileRow 暴露 updated_at）——均为最小必要增量，验收确认无越界修改；⑤ Season 目录上下文：剧名取自季目录外的最近目录段（绝命毒师/Season 1/01.mkv → 剧名绝命毒师）
+
 ### QYP2-010 实现安全 NFO 解析与字段合并
 
 - [ ] **依赖：** QYP2-003、QYP2-009
