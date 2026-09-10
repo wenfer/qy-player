@@ -40,6 +40,11 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+/** Revision the editor would currently see for a field. */
+function currentRevision(field: string): number {
+  return winnerFor(loadItemStore(repo, itemId), field)?.revision ?? 0;
+}
+
 describe('saveManualEdits (QYP2-022)', () => {
   it('writes a manual slot that becomes the winner', () => {
     const store = loadItemStore(repo, itemId);
@@ -94,9 +99,9 @@ describe('saveManualEdits (QYP2-022)', () => {
   });
 
   it('null value restores the source winner (manual row deleted)', () => {
-    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题' }]);
+    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }]);
     expect(winnerFor(loadItemStore(repo, itemId), 'title')?.provider).toBe('manual');
-    const result = saveManualEdits(repo, itemId, [{ field: 'title', value: null }]);
+    const result = saveManualEdits(repo, itemId, [{ field: 'title', value: null, expectedRevision: currentRevision('title') }]);
     expect(result.ok).toBe(true);
     const winner = winnerFor(loadItemStore(repo, itemId), 'title');
     expect(winner?.provider).toBe('nfo');
@@ -104,7 +109,7 @@ describe('saveManualEdits (QYP2-022)', () => {
   });
 
   it('re-scan (NFO apply) never overwrites locked manual fields', () => {
-    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题' }]);
+    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }]);
     // Simulate a re-scan arriving with fresh NFO values.
     const store = loadItemStore(repo, itemId);
     const outcome = applyNfoMetadata(store, {
@@ -127,8 +132,8 @@ describe('saveManualEdits (QYP2-022)', () => {
 
   it('restoreManualFields clears one field or all manual overrides', () => {
     saveManualEdits(repo, itemId, [
-      { field: 'title', value: '手工标题' },
-      { field: 'plot', value: '手工剧情' },
+      { field: 'title', value: '手工标题', expectedRevision: currentRevision('title') },
+      { field: 'plot', value: '手工剧情', expectedRevision: currentRevision('plot') },
     ]);
     const single = restoreManualFields(repo, itemId, ['title']);
     expect(single.cleared).toEqual(['title']);
@@ -146,14 +151,66 @@ describe('saveManualEdits (QYP2-022)', () => {
   });
 });
 
+describe('item precheck and revision contract', () => {
+  it('returns ITEM_NOT_FOUND for unknown items', () => {
+    const result = saveManualEdits(repo, 999999, [{ field: 'title', value: 'x', expectedRevision: 0 }]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('ITEM_NOT_FOUND');
+  });
+
+  it('rejects patches without expectedRevision (no silent LWW)', () => {
+    const result = saveManualEdits(repo, itemId, [
+      { field: 'title', value: 'no revision' } as unknown as ManualPatch,
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('VALIDATION_FAILED');
+    expect(winnerFor(loadItemStore(repo, itemId), 'title')?.provider).toBe('nfo');
+  });
+
+  it('treats a value identical to the current source winner as a no-op (no silent lock)', () => {
+    const result = saveManualEdits(repo, itemId, [
+      { field: 'title', value: 'NFO 标题', expectedRevision: currentRevision('title') },
+    ]);
+    if (!result.ok) throw new Error('save failed');
+    expect(result.changed).toEqual([]);
+    const winner = winnerFor(loadItemStore(repo, itemId), 'title');
+    expect(winner?.provider).toBe('nfo'); // not locked to manual
+  });
+});
+
+describe('loadItemStore tolerance branches', () => {
+  it('skips unknown providers, null values and corrupt JSON while loading healthy rows', () => {
+    repo.upsertMetadataSource(itemId, 'title', 'manual', '手工标题');
+    // Raw rows with problematic shapes (bypassing the typed API).
+    db.prepare(
+      "INSERT INTO catalog_metadata_sources (item_id, field, provider, value, revision) VALUES (?, ?, ?, ?, 1)"
+    ).run(itemId, 'mystery', 'unknown-provider', '"x"');
+    db.prepare(
+      "INSERT INTO catalog_metadata_sources (item_id, field, provider, value, revision) VALUES (?, ?, ?, NULL, 1)"
+    ).run(itemId, 'empty', 'nfo');
+    db.prepare(
+      "INSERT INTO catalog_metadata_sources (item_id, field, provider, value, revision) VALUES (?, ?, ?, ?, 1)"
+    ).run(itemId, 'broken', 'nfo', '{not-json');
+    const store = loadItemStore(repo, itemId);
+    expect(store.title?.manual?.value).toBe('手工标题');
+    expect(store.mystery).toBeUndefined();
+    expect(store.empty).toBeUndefined();
+    expect(store.broken).toBeUndefined();
+    // Healthy NFO rows still load.
+    expect(store.year?.nfo?.value).toBe(2019);
+  });
+});
+
 describe('validateEditableValue boundaries (§14.1)', () => {
   it('enforces every whitelist shape', () => {
     expect(validateEditableValue('title', 'ok')).toBeNull();
-    expect(validateEditableValue('title', '')).toMatchObject({});
+    expect(validateEditableValue('title', '')).toContain('非空文本');
     expect(validateEditableValue('title', 'x'.repeat(LIMITS.shortText + 1))).toBeTruthy();
     expect(validateEditableValue('plot', 'x'.repeat(LIMITS.longText + 1))).toBeTruthy();
     expect(validateEditableValue('premiered', '2019-01-01')).toBeNull();
     expect(validateEditableValue('premiered', '20190101')).toBeTruthy();
+    expect(validateEditableValue('premiered', '2021-13-99')).toBeTruthy();
+    expect(validateEditableValue('premiered', '2021-02-30')).toBeTruthy();
     expect(validateEditableValue('year', 2024)).toBeNull();
     expect(validateEditableValue('year', 2024.5)).toBeTruthy();
     expect(validateEditableValue('season', 0)).toBeNull();
@@ -178,14 +235,14 @@ describe('validateEditableValue boundaries (§14.1)', () => {
 
 describe('store round-trip (loadItemStore)', () => {
   it('rebuilds revisions and providers from DB rows', () => {
-    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题' }]);
+    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }]);
     const store = loadItemStore(repo, itemId);
     expect(store.title?.nfo?.value).toBe('NFO 标题');
     expect(store.title?.manual?.value).toBe('手工标题');
     expect((store.title?.manual?.revision ?? 0)).toBeGreaterThanOrEqual(1);
     // A second identical write is a no-op for revisions? The editor
     // writes only on change; same value + same revision still succeeds.
-    const patches: ManualPatch[] = [{ field: 'title', value: '手工标题' }];
+    const patches: ManualPatch[] = [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }];
     const again = saveManualEdits(repo, itemId, patches);
     expect(again.ok).toBe(true);
   });

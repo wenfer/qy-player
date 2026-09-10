@@ -4,7 +4,6 @@ import {
   winnerFor,
   type ProviderStore,
 } from './metadata-merger';
-import { MetadataConflictError } from './metadata-merger';
 import type { MetadataProvider, MetadataValue } from './types';
 
 /**
@@ -23,11 +22,13 @@ import type { MetadataProvider, MetadataValue } from './types';
  */
 
 export interface EditorRepoSurface {
+  getItem(id: number): { id: number } | undefined;
   listMetadataSources(itemId: number): Array<{
     field: string;
     provider: string;
     value: string | null;
     revision: number;
+    updated_at: number | null;
   }>;
   upsertMetadataSource(itemId: number, field: string, provider: string, value: unknown): void;
   deleteMetadataSource(itemId: number, field: string, provider: string): void;
@@ -111,7 +112,7 @@ export function loadItemStore(repo: EditorRepoSurface, itemId: number): Provider
       continue; // corrupt row: skip instead of crashing the editor
     }
     const slots = (store[row.field] ??= {});
-    slots[provider] = { value, revision: row.revision, updatedAt: 0 };
+    slots[provider] = { value, revision: row.revision, updatedAt: row.updated_at ?? 0 };
   }
   return store;
 }
@@ -121,6 +122,11 @@ const PROVIDERS = new Set<string>(['manual', 'nfo', 'scraper', 'filename']);
 // ---------------------------------------------------------------------------
 // Validation (§14.1: 输入长度/范围校验)
 // ---------------------------------------------------------------------------
+
+/** Structural equality (same rule metadata-merger uses). */
+function stableEquals(a: MetadataValue, b: MetadataValue): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -152,11 +158,17 @@ export function validateEditableValue(field: string, value: MetadataValue): stri
         return `字段 ${field} 需要介于 0 与 10 之间的数值`;
       }
       return null;
-    case 'date':
+    case 'date': {
       if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
         return `字段 ${field} 需要 YYYY-MM-DD 日期`;
       }
+      // Real calendar check: 2021-13-99 must fail, not just the shape.
+      const parsed = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+        return `字段 ${field} 不是有效的日历日期`;
+      }
       return null;
+    }
     case 'stringList':
       if (!Array.isArray(value) || value.length > LIMITS.listItems) {
         return `字段 ${field} 最多 ${LIMITS.listItems} 项`;
@@ -222,6 +234,11 @@ function applyManualValidated(
   if (patch.value === null) {
     return { store: clearManualField(store, patch.field), changed: true };
   }
+  // Writing a value identical to the current (non-manual) winner would
+  // silently lock the field; treat it as a no-op instead.
+  if (winner && winner.provider !== 'manual' && stableEquals(winner.value, patch.value)) {
+    return { store, changed: false };
+  }
   const outcome = applyManualField(store, patch.field, patch.value, {
     expectedRevision: patch.expectedRevision,
   });
@@ -240,6 +257,16 @@ export function saveManualEdits(
 ): EditorResult {
   if (!Number.isInteger(itemId) || itemId <= 0) {
     return { ok: false, code: 'VALIDATION_FAILED', message: '条目 ID 无效' };
+  }
+  if (!repo.getItem(itemId)) {
+    return { ok: false, code: 'ITEM_NOT_FOUND', message: '条目不存在' };
+  }
+  // §14.1: every save must carry the revision it saw — a missing
+  // expectedRevision is a client bug, not a free last-write-wins.
+  for (const patch of patches) {
+    if (!patch || typeof patch.field !== 'string' || typeof patch.expectedRevision !== 'number') {
+      return { ok: false, code: 'VALIDATION_FAILED', message: '补丁缺少 expectedRevision（字段状态版本）' };
+    }
   }
   // Whole-batch validation before any write.
   for (const patch of patches) {
@@ -262,22 +289,9 @@ export function saveManualEdits(
 
   for (const patch of patches) {
     const before = winnerFor(next, patch.field);
-    let result;
-    try {
-      result = applyManualValidated(next, patch);
-    } catch (err) {
-      if (err instanceof MetadataConflictError) {
-        conflicts.push({
-          field: patch.field,
-          expectedRevision: err.expectedRevision,
-          current: err.current
-            ? { provider: err.current.provider, revision: err.current.revision, value: err.current.value }
-            : null,
-        });
-        continue;
-      }
-      throw err;
-    }
+    // Conflict paths (stale revision) are collected; the loop continues so
+    // the UI receives every field's diff in one round-trip.
+    const result = applyManualValidated(next, patch);
     if (result.conflict) {
       conflicts.push(result.conflict);
       continue;
