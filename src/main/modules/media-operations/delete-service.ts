@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { dirname, join } from 'path';
 import { statSync } from 'fs';
 
@@ -94,11 +94,22 @@ const TOKEN_TTL_MS = 10 * 60 * 1000;
 interface TokenPayload {
   sourceId: number;
   itemId: number;
+  /** The source root AT PREVIEW TIME - a root change invalidates the token
+   * (otherwise a re-pointed source would redirect the delete target). */
+  sourceRoot: string;
   targetDir: string;
   fingerprint: string;
+  /** WebDAV If-Match precondition from the files' etag fingerprints. */
+  ifMatch?: string;
   method: DeleteMethod;
   itemTitle: string;
   expiresAt: number;
+}
+
+/** etag value from a file row's fingerprint ('etag:<v>' | 'nofetag:...'). */
+function etagFromFingerprint(fingerprint: string | null): string | undefined {
+  if (fingerprint?.startsWith('etag:')) return fingerprint.slice(5) || undefined;
+  return undefined;
 }
 
 /** Files' content fingerprint at preview time (mtime/size/etag sensitive). */
@@ -176,6 +187,9 @@ export class SafeDeleteService {
     if (source.kind !== 'local' && source.kind !== 'webdav') {
       return { ok: false, code: 'INVALID_INPUT', message: '来源类型不支持删除' };
     }
+    if (source.kind === 'webdav' && !item.title) {
+      return { ok: false, code: 'INVALID_INPUT', message: '条目缺少标题，无法确认永久删除' };
+    }
 
     const files = this.repo.listFilesByItem(itemId);
     if (files.length === 0) {
@@ -203,12 +217,17 @@ export class SafeDeleteService {
     }
 
     // Local: realpath containment re-verified here (symlinks rejected by
-    // resolveInside; prefix-only checks are forbidden by §14.2).
+    // resolveInside; prefix-only checks are forbidden by §14.2), plus a
+    // mount-point check: the target must live on the same filesystem as
+    // the source root (a bind/NFS mount under the root is refused).
     if (source.kind === 'local') {
       try {
         const real = this.deps.resolveInside(sourceId, dir);
         if (!statSync(real).isDirectory()) {
           return { ok: false, code: 'NO_OWNERSHIP', message: '目标不是目录' };
+        }
+        if (statSync(real).dev !== statSync(source.root).dev) {
+          return { ok: false, code: 'OUT_OF_ROOT', message: '目标位于另一个文件系统（挂载点），拒绝删除' };
         }
       } catch (err) {
         return {
@@ -224,18 +243,19 @@ export class SafeDeleteService {
     const method: DeleteMethod = source.kind === 'local' ? 'local-trash' : 'webdav-delete';
     const totalBytes = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
     const fingerprint = filesFingerprint(files);
-    const token = createHash('sha256')
-      .update(`${sourceId}:${itemId}:${dir}:${fingerprint}:${Date.now()}:${Math.random()}`)
-      .digest('hex')
-      .slice(0, 24);
+    const token = randomBytes(12).toString('hex');
 
     const ttl = this.deps.tokenTtlMs ?? TOKEN_TTL_MS;
     this.sweepExpired();
     this.tokens.set(token, {
       sourceId,
       itemId,
+      sourceRoot: source.root,
       targetDir: dir,
       fingerprint,
+      ...(method === 'webdav-delete'
+        ? { ifMatch: etagFromFingerprint(files.find((f) => f.fingerprint?.startsWith('etag:'))?.fingerprint ?? null) }
+        : {}),
       method,
       itemTitle: item.title ?? '',
       expiresAt: (this.deps.now?.() ?? Date.now()) + ttl,
@@ -284,6 +304,12 @@ export class SafeDeleteService {
       this.tokens.delete(token);
       return { ok: false, code: 'ITEM_NOT_FOUND', message: '条目或来源已不存在' };
     }
+    // Root binding (§14.2): a re-pointed source between preview and
+    // execute would redirect the delete at an unrelated directory.
+    if (source.root !== payload.sourceRoot) {
+      this.tokens.delete(token);
+      return { ok: false, code: 'FINGERPRINT_CHANGED', message: '来源根目录已变更，请重新预览' };
+    }
 
     // Full re-verification: files, fingerprint, ownership.
     const files = this.repo.listFilesByItem(payload.itemId);
@@ -324,6 +350,21 @@ export class SafeDeleteService {
           this.tokens.delete(token);
           return { ok: false, code: 'SYMLINK_CHANGED', message: '目标不再是目录，请重新预览' };
         }
+        // Mount-point re-check (same-filesystem as the root).
+        if (statSync(absDir).dev !== statSync(source.root).dev) {
+          this.tokens.delete(token);
+          return { ok: false, code: 'OUT_OF_ROOT', message: '目标位于另一个文件系统（挂载点）' };
+        }
+        // Disk-side spot check: DB rows only see scan-time state; a file
+        // changed on disk since the preview must abort the trash too.
+        for (const file of files) {
+          const absFile = this.deps.resolveInside(payload.sourceId, file.relative_path);
+          const stat = statSync(absFile);
+          if ((file.mtime !== null && stat.mtimeMs !== file.mtime) || (file.size !== null && stat.size !== file.size)) {
+            this.tokens.delete(token);
+            return { ok: false, code: 'FINGERPRINT_CHANGED', message: '目标已变化（磁盘文件与预览不一致），请重新预览' };
+          }
+        }
       } catch {
         this.tokens.delete(token);
         return { ok: false, code: 'SYMLINK_CHANGED', message: '目标路径校验失败（可能已被替换），请重新预览' };
@@ -342,9 +383,19 @@ export class SafeDeleteService {
         return { ok: false, code: 'TITLE_MISMATCH', message: '请输入与媒体标题完全一致的标题以确认永久删除' };
       }
       try {
-        const result = await this.deps.webdavDelete({ sourceId: payload.sourceId, relativePath: payload.targetDir });
+        // If-Match is the server-side re-verification between preview and
+        // execute (§14.2.5): a moved/replaced collection answers 412.
+        const result = await this.deps.webdavDelete({
+          sourceId: payload.sourceId,
+          relativePath: payload.targetDir,
+          ...(payload.ifMatch ? { ifMatch: payload.ifMatch } : {}),
+        });
         status = result.status; // 'deleted' or 'unknown' — never pretend
-      } catch {
+      } catch (err) {
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 412) {
+          return { ok: false, code: 'FINGERPRINT_CHANGED', message: '目标已变化（服务器条件失败），请重新预览' };
+        }
         return { ok: false, code: 'WEBDAV_FAILED', message: 'WebDAV 删除请求失败' };
       }
     }
@@ -374,4 +425,35 @@ export class SafeDeleteService {
 import { rmSync } from 'fs';
 function rmDirShim(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// IPC wire mapping (QYP2-024 contract): service results → ActionResult
+// ---------------------------------------------------------------------------
+
+import { err as actionErr, ok as actionOk } from '../../../shared/types/actions';
+import type { ActionResult } from '../../../shared/types/actions';
+
+/** Map preview results onto the IPC envelope without double wrapping. */
+export function mapDeletePreviewResult(result: DeletePreviewResult): ActionResult<DeletePreview> {
+  if (result.ok) return actionOk(result.preview);
+  return actionErr(
+    result.code === 'ITEM_NOT_FOUND' ? 'NOT_FOUND' : result.code === 'READ_ONLY' || result.code === 'NO_OWNERSHIP' ? 'UNAVAILABLE' : 'VALIDATION_FAILED',
+    result.message
+  );
+}
+
+/** Map execute results onto the IPC envelope without double wrapping. */
+export function mapDeleteExecuteResult(result: DeleteExecuteResult): ActionResult<{ status: string; itemId: number }> {
+  if (result.ok) return actionOk({ status: result.status, itemId: result.itemId });
+  return actionErr(
+    result.code === 'ITEM_NOT_FOUND'
+      ? 'NOT_FOUND'
+      : result.code === 'TRASH_FAILED' || result.code === 'WEBDAV_FAILED' || result.code === 'WEBDAV_UNKNOWN'
+        ? 'UNAVAILABLE'
+        : result.code === 'FINGERPRINT_CHANGED'
+          ? 'UPSTREAM_CHANGED'
+          : 'VALIDATION_FAILED',
+    result.message
+  );
 }

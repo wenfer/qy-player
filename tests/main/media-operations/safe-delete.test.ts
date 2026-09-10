@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,8 @@ import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository, type CatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { LocalSourceAdapter } from '../../../src/main/modules/library-sources/local-source';
 import {
+  mapDeleteExecuteResult,
+  mapDeletePreviewResult,
   SafeDeleteService,
   type DeleteExecuteResult,
   type DeleteServiceDeps,
@@ -63,6 +65,9 @@ beforeEach(() => {
   cacheRoot = join(root, 'cache');
   mkdirSync(join(mediaRoot, '电影A'), { recursive: true });
   writeFileSync(join(mediaRoot, '电影A', 'a.mkv'), Buffer.alloc(100, 0x61));
+  // DB rows must mirror the real on-disk stat (the execute-phase spot
+  // check compares them against a fresh statSync).
+  const aStat = statSync(join(mediaRoot, '电影A', 'a.mkv'));
   trashCalls = [];
   webdavCalls = [];
   adapters = new Map();
@@ -73,7 +78,7 @@ beforeEach(() => {
   webdavSourceId = repo.createSource({ kind: 'webdav', name: '云盘', root: 'http://dav.example/dav', readOnly: false });
   adapters.set(localSourceId, LocalSourceAdapter.fromSource(localSourceId, mediaRoot));
   itemId = repo.upsertItem({ sourceId: localSourceId, sourceKey: 'movieA', kind: 'movie', title: '电影A' });
-  repo.upsertFile({ sourceId: localSourceId, itemId, relativePath: '电影A/a.mkv', size: 100, mtime: 1000 });
+  repo.upsertFile({ sourceId: localSourceId, itemId, relativePath: '电影A/a.mkv', size: aStat.size, mtime: aStat.mtimeMs });
   service = makeService();
 });
 
@@ -245,6 +250,15 @@ describe('webdav delete (capability + preconditions)', () => {
 
   it('previews with title confirmation requirement and sends If-Match', async () => {
     const wid = makeWebdavItem();
+    // Give the file an etag fingerprint so the precondition is real.
+    repo.upsertFile({
+      sourceId: webdavSourceId,
+      itemId: wid,
+      relativePath: 'cloud-movie/movie.mkv',
+      size: 500,
+      mtime: 100,
+      fingerprint: 'etag:abc123',
+    });
     const preview = service.preview(webdavSourceId, wid);
     expect(preview.ok).toBe(true);
     if (!preview.ok) return;
@@ -257,13 +271,41 @@ describe('webdav delete (capability + preconditions)', () => {
     if (!mismatch.ok) expect(mismatch.code).toBe('TITLE_MISMATCH');
     expect(webdavCalls).toHaveLength(0);
 
-    // Correct title proceeds; the fingerprint etag rides If-Match.
+    // Correct title proceeds; the etag rides If-Match (server-side
+    // re-verification between preview and execute, §14.2.5).
     const done = await service.execute(preview.preview.token, { confirmTitle: '云盘电影' });
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.status).toBe('deleted');
-    expect(webdavCalls).toEqual([{ relativePath: 'cloud-movie', ifMatch: undefined }]);
+    expect(webdavCalls).toEqual([{ relativePath: 'cloud-movie', ifMatch: 'abc123' }]);
     expect(repo.getItem(wid)?.availability).toBe('missing');
+  });
+
+  it('maps a 412 precondition failure to FINGERPRINT_CHANGED', async () => {
+    webdavBehavior = 'precondition-fail';
+    const wid = makeWebdavItem();
+    repo.upsertFile({
+      sourceId: webdavSourceId,
+      itemId: wid,
+      relativePath: 'cloud-movie/movie.mkv',
+      size: 500,
+      mtime: 100,
+      fingerprint: 'etag:stale',
+    });
+    const preview = service.preview(webdavSourceId, wid);
+    if (!preview.ok) throw new Error('preview failed');
+    const result = await service.execute(preview.preview.token, { confirmTitle: '云盘电影' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('FINGERPRINT_CHANGED');
+    expect(repo.getItem(wid)?.availability).toBe('online');
+  });
+
+  it('refuses WebDAV delete for null-title items (empty-string bypass)', () => {
+    const wid = repo.upsertItem({ sourceId: webdavSourceId, sourceKey: 'no-title', kind: 'movie', title: null as unknown as string });
+    repo.upsertFile({ sourceId: webdavSourceId, itemId: wid, relativePath: 'no-title/movie.mkv', size: 1, mtime: 1 });
+    const preview = service.preview(webdavSourceId, wid);
+    expect(preview.ok).toBe(false);
+    if (!preview.ok) expect(preview.code).toBe('INVALID_INPUT');
   });
 
   it('marks unknown outcomes instead of faking success', async () => {
@@ -310,5 +352,33 @@ describe('managed cache cleanup', () => {
     expect(removeManagedCache).toHaveBeenCalledWith(itemId);
     const result: DeleteExecuteResult = { ok: true, status: 'trashed', itemId };
     expect(result.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wire contract (QYP2-024 §16.6): service results → IPC envelope shapes
+// ---------------------------------------------------------------------------
+
+describe('wire contract mappers', () => {
+  it('maps preview ok/failure without double wrapping', () => {
+    const good = mapDeletePreviewResult(service.preview(localSourceId, itemId));
+    expect(good.ok).toBe(true);
+    if (good.ok) expect(good.data?.token).toBeTruthy();
+
+    const bad = mapDeletePreviewResult(service.preview(localSourceId, 999999));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error?.code).toBe('NOT_FOUND');
+  });
+
+  it('maps execute ok/unknown/typed failures', async () => {
+    const preview = service.preview(localSourceId, itemId);
+    if (!preview.ok) throw new Error('preview failed');
+    const good = mapDeleteExecuteResult(await service.execute(preview.preview.token));
+    expect(good.ok).toBe(true);
+    if (good.ok) expect(good.data?.status).toBe('trashed');
+
+    const replay = mapDeleteExecuteResult(await service.execute(preview.preview.token));
+    expect(replay.ok).toBe(false);
+    if (!replay.ok) expect(replay.error?.code).toBe('VALIDATION_FAILED'); // TOKEN_INVALID → validation
   });
 });

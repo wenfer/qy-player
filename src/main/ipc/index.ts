@@ -77,7 +77,11 @@ import {
   toEditorActionResult,
   type ManualPatch,
 } from '../modules/metadata/editor-service';
-import { SafeDeleteService } from '../modules/media-operations/delete-service';
+import {
+  mapDeleteExecuteResult,
+  mapDeletePreviewResult,
+  SafeDeleteService,
+} from '../modules/media-operations/delete-service';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -860,6 +864,16 @@ function registerCatalogHandlers(
       return adapter.deleteTree(relativePath, new AbortController().signal, ifMatch);
     },
     managedCacheRoots: [subtitleManagedRoot, metadataImagesDir],
+    // Managed DB rows die with the item: subtitle associations and image
+    // slots (the service already removed the files themselves).
+    removeManagedCache: (deletedItemId) => {
+      for (const row of catalogRepo.listSubtitlesByItem(deletedItemId)) {
+        catalogRepo.deleteSubtitle(deletedItemId, row.id);
+      }
+      for (const field of ['poster', 'fanart']) {
+        catalogRepo.deleteMetadataSource(deletedItemId, field, 'manual');
+      }
+    },
   });
   try {
     cleanupTempFiles(subtitleManagedRoot, new Set(catalogRepo.listAllSubtitlePaths()));
@@ -1210,12 +1224,7 @@ function registerCatalogHandlers(
   ipcMain.handle(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, (_event, ref: { sourceId?: unknown; itemId?: unknown }) => {
     const sourceId = Number(ref?.sourceId);
     const itemId = Number(ref?.itemId);
-    const result = safeDelete.preview(sourceId, itemId);
-    if (!result.ok) {
-      const code = result.code === 'ITEM_NOT_FOUND' ? 'NOT_FOUND' : result.code === 'READ_ONLY' || result.code === 'NO_OWNERSHIP' ? 'UNAVAILABLE' : 'VALIDATION_FAILED';
-      return err(code, result.message);
-    }
-    return ok(result.preview);
+    return mapDeletePreviewResult(safeDelete.preview(sourceId, itemId));
   });
 
   ipcMain.handle(
@@ -1227,19 +1236,7 @@ function registerCatalogHandlers(
       const result = await safeDelete.execute(args.token, {
         ...(typeof args.confirmTitle === 'string' ? { confirmTitle: args.confirmTitle } : {}),
       });
-      if (!result.ok) {
-        return err(
-          result.code === 'ITEM_NOT_FOUND'
-            ? 'NOT_FOUND'
-            : result.code === 'TRASH_FAILED' || result.code === 'WEBDAV_UNKNOWN' || result.code === 'WEBDAV_FAILED'
-              ? 'UNAVAILABLE'
-              : result.code === 'FINGERPRINT_CHANGED'
-                ? 'UPSTREAM_CHANGED'
-                : 'VALIDATION_FAILED',
-          result.message
-        );
-      }
-      return ok({ status: result.status, itemId: result.itemId });
+      return mapDeleteExecuteResult(result);
     }
   );
 
