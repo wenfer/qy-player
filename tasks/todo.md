@@ -515,13 +515,19 @@ Evidence:
 
 ### QYP2-023 开发详情页元数据编辑器
 
-- [ ] **依赖：** QYP2-019、QYP2-022
-- [ ] **Read first：** `src/renderer/pages/Detail/index.tsx`、现有 Toast store
-- [ ] **允许修改：** `src/renderer/pages/Detail/MetadataEditor.tsx`、`src/renderer/pages/Detail/MetadataField.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/renderer/detail/metadata-editor.test.tsx`
-- [ ] **目标：** 展示字段来源、编辑草稿、保存冲突、恢复字段和图片导入。
-- [ ] **验收：** 失败保留草稿；差异可理解；长中文/多标签可滚动换行；dialog 焦点和键盘操作正确。
-- [ ] **验证：** renderer 测试、1280×800 手工可访问性检查。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-019、QYP2-022
+- [x] **Read first：** `src/renderer/pages/Detail/index.tsx`、现有 Toast store
+- [x] **允许修改：** `src/renderer/pages/Detail/MetadataEditor.tsx`、`src/renderer/pages/Detail/MetadataField.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/renderer/detail/metadata-editor.test.tsx`
+- [x] **目标：** 展示字段来源、编辑草稿、保存冲突、恢复字段和图片导入。
+- [x] **验收：** 失败保留草稿；差异可理解；长中文/多标签可滚动换行；dialog 焦点和键盘操作正确。
+- [x] **验证：** renderer 测试、1280×800 手工可访问性检查。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（33 文件 396 测试通过，本任务 10 renderer + 7 wire/image 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - UI：MetadataEditor 对话框（草稿编辑、批量保存、冲突逐字段「当前值 vs 提交值」+ 覆盖/放弃、逐字段恢复 + 恢复全部、海报/背景图导入仅经系统选择器、失败全路径保留草稿、初始焦点落第一个输入框、Tab trap、Esc、关闭回焦触发按钮）；MetadataField（中文标签 + 来源徽章 手工/NFO/刮削/文件名、按形状渲染、未知字段只读、冲突 break-all）
+  - Review notes: 评审 Request changes → CRITICAL 2 项全修（SAVE 双重包裹使冲突假成功清空草稿——toEditorActionResult 统一映射，conflicts 走 error.details；RESTORE/IMPORT_IMAGES 同类形状修正）；REQUIRED 3 项全修（中文字段标签杜绝键名泄漏、wire contract 测试 ok/conflict/not-found/validation、importItemImages 7 分支测试含孤儿清理）；OPTIONAL 修 4（初始焦点、空数字=恢复语义、未知字段只读、break-all）；延后记录：图片导入 renderer 任意路径边界（与字幕同先例，≤20MiB 拷入受管目录无回读通道）、4×20MiB 同步拷贝阻塞（OPTIONAL 接受）
+  - 越界（待追认）：shared/ipc-channels.ts（METADATA 组）、shared/types/metadata-editor.ts + actions.ts details 放宽为 Record<string,unknown>、editor-service.ts（describeItemFields/importItemImages/toEditorActionResult）、ipc/index.ts（5 个 handler）、LibraryBrowse/index.tsx（接线，目录条目详情实际所在，Detail/index.tsx 为在线详情页不适用）
+  - 手工验证（待补录）：1280×800 键盘全流程（Tab/焦点环/冲突差异渲染）
+  - Result: 通过（自动化；键盘手工待补）
 
 ### QYP2-024 实现安全删除后端
 
