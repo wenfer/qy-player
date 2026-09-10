@@ -26,6 +26,12 @@ import {
   walkSourceTree,
 } from '../modules/library-scanner/local-scanner';
 import {
+  createWebDavScanDriver,
+  persistSourceHealth,
+  readPersistedHealth,
+  type SourceHealthState,
+} from '../modules/library-scanner/webdav-scanner';
+import {
   createLocalSourceFromSelection,
   createWebDavSource,
   getAdapterForSource,
@@ -625,6 +631,7 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_LIST, () => {
     const entries: SourceListEntry[] = repo.listSources().map((source) => {
       const lastRun = repo.getLatestScanRun(source.id);
+      const health = readPersistedHealth(source);
       return {
         id: source.id,
         kind: source.kind,
@@ -637,6 +644,12 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
             ? { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true }
             : { ...LOCAL_SOURCE_CAPABILITIES },
         hasCredential: source.secret_ref ? secretStore.hasSecretByRef(source.secret_ref) : false,
+        ...(health
+          ? {
+              health: health.health,
+              ...(health.checkedAt !== undefined ? { healthCheckedAt: health.checkedAt * 1000 } : {}),
+            }
+          : {}),
         ...(lastRun
           ? {
               lastRun: {
@@ -705,10 +718,14 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     try {
       const { adapter } = getAdapterForSource(db, sourceId, secretStore);
       const capabilities = await adapter.testConnection(new AbortController().signal);
-      return ok(capabilities.canSeek ? 'ok' : 'degraded');
+      const state: SourceHealthState = capabilities.canSeek ? 'ok' : 'degraded';
+      persistSourceHealth(repo, sourceId, state);
+      return ok(state);
     } catch (e) {
       // WebDAV 401/403 is auth failure, not offline (plan §6.1 health map).
       const status = (e as { status?: number }).status;
+      const state: SourceHealthState = status === 401 || status === 403 ? 'auth-required' : 'offline';
+      persistSourceHealth(repo, sourceId, state);
       if (status === 401 || status === 403) {
         return err('AUTH_REQUIRED', '认证失败：请检查用户名与密码');
       }
@@ -729,25 +746,24 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     } catch (e) {
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
     }
-    if (adapter.kind === 'webdav') {
-      // WebDAV scanning arrives with QYP2-014 (bounded traversal, offline
-      // semantics); refusing here beats a silent local-only scan.
-      return err('UNAVAILABLE', 'WebDAV 扫描即将在后续版本提供');
-    }
     // Recursive walk over the adapter; deterministic order also drives the
     // movie-group flush and the resume cursor semantics (QYP2-009).
+    // Depth 0/1 stays inside the webdav adapter; Depth infinity is forbidden.
     const scanningAdapter: SourceAdapter = {
       ...adapter,
       list: (path: string, signal: AbortSignal) => walkSourceTree(adapter, path, signal),
     };
-    const driver = createLocalScanDriver({
-      repo,
-      sourceId,
-      // NFO contents are read through the adapter's containment check, so
-      // a stored relative path can never escape the source root.
-      readNfo: async (relativePath) =>
-        readFile((adapter as LocalSourceAdapter).resolveInside(relativePath)),
-    });
+    const driver =
+      adapter.kind === 'webdav'
+        ? createWebDavScanDriver({ repo, sourceId, adapter })
+        : createLocalScanDriver({
+            repo,
+            sourceId,
+            // NFO contents are read through the adapter's containment check,
+            // so a stored relative path can never escape the source root.
+            readNfo: async (relativePath) =>
+              readFile((adapter as LocalSourceAdapter).resolveInside(relativePath)),
+          });
     const controller = new ScanJobController({
       repo,
       adapter: scanningAdapter,

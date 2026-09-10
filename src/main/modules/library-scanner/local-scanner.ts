@@ -194,6 +194,11 @@ export function createLocalScanDriver(deps: {
    * the source adapter). When absent, NFO files are skipped silently.
    */
   readNfo?: (relativePath: string, signal: AbortSignal) => Promise<Buffer>;
+  /**
+   * Fingerprint hook (QYP2-014): WebDAV prefers `etag:<etag>` and falls
+   * back to the local size:mtime format. Defaults to local behavior.
+   */
+  fingerprintOf?: (entry: SourceEntry) => string | undefined;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   // Existing files snapshot: cheap in-driver change detection without extra
@@ -248,6 +253,13 @@ export function createLocalScanDriver(deps: {
     }
   }
 
+  const fingerprintFor = (entry: SourceEntry): string | undefined =>
+    deps.fingerprintOf
+      ? deps.fingerprintOf(entry)
+      : entry.size !== undefined && entry.mtime !== undefined
+        ? `${entry.size}:${Math.floor(entry.mtime)}`
+        : undefined;
+
   const driver: LocalScanDriver = {
     seen,
 
@@ -264,13 +276,11 @@ export function createLocalScanDriver(deps: {
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
 
       seen.add(entry.relativePath);
-      // Fingerprint is size + mtime (ms). mtime is floored to an integer
-      // for stability; if an adapter ever reports seconds the format must
-      // be bumped so old fingerprints do not silently match.
-      const fingerprint =
-        entry.size !== undefined && entry.mtime !== undefined
-          ? `${entry.size}:${Math.floor(entry.mtime)}`
-          : undefined;
+      // Default fingerprint is size + mtime (ms). mtime is floored to an
+      // integer for stability; if an adapter ever reports seconds the
+      // format must be bumped so old fingerprints do not silently match.
+      // WebDAV overrides this with the etag-preferring hook (plan §6.1).
+      const fingerprint = fingerprintFor(entry);
       const existing = filesIndex.get(entry.relativePath);
       // Incremental skip: identical size+mtime means nothing changed, so no
       // re-upsert and (later) no re-enrichment for this file.
@@ -388,10 +398,7 @@ export function createLocalScanDriver(deps: {
     const year = main.parsed.movie?.year;
 
     const attach = (c: BufferedCandidate, targetItem: number): void => {
-      const fp =
-        c.entry.size !== undefined && c.entry.mtime !== undefined
-          ? `${c.entry.size}:${Math.floor(c.entry.mtime)}`
-          : undefined;
+      const fp = fingerprintFor(c.entry);
       repo.upsertFile({
         sourceId,
         itemId: targetItem,

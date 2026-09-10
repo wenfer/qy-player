@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw, Trash2, X, Lock, Unlock, Globe, AlertTriangle } from 'lucide-react';
+import { Loader2, RefreshCw, Trash2, X, Lock, Unlock, Globe, AlertTriangle, HeartPulse } from 'lucide-react';
 import { urlLooksPlaintextHttp } from './WebDavFields';
 import type { SourceListEntry } from '../../../shared/types';
 
@@ -12,6 +12,13 @@ export interface SourceListProps {
 }
 
 const NON_TERMINAL = new Set(['queued', 'discovering', 'indexing', 'enriching']);
+
+const HEALTH_LABEL: Record<string, string> = {
+  ok: '在线',
+  degraded: '部分可用',
+  offline: '离线',
+  'auth-required': '需要认证',
+};
 
 /** Source rows for 本地 + WebDAV sources (plan §7/§8, QYP2-008/013). */
 export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove }: SourceListProps) {
@@ -45,6 +52,20 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
                     <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
                       {source.hasCredential ? <Lock size={10} /> : <Unlock size={10} />}
                       {source.hasCredential ? '凭据已保存' : '无凭据'}
+                    </span>
+                  )}
+                  {source.health && (
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        source.health === 'ok'
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : source.health === 'auth-required' || source.health === 'offline'
+                            ? 'bg-amber-500/10 text-amber-500'
+                            : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      <HeartPulse size={10} />
+                      {HEALTH_LABEL[source.health] ?? source.health}
                     </span>
                   )}
                 </div>

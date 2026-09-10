@@ -174,8 +174,15 @@ export function isCreateLocalSourceInput(value: unknown): value is CreateLocalSo
   return true;
 }
 
+/** Last known health observation (plan §6.1: persisted per source). */
+export type SourceHealthObservation = 'ok' | 'degraded' | 'offline' | 'auth-required';
+
 /** Last known scan state for a source, for lists that must not re-query. */
 export interface SourceListEntry extends SourceSummary {
+  /** Persisted health from the last explicit health check. */
+  health?: SourceHealthObservation;
+  /** Unix ms when health was last checked; absent when never probed. */
+  healthCheckedAt?: number;
   lastRun?: {
     status: ScanState;
     processed?: number;
