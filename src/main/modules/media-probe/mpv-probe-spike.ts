@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -75,7 +75,7 @@ export interface ProbeResult {
   duration?: number;
   /** Demuxer/container name (file-format), e.g. 'Matroska'. */
   container?: string;
-  video?: { codec?: string; width?: number; height?: number; fps?: number; aspect?: string };
+  video?: { codec?: string; width?: number; height?: number; fps?: number; aspect?: number };
   audio?: { codec?: string; channels?: number; samplerate?: number };
   tracks: ProbeTrack[];
   /** Field keys no candidate property could supply on this version. */
@@ -97,7 +97,7 @@ export const PROBE_FIELD_CANDIDATES: Record<string, string[]> = {
   'video.aspect': ['video-params/aspect', 'video-aspect'],
   'audio.codec': ['audio-codec'],
   'audio.channels': ['audio-params/channel-count', 'audio-channels'],
-  'audio.samplerate': ['audio-params/samplerate', 'demux-samplerate'],
+  'audio.samplerate': ['audio-params/samplerate', 'audio-samplerate', 'demux-samplerate'],
 };
 
 function num(value: unknown): number | undefined {
@@ -135,7 +135,7 @@ export function assembleProbeResult(version: string, props: Map<string, unknown>
     width: num(get('video.width')),
     height: num(get('video.height')),
     fps: num(get('video.fps')),
-    aspect: str(get('video.aspect')),
+    aspect: num(get('video.aspect')),
   };
   const audio = {
     codec: str(get('audio.codec')),
@@ -219,10 +219,12 @@ export function spawnProbeProcess(binary: string, args: string[]): ProbeSpawn {
   const stdoutChunks: Buffer[] = [];
   let stdoutBytes = 0;
   child.stdout?.on('data', (chunk: Buffer) => {
-    // Bounded stdout (plan §10): diagnostics only, never unbounded.
+    // Bounded stdout (plan §10): diagnostics only, never unbounded; the
+    // final chunk is truncated to the remaining budget, never overruns.
     if (stdoutBytes < PROBE_STDOUT_CAP) {
-      stdoutChunks.push(chunk);
-      stdoutBytes += chunk.length;
+      const room = PROBE_STDOUT_CAP - stdoutBytes;
+      stdoutChunks.push(room < chunk.length ? chunk.subarray(0, room) : chunk);
+      stdoutBytes += Math.min(room, chunk.length);
     }
   });
   // Drain stderr silently so the pipe never blocks mpv (AGENTS.md).
@@ -272,7 +274,8 @@ function killChild(child: ChildProcess): void {
 async function queryProperty(
   ipc: MpvIpcClient,
   name: string,
-  deadline: number
+  deadline: number,
+  extraRace?: Promise<unknown>[]
 ): Promise<unknown> {
   const remaining = deadline - Date.now();
   if (remaining <= 0) throw new ProbeError('TIMEOUT', 'mpv 探测超时');
@@ -280,7 +283,26 @@ async function queryProperty(
   try {
     return await Promise.race([
       ipc.getProperty(name).catch(() => undefined as unknown),
+      ...(extraRace ?? []),
       new Promise<unknown>((_, reject) => {
+        timer = setTimeout(() => reject(new ProbeError('TIMEOUT', 'mpv 探测超时')), remaining);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Reject with a ProbeError once the deadline passes. */
+async function raceDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new ProbeError('TIMEOUT', 'mpv 探测超时');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new ProbeError('TIMEOUT', 'mpv 探测超时')), remaining);
         timer.unref?.();
       }),
@@ -293,10 +315,11 @@ async function queryProperty(
 async function getPropertyAllowingFailure(
   ipc: MpvIpcClient,
   name: string,
-  deadline: number
+  deadline: number,
+  extraRace?: Promise<unknown>[]
 ): Promise<unknown> {
   try {
-    return await queryProperty(ipc, name, deadline);
+    return await queryProperty(ipc, name, deadline, extraRace);
   } catch (err) {
     if (err instanceof ProbeError) throw err;
     return undefined;
@@ -310,6 +333,11 @@ async function getPropertyAllowingFailure(
 export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
   const timeoutMs = deps.timeoutMs ?? PROBE_TIMEOUT_MS;
   const socketDir = deps.socketDir ?? join(tmpdir(), 'qy-probe');
+  try {
+    mkdirSync(socketDir, { recursive: true });
+  } catch {
+    // exists / raced - mpv will surface a real error if binding fails
+  }
   const socketPath = join(socketDir, `probe-${process.pid}-${Date.now()}.sock`);
   try {
     rmSync(socketPath, { force: true });
@@ -336,19 +364,38 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
     }
   };
   let spawnError: Error | null = null;
+  let earlyExit: string | null = null;
   spawned.child.once('error', (err) => {
     spawnError = err;
   });
+  spawned.child.once('exit', (code, signal) => {
+    earlyExit = `code=${code ?? 'null'} signal=${signal ?? 'null'}`;
+  });
   try {
-    await waitForSocket(socketPath, Math.min(5000, timeoutMs), () => spawnError);
+    await waitForSocket(socketPath, Math.min(5000, timeoutMs), () => {
+      if (spawnError) return spawnError;
+      if (earlyExit !== null) {
+        return new Error(`mpv 提前退出 (${earlyExit})，无法解析目标`);
+      }
+      return null;
+    });
     const ipc = new MpvIpcClient(socketPath);
     try {
-      await ipc.connect();
+      // connect() resolves on 'connect' and rejects on pre-connect socket
+      // errors; the deadline race keeps a hung accept from blocking.
+      await raceDeadline(ipc.connect(), deadline);
     } catch (err) {
+      if (err instanceof ProbeError) throw err;
       throw new ProbeError('CONNECT', err instanceof Error ? `mpv IPC 连接失败: ${err.message}` : 'mpv IPC 连接失败');
     }
+    // A dead mpv must abort the probe as UNAVAILABLE, not degrade into a
+    // "success" whose every field is unsupported (plan §10: distinguish
+    // timeout / offline / unsupported).
+    const disconnected = new Promise<never>((_, reject) => {
+      ipc.once('disconnect', () => reject(new ProbeError('UNAVAILABLE', 'mpv IPC 断开（探测进程已退出）')));
+    });
     try {
-      const versionRaw = await getPropertyAllowingFailure(ipc, 'mpv-version', deadline);
+      const versionRaw = await getPropertyAllowingFailure(ipc, 'mpv-version', deadline, [disconnected]);
       const version = typeof versionRaw === 'string' && versionRaw ? versionRaw : 'unknown';
 
       // Let the demuxer settle: duration appears once the file is parsed.
@@ -356,7 +403,7 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
       const fields = [...Object.keys(PROBE_FIELD_CANDIDATES), 'track-list'];
       const settleUntil = Date.now() + Math.min(PROBE_SETTLE_MS, Math.max(0, deadline - Date.now()));
       while (Date.now() < settleUntil) {
-        const duration = await getPropertyAllowingFailure(ipc, 'duration', deadline);
+        const duration = await getPropertyAllowingFailure(ipc, 'duration', deadline, [disconnected]);
         if (typeof duration === 'number' && duration > 0) {
           props.set('duration', duration);
           break;
@@ -368,13 +415,13 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
       for (const field of fields) {
         if (field === 'duration' && props.has('duration')) continue;
         if (field === 'track-list') {
-          const tracks = await getPropertyAllowingFailure(ipc, 'track-list', deadline);
+          const tracks = await getPropertyAllowingFailure(ipc, 'track-list', deadline, [disconnected]);
           if (tracks !== undefined) props.set('track-list', tracks);
           continue;
         }
         const candidates = PROBE_FIELD_CANDIDATES[field] ?? [];
         for (const name of candidates) {
-          const value = await getPropertyAllowingFailure(ipc, name, deadline);
+          const value = await getPropertyAllowingFailure(ipc, name, deadline, [disconnected]);
           if (value !== undefined) {
             props.set(name, value);
             break;

@@ -34,6 +34,7 @@ const PROPS_032: PropMap = {
   'video-params/w': 1920,
   'video-params/h': 1080,
   'container-fps': 23.976,
+  'video-params/aspect': 1.7778,
   'audio-codec': 'aac',
   'audio-params/channel-count': 6,
   'track-list': TRACKS_032,
@@ -47,6 +48,7 @@ const PROPS_029: PropMap = {
   width: 1280,
   height: 720,
   'container-fps': 25,
+  'video-aspect': 1.3333,
   'audio-codec': 'ac3',
   'audio-channels': 2,
   'track-list': [
@@ -165,7 +167,7 @@ describe('assembleProbeResult', () => {
     expect(result.version).toBe('0.32.0');
     expect(result.duration).toBeCloseTo(3600.5);
     expect(result.container).toBe('Matroska');
-    expect(result.video).toMatchObject({ codec: 'h264', width: 1920, height: 1080, fps: 23.976 });
+    expect(result.video).toMatchObject({ codec: 'h264', width: 1920, height: 1080, fps: 23.976, aspect: 1.7778 });
     expect(result.audio).toMatchObject({ codec: 'aac', channels: 6 });
     expect(result.tracks).toHaveLength(3);
     expect(result.tracks.find((t) => t.kind === 'subtitle')).toMatchObject({
@@ -179,7 +181,7 @@ describe('assembleProbeResult', () => {
   it('maps the 0.29 shape through the fallback names', () => {
     const props = new Map(Object.entries(PROPS_029));
     const result = assembleProbeResult('0.29.1', props);
-    expect(result.video).toMatchObject({ codec: 'mpeg4', width: 1280, height: 720, fps: 25 });
+    expect(result.video).toMatchObject({ codec: 'mpeg4', width: 1280, height: 720, fps: 25, aspect: 1.3333 });
     expect(result.audio).toMatchObject({ codec: 'ac3', channels: 2 });
     expect(result.tracks).toHaveLength(2);
     expect(result.unsupported).not.toContain('audio.channels');
@@ -271,7 +273,7 @@ describe('probe process plumbing (spawnProbeProcess)', () => {
       setTimeout(resolve, 5000);
     });
     const total = spawned.stdoutChunks.reduce((n, c) => n + c.length, 0);
-    expect(total).toBeLessThanOrEqual(PROBE_STDOUT_CAP + 65536);
+    expect(total).toBeLessThanOrEqual(PROBE_STDOUT_CAP);
     expect(total).toBeGreaterThan(0);
   });
 
