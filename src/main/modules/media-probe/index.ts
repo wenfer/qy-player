@@ -60,6 +60,7 @@ export class MediaProbeService {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlight = new Map<string, Promise<MediaProbeOutcome>>();
   private readonly pending: QueueEntry[] = [];
+  private readonly waiters = new Map<string, number>();
   private running: QueueEntry | null = null;
   private active = false;
 
@@ -98,6 +99,26 @@ export class MediaProbeService {
     this.inFlight.set(key, promise);
     this.schedule();
     return this.attachCancellation(promise, request.signal, key);
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-caller cancellation
+  //
+  // An abort must only discard the aborting caller's await. The shared
+  // flight keeps running for every other coalesced caller; the entry
+  // itself (queue slot or running flag) is torn down only when the
+  // aborting caller was the LAST waiter on that key. (A coalesced caller
+  // aborting must never hang the original waiter.)
+  // -------------------------------------------------------------------------
+
+  private addWaiter(key: string): void {
+    this.waiters.set(key, (this.waiters.get(key) ?? 0) + 1);
+  }
+
+  private removeWaiter(key: string): void {
+    const count = (this.waiters.get(key) ?? 0) - 1;
+    if (count <= 0) this.waiters.delete(key);
+    else this.waiters.set(key, count);
   }
 
   /** Drop every cache entry (tests, explicit user refresh). */
@@ -167,40 +188,44 @@ export class MediaProbeService {
     signal: AbortSignal | undefined,
     key: string
   ): Promise<MediaProbeOutcome> {
-    if (!signal) return promise;
-    if (signal.aborted) {
-      this.cancelByKey(key);
+    this.addWaiter(key);
+    if (signal?.aborted) {
+      this.abandon(key);
       return Promise.resolve(this.cancelledOutcome());
     }
     return new Promise<MediaProbeOutcome>((resolve) => {
       const onAbort = (): void => {
-        signal.removeEventListener('abort', onAbort);
-        this.cancelByKey(key);
+        signal?.removeEventListener('abort', onAbort);
+        this.abandon(key);
         resolve(this.cancelledOutcome());
       };
-      signal.addEventListener('abort', onAbort, { once: true });
+      signal?.addEventListener('abort', onAbort, { once: true });
       promise.then(
         (outcome) => {
-          signal.removeEventListener('abort', onAbort);
+          signal?.removeEventListener('abort', onAbort);
+          this.removeWaiter(key);
           resolve(outcome);
         },
         () => {
-          signal.removeEventListener('abort', onAbort);
+          signal?.removeEventListener('abort', onAbort);
+          this.removeWaiter(key);
           resolve(this.cancelledOutcome());
         }
       );
     });
   }
 
-  /** Cancel a queued entry, or flag a running one so its result is discarded. */
-  private cancelByKey(key: string): void {
+  /** One caller is gone: tear down shared state only if it was the last. */
+  private abandon(key: string): void {
+    this.removeWaiter(key);
+    if ((this.waiters.get(key) ?? 0) > 0) return; // others still waiting
     const queued = this.pending.find((candidate) => candidate.key === key);
     if (queued) {
-      queued.cancelled = true;
       this.pending.splice(this.pending.indexOf(queued), 1);
       this.inFlight.delete(key);
       return;
     }
+    // Running entry with nobody left to receive it: discard its result.
     if (this.running?.key === key) this.running.cancelled = true;
   }
 

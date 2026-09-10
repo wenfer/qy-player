@@ -308,6 +308,49 @@ describe('MediaProbeService queue and cancellation', () => {
     expect(service.size).toBe(0);
   });
 
+  it('a coalesced caller aborting never hangs the original waiter (CRITICAL regression)', async () => {
+    const runner = manualRunner();
+    const service = new MediaProbeService({ runner: { spikeFn: runner.spikeFn } });
+    const controller = new AbortController();
+    const initiator = service.probe({ target: '/a.mkv', fingerprint: 'f1' });
+    const coalesced = service.probe({
+      target: '/a.mkv',
+      fingerprint: 'f1',
+      signal: controller.signal,
+    });
+    expect(runner.pending()).toBe(1); // one shared flight
+    controller.abort(); // only the coalesced caller leaves
+    expect((await coalesced).status).toBe('cancelled');
+    // The initiator still receives the real result; the flight completes
+    // and the outcome is cached for future callers.
+    runner.settle(0, OK_RESULT());
+    const outcome = await initiator;
+    expect(outcome.status).toBe('ok');
+    expect(outcome.fromCache).toBe(false);
+    expect(service.size).toBe(1);
+  });
+
+  it('a coalesced caller aborting a queued entry keeps it queued for the waiter', async () => {
+    const runner = manualRunner();
+    const service = new MediaProbeService({ runner: { spikeFn: runner.spikeFn } });
+    const controller = new AbortController();
+    const initiator = service.probe({ target: '/1.mkv', fingerprint: 'f' }); // running
+    const waiter = service.probe({ target: '/2.mkv', fingerprint: 'f' }); // queued
+    const coalesced = service.probe({
+      target: '/2.mkv',
+      fingerprint: 'f',
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect((await coalesced).status).toBe('cancelled');
+    runner.settle(0, OK_RESULT());
+    await initiator;
+    await drain();
+    expect(runner.pending()).toBe(1); // /2.mkv still runs for `waiter`
+    runner.settle(1, OK_RESULT());
+    expect((await waiter).status).toBe('ok');
+  });
+
   it('passes the fingerprint through to every outcome', async () => {
     const runner = manualRunner();
     const service = new MediaProbeService({ runner: { spikeFn: runner.spikeFn } });
