@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import Detail from './pages/Detail';
 import Settings from './pages/Settings';
+import MediaSources from './pages/MediaSources';
 import Search from './pages/Search';
 import Local from './pages/Local';
 import LibraryBrowse from './pages/LibraryBrowse';
@@ -26,6 +27,7 @@ function App() {
             <Route path="/browse/:sourceId" element={<LibraryBrowse />} />
             <Route path="/browse/:sourceId/item/:itemId" element={<LibraryBrowse />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/media-sources" element={<MediaSources />} />
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />
             <Route path="/history" element={<History />} />

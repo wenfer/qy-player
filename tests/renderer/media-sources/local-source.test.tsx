@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Settings from '../../../src/renderer/pages/Settings';
-import SourceForm from '../../../src/renderer/pages/Settings/SourceForm';
+import { MemoryRouter } from 'react-router-dom';
+import MediaSources from '../../../src/renderer/pages/MediaSources';
+import SourceForm from '../../../src/renderer/pages/MediaSources/SourceForm';
 
 const listSources = vi.fn();
 const saveSource = vi.fn();
@@ -122,7 +123,7 @@ describe('Settings page sources section', () => {
         lastRun: { status: 'completed', processed: 12, total: 12, at: Date.now() },
       },
     ]);
-    render(<Settings />);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
 
     await waitFor(() => expect(screen.getByText('电影收藏')).toBeTruthy());
     expect(screen.getByText(/完成，共 12 项/)).toBeTruthy();
@@ -143,7 +144,7 @@ describe('Settings page sources section', () => {
         hasCredential: false,
       },
     ]);
-    render(<Settings />);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('剧集库')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /扫描 剧集库/ }));
@@ -168,7 +169,7 @@ describe('Settings page sources section', () => {
         hasCredential: false,
       },
     ]);
-    render(<Settings />);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('电影')).toBeTruthy());
 
     emitScanEvent({ sourceId: 3, runId: 1, state: 'completed', processed: 7, total: 7, at: Date.now() });
@@ -187,7 +188,7 @@ describe('Settings page sources section', () => {
         hasCredential: false,
       },
     ]);
-    render(<Settings />);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('旧库')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /移除 旧库（不删除文件）/ }));

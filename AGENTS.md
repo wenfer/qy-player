@@ -75,6 +75,7 @@
 - 保留 upsert 模式：`watch_history`/`playback_progress` 都按业务键 ON CONFLICT 更新，写入时用 `COALESCE(excluded.x, x)` 防止 null 抹掉旧值
 
 ### UI 约定（用户偏好，勿回退）
+- **设置页仅软件配置**（服务器、快捷键等）；媒体来源（本地目录/WebDAV）在独立「媒体库」页面（`/media-sources`）管理，勿合并回去
 - **拒绝横向滚动条**：超宽内容一律换行（`flex-wrap` / grid），用户明确反对横向拖动
 - Tailwind + 深色主题语义 token（`bg-card`/`border-border`/`text-muted-foreground`/`focus-ring`）
 - 异步操作必须有 Toast 反馈（`stores/toast-store`）；列表操作用乐观更新 + 失败回滚

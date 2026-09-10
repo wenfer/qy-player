@@ -1,9 +1,10 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, FolderOpen, Search, Settings, History, Keyboard } from 'lucide-react';
+import { Home, FolderOpen, Library, Search, Settings, History, Keyboard } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: '首页', icon: Home },
   { path: '/local', label: '本地', icon: FolderOpen },
+  { path: '/media-sources', label: '媒体库', icon: Library },
   { path: '/history', label: '历史', icon: History },
   { path: '/shortcuts', label: '快捷键', icon: Keyboard },
   { path: '/search', label: '搜索', icon: Search },

@@ -389,6 +389,15 @@ Evidence:
 - [ ] Nextcloud、Apache WebDAV 和目标 NAS/Alist 至少完成兼容矩阵；不兼容项有记录。
 - [ ] 断网、取消、401/403、Range 不支持均有证据。
 
+## 用户追加任务（计划外，待追认）
+
+### U-001 设置页与媒体库页面分离
+
+- [x] **背景：** 用户反馈找不到 WebDAV 配置入口，且要求设置页仅保留软件配置。
+- [x] **改动：** 来源管理（本地+WebDAV 的 SourceForm/SourceList/WebDavFields）从 Settings 整体迁移到新页面 `pages/MediaSources`（路由 `/media-sources`，导航「媒体库」）；Settings 只留媒体服务器等软件配置并加指引文案；AGENTS.md UI 约定补此偏好。
+- [x] **Evidence：** `npm test -- --run`（27 文件 317 测试通过，来源测试迁至 tests/renderer/media-sources/ 并改挂新页面）；`npm run typecheck` 零错误；`git diff --check`
+- [x] **Result:** 通过
+
 ## Phase D：详情、技术信息与媒体操作
 
 ### QYP2-016 交付 WebDAV 播放与 seek 体验

@@ -2,8 +2,8 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Settings from '../../../src/renderer/pages/Settings';
-import SourceForm from '../../../src/renderer/pages/Settings/SourceForm';
+import MediaSources from '../../../src/renderer/pages/MediaSources';
+import SourceForm from '../../../src/renderer/pages/MediaSources/SourceForm';
 
 const saveSource = vi.fn();
 const testSource = vi.fn();
@@ -187,7 +187,7 @@ describe('Settings page: WebDAV source rows', () => {
     ]);
     render(
       <MemoryRouter>
-        <Settings />
+        <MediaSources />
       </MemoryRouter>
     );
     await waitFor(() => expect(screen.getByText('家庭云盘')).toBeTruthy());
@@ -205,10 +205,10 @@ describe('Settings page: WebDAV source rows', () => {
   it('saves through the page handler and refreshes the list', async () => {
     render(
       <MemoryRouter>
-        <Settings />
+        <MediaSources />
       </MemoryRouter>
     );
-    const sourcesSection = await screen.findByRole('region', { name: '本地媒体来源' });
+    const sourcesSection = await screen.findByRole('region', { name: '媒体来源' });
     const addButton = sourcesSection.querySelector('button.bg-primary') as HTMLButtonElement;
     expect(addButton).toBeTruthy();
     fireEvent.click(addButton);
