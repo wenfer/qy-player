@@ -467,13 +467,18 @@ Evidence:
 
 ### QYP2-020 实现字幕导入与持久关联
 
-- [ ] **依赖：** QYP2-003、QYP2-015
-- [ ] **Read first：** `src/main/modules/subtitle-engine/scanner.ts`、本文第 13 节
-- [ ] **允许修改：** `src/main/modules/media-operations/subtitle-service.ts`、`src/main/modules/subtitle-engine/scanner.ts`、`src/main/modules/catalog/repository.ts`、`src/main/ipc/index.ts`、`tests/main/subtitles/subtitle-attachment.test.ts`
-- [ ] **目标：** 导入 SRT/ASS/SSA/SUB/VTT 到受管目录，保存语言/格式/默认/状态。
-- [ ] **验收：** 单文件 ≤20 MiB；临时文件+原子 rename；文件名不可逃逸；移除关联不触碰原文件；失败无孤儿记录。
-- [ ] **验证：** 成功/超限/非法扩展名/复制失败/重启恢复测试。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-003、QYP2-015
+- [x] **Read first：** `src/main/modules/subtitle-engine/scanner.ts`、本文第 13 节
+- [x] **允许修改：** `src/main/modules/media-operations/subtitle-service.ts`、`src/main/modules/subtitle-engine/scanner.ts`、`src/main/modules/catalog/repository.ts`、`src/main/ipc/index.ts`、`tests/main/subtitles/subtitle-attachment.test.ts`
+- [x] **目标：** 导入 SRT/ASS/SSA/SUB/VTT 到受管目录，保存语言/格式/默认/状态。
+- [x] **验收：** 单文件 ≤20 MiB；临时文件+原子 rename；文件名不可逃逸；移除关联不触碰原文件；失败无孤儿记录。
+- [x] **验证：** 成功/超限/非法扩展名/复制失败/重启恢复测试。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（29 文件 342 测试通过，本任务 19 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 实现：受管目录 `<userData>/subtitles/<itemId>/`，文件名全受控（`sub-*`/`.tmp-` + UUID + 受验证扩展名，源文件名零参与→不可逃逸）；copy→temp→同文件系统原子 rename→DB 行，insert 失败删文件、copy 失败删 temp（双向无孤儿）；20 MiB 限额（校验后 copy 再复查，TOCTOU 闭合）；SUBTITLES.PICK_FILE/IMPORT/LIST/REMOVE/SET_DEFAULT 成套；list() 存在性清扫双向（missing↔ok，corrupt 不动）；启动清理 .tmp- + 对账 DB 清孤儿 sub-*；remove() imported 删受管副本、sidecar 只删关联（测试断言原文件 size/mtime 不变）；setDefault/import-default 单事务唯一默认
+  - Review notes: 评审 Request changes → REQUIRED 3 项全修（① insert+默认切换包进事务 insertSubtitleAsDefault，消除双默认/悬空行破口；② list 清扫改双向，missing 不再粘滞，附恢复回归测试；③ setDefaultSubtitle 包事务）；OPTIONAL 修 6（TOCTOU 复查、remove 先行后文件、language≤32/title≤200 长度帽、detectLanguage 只吃 basename、孤儿对账清扫、IO 错误固定文案不泄漏路径）；延后：IPC 返回 snake_case 与 shared SubtitleAttachmentInfo 的 camelCase mapper（QYP2-021 接线时统一）
+  - 越界（待追认）：shared/types/subtitles.ts、shared/ipc-channels.ts（SUBTITLES 组）、preload/index.ts（5 个 wrapper）——§16.6 新 IPC 成套修改的强制组成
+  - Result: 通过
 
 ### QYP2-021 接入字幕播放注入和详情 UI
 
