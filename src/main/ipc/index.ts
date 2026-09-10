@@ -16,7 +16,28 @@ import {
   sanitizeServerForRenderer,
 } from '../modules/security/secret-store';
 import type { SecretStore, StreamHeaderCache } from '../modules/security/secret-store';
+import { LocalSourceAdapter } from '../modules/library-sources/local-source';
+import type { SourceEntry } from '../modules/library-sources/types';
+import { ScanJobController } from '../modules/library-scanner/job-controller';
+import {
+  createLocalSourceFromSelection,
+  getAdapterForSource,
+  removeSource,
+} from '../modules/catalog/source-service';
+import { createCatalogRepository } from '../modules/catalog/repository';
+import type { CatalogRepository } from '../modules/catalog/repository';
+import {
+  isCreateLocalSourceInput,
+  err,
+  ok,
+} from '../../shared/types';
 import type { ServerConfig } from '../../shared/types';
+import type {
+  ActionResult,
+  ScanProgressEvent,
+  SourceCapabilities,
+  SourceListEntry,
+} from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
 
@@ -534,5 +555,207 @@ export function registerIpcHandlers(player: PlayerCore): void {
   // Cleanup on app quit
   ipcMain.handle('app:quit', () => {
     closeDatabase();
+  });
+
+  registerCatalogHandlers(db, secretStore);
+}
+
+// ---------------------------------------------------------------------------
+// Catalog sources (plan §7; QYP2-008)
+// ---------------------------------------------------------------------------
+
+const LOCAL_SOURCE_CAPABILITIES: SourceCapabilities = {
+  canSeek: true,
+  canDelete: false, // deletion arrives with the safe-delete service (QYP2-024)
+  supportsEtag: false,
+  supportsRange: true,
+};
+
+const activeScanJobs = new Map<number, ScanJobController>();
+const scanEventListeners = new Set<(event: ScanProgressEvent) => void>();
+
+function broadcastScanEvent(event: ScanProgressEvent): void {
+  for (const listener of scanEventListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      // One failing listener must not break the others.
+      console.error('[SCAN-EVENTS] 监听器异常:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+/**
+ * Minimal per-entry indexer so the 008 UI already shows real results.
+ * QYP2-009 replaces this with recursive traversal and movie/series
+ * classification; until then only root-level files are indexed.
+ */
+function createBasicScanDriver(repo: CatalogRepository, sourceId: number): {
+  index(entry: SourceEntry, signal: AbortSignal): Promise<void>;
+} {
+  return {
+    async index(entry) {
+      if (entry.isDirectory) return;
+      const title = entry.relativePath.replace(/\.[^.]+$/, '').split('/').pop() ?? entry.relativePath;
+      const itemId = repo.upsertItem({
+        sourceId,
+        sourceKey: entry.relativePath,
+        kind: 'video',
+        title,
+      });
+      repo.upsertFile({
+        sourceId,
+        itemId,
+        relativePath: entry.relativePath,
+        size: entry.size,
+        mtime: entry.mtime,
+      });
+    },
+  };
+}
+
+function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore: SecretStore): void {
+  const repo = createCatalogRepository(db);
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.PICK_DIR, async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: '选择媒体库目录',
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_LIST, () => {
+    const entries: SourceListEntry[] = repo.listSources().map((source) => {
+      const lastRun = repo.getLatestScanRun(source.id);
+      return {
+        id: source.id,
+        kind: source.kind,
+        name: source.name,
+        root: source.root,
+        readOnly: source.read_only === 1,
+        capabilities: { ...LOCAL_SOURCE_CAPABILITIES },
+        hasCredential: source.secret_ref ? secretStore.hasSecretByRef(source.secret_ref) : false,
+        ...(lastRun
+          ? {
+              lastRun: {
+                status: lastRun.status,
+                ...(lastRun.processed_count !== null ? { processed: lastRun.processed_count } : {}),
+                ...(lastRun.total_count !== null ? { total: lastRun.total_count } : {}),
+                ...(lastRun.error ? { message: lastRun.error } : {}),
+                at: (lastRun.finished_at ?? lastRun.started_at ?? 0) * 1000,
+              },
+            }
+          : {}),
+      };
+    });
+    return entries;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_TEST, async (_event, input: unknown): Promise<ActionResult<SourceCapabilities>> => {
+    if (!isCreateLocalSourceInput(input)) {
+      return err('VALIDATION_FAILED', '来源输入不合法');
+    }
+    try {
+      const root = LocalSourceAdapter.canonicalizeRoot(input.root);
+      const adapter = LocalSourceAdapter.fromSource(0, root);
+      const capabilities = await adapter.testConnection(new AbortController().signal);
+      return ok(capabilities);
+    } catch (e) {
+      return err('UNAVAILABLE', e instanceof Error ? e.message : '目录不可用', { retryable: true });
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_SAVE, (_event, input: unknown): ActionResult<{ sourceId: number; root: string; name: string }> => {
+    if (!isCreateLocalSourceInput(input)) {
+      return err('VALIDATION_FAILED', '来源输入不合法');
+    }
+    try {
+      const created = createLocalSourceFromSelection(db, input.root, { name: input.name });
+      return ok(created);
+    } catch (e) {
+      return err('VALIDATION_FAILED', e instanceof Error ? e.message : '来源创建失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_REMOVE, (_event, sourceId: number): ActionResult<true> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0) {
+      return err('VALIDATION_FAILED', '来源 ID 不合法');
+    }
+    activeScanJobs.get(sourceId)?.cancel();
+    activeScanJobs.delete(sourceId);
+    try {
+      removeSource(db, sourceId);
+      return ok(true);
+    } catch (e) {
+      return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
+    try {
+      const { adapter } = getAdapterForSource(db, sourceId);
+      const capabilities = await adapter.testConnection(new AbortController().signal);
+      return ok(capabilities.canSeek ? 'ok' : 'degraded');
+    } catch (e) {
+      return err('UNAVAILABLE', e instanceof Error ? e.message : '来源不可达', { retryable: true });
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SCAN_START, (_event, sourceId: number): ActionResult<true> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0) {
+      return err('VALIDATION_FAILED', '来源 ID 不合法');
+    }
+    if (activeScanJobs.has(sourceId)) {
+      return err('CONFLICT', '该来源已有扫描任务在运行');
+    }
+    let adapter;
+    try {
+      ({ adapter } = getAdapterForSource(db, sourceId));
+    } catch (e) {
+      return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
+    }
+    const controller = new ScanJobController({
+      repo,
+      adapter,
+      driver: createBasicScanDriver(repo, sourceId),
+      sourceId,
+      root: repo.getSource(sourceId)?.root ?? '',
+      onEvent: broadcastScanEvent,
+    });
+    activeScanJobs.set(sourceId, controller);
+    void controller
+      .start()
+      .catch((e) => {
+        console.error(`[SCAN] 来源 ${sourceId} 扫描异常:`, e instanceof Error ? e.message : e);
+      })
+      .finally(() => {
+        activeScanJobs.delete(sourceId);
+      });
+    return ok(true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SCAN_CANCEL, (_event, sourceId: number): ActionResult<true> => {
+    const job = activeScanJobs.get(sourceId);
+    if (!job) {
+      return err('NOT_FOUND', '该来源没有正在运行的扫描');
+    }
+    job.cancel();
+    return ok(true);
+  });
+
+  // Push channel: renderers subscribe through preload (single dispatcher per
+  // sender) and receive ScanProgressEvent payloads (<= 4Hz by controller).
+  ipcMain.on(IPC_CHANNELS.CATALOG.SCAN_EVENTS, (event) => {
+    const push = (e: ScanProgressEvent): void => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC_CHANNELS.CATALOG.SCAN_EVENTS, e);
+      }
+    };
+    scanEventListeners.add(push);
+    event.sender.once('destroyed', () => {
+      scanEventListeners.delete(push);
+    });
   });
 }

@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import type { MediaContext } from '../shared/types';
 
+// Subscribers for the catalog scan progress push channel (see onScanProgress).
+const scanProgressCallbacks = new Set<(event: unknown) => void>();
+
 // Forward renderer console to main process for debugging
 ['log', 'warn', 'error', 'info'].forEach((level) => {
   const original = (console as unknown as Record<string, (...args: unknown[]) => void>)[level];
@@ -48,6 +51,38 @@ const electronAPI = {
   // Library
   openFile: () => ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.OPEN_FILE),
   openFolder: () => ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.OPEN_FOLDER),
+
+  // Catalog sources (QYP2-008)
+  pickDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.PICK_DIR),
+  listSources: () => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_LIST),
+  testSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_TEST, input),
+  saveSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SAVE, input),
+  removeSource: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_REMOVE, sourceId),
+  sourceHealth: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, sourceId),
+  startScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_START, sourceId),
+  cancelScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_CANCEL, sourceId),
+  onScanProgress: (callback: (event: unknown) => void) => {
+    // Single dispatcher: multiple renderer subscribers share one IPC listener.
+    const callbacks = scanProgressCallbacks;
+    callbacks.add(callback);
+    if (callbacks.size === 1) {
+      ipcRenderer.on(IPC_CHANNELS.CATALOG.SCAN_EVENTS, (_event, payload: unknown) => {
+        for (const cb of [...callbacks]) {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[SCAN-EVENTS] 订阅者异常:', err);
+          }
+        }
+      });
+    }
+    return () => {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) {
+        ipcRenderer.removeAllListeners(IPC_CHANNELS.CATALOG.SCAN_EVENTS);
+      }
+    };
+  },
   getRecentlyPlayed: (limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.GET_RECENTLY_PLAYED, limit),
   clearHistory: () => ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.CLEAR_HISTORY),

@@ -440,6 +440,13 @@ export function createCatalogRepository(db: Database.Database) {
       return db.prepare('SELECT * FROM scan_runs WHERE id = ?').get(id) as ScanRunRow | undefined;
     },
 
+    /** Most recent run of a source (for list views); undefined when never scanned. */
+    getLatestScanRun(sourceId: number): ScanRunRow | undefined {
+      return db
+        .prepare('SELECT * FROM scan_runs WHERE source_id = ? ORDER BY id DESC LIMIT 1')
+        .get(sourceId) as ScanRunRow | undefined;
+    },
+
     /** Startup recovery: anything non-terminal becomes interrupted (plan §6.1). */
     recoverInterruptedScanRuns(): number {
       const result = db

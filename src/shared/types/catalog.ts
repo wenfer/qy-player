@@ -128,6 +128,36 @@ export interface ScanProgressEvent {
   at: number;
 }
 
+/** Renderer-supplied input for creating a local source (plan §7). */
+export interface CreateLocalSourceInput {
+  kind: 'local';
+  /** Directory path from the Electron picker; canonicalized main-side. */
+  root: string;
+  name?: string;
+}
+
+export function isCreateLocalSourceInput(value: unknown): value is CreateLocalSourceInput {
+  if (typeof value !== 'object' || value === null) return false;
+  const input = value as Record<string, unknown>;
+  if (input.kind !== 'local') return false;
+  if (typeof input.root !== 'string' || input.root.length === 0) return false;
+  if (input.name !== undefined && typeof input.name !== 'string') return false;
+  return true;
+}
+
+/** Last known scan state for a source, for lists that must not re-query. */
+export interface SourceListEntry extends SourceSummary {
+  lastRun?: {
+    status: ScanState;
+    processed?: number;
+    total?: number;
+    /** Sanitized failure message for failed runs. */
+    message?: string;
+    /** Unix timestamp in milliseconds. */
+    at: number;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Pagination (runtime-checked contract)
 // ---------------------------------------------------------------------------

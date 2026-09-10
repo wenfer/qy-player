@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Server } from 'lucide-react';
+import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Server, HardDrive, RefreshCw, X, Loader2 } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import ServerForm, { ServerForm as ServerFormValues } from './ServerForm';
+import SourceForm from './SourceForm';
+import type { SourceListEntry, ScanProgressEvent } from '../../../shared/types';
 
 interface AuthResult {
   ok: boolean;
@@ -38,6 +40,13 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<ServerFormValues>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceListEntry[]>([]);
+  const [showSourceForm, setShowSourceForm] = useState(false);
+  const [savingSource, setSavingSource] = useState(false);
+  const [testingSource, setTestingSource] = useState(false);
+  const [sourceFormError, setSourceFormError] = useState<string | null>(null);
+  const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
+  const [liveProgress, setLiveProgress] = useState<Record<number, ScanProgressEvent>>({});
   const addToast = useToastStore((s) => s.addToast);
 
   const loadServers = useCallback(async () => {
@@ -52,6 +61,130 @@ export default function Settings() {
   useEffect(() => {
     loadServers();
   }, [loadServers]);
+
+  // ---- Local media sources (QYP2-008) ----
+  const loadSources = useCallback(async () => {
+    try {
+      const data = await window.electronAPI.listSources();
+      setSources(data as SourceListEntry[]);
+    } catch {
+      addToast('加载媒体来源失败', 'error');
+    }
+  }, [addToast]);
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  // Scan progress push: refresh the list on events (<= 4Hz) and turn
+  // terminal states into toasts.
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onScanProgress((event) => {
+      const e = event as ScanProgressEvent;
+      setLiveProgress((prev) => ({ ...prev, [e.sourceId]: e }));
+      if (e.state === 'completed' || e.state === 'cancelled' || e.state === 'failed' || e.state === 'interrupted') {
+        setScanningIds((prev) => {
+          const next = new Set(prev);
+          next.delete(e.sourceId);
+          return next;
+        });
+        if (e.state === 'completed') addToast('扫描完成', 'success');
+        else if (e.state === 'failed') addToast(`扫描失败${e.message ? `：${e.message}` : ''}`, 'error');
+        else addToast('扫描已停止', 'info');
+        loadSources();
+      }
+    });
+    return unsubscribe;
+  }, [addToast, loadSources]);
+
+  const handleSourceTest = useCallback(
+    async (values: { root: string }): Promise<{ ok: boolean; error?: string } | null> => {
+      setTestingSource(true);
+      try {
+        const res = (await window.electronAPI.testSource({ kind: 'local', root: values.root })) as {
+          ok: boolean;
+          data?: unknown;
+          error?: { message: string };
+        };
+        return res.ok ? { ok: true } : { ok: false, error: res.error?.message ?? '目录不可用' };
+      } catch {
+        return { ok: false, error: '测试请求失败' };
+      } finally {
+        setTestingSource(false);
+      }
+    },
+    []
+  );
+
+  const handleSourceSave = useCallback(
+    async (values: { root: string; name: string }): Promise<boolean> => {
+      if (!values.root) {
+        setSourceFormError('请先选择目录');
+        return false;
+      }
+      setSavingSource(true);
+      setSourceFormError(null);
+      try {
+        const res = (await window.electronAPI.saveSource({
+          kind: 'local',
+          root: values.root,
+          name: values.name || undefined,
+        })) as { ok: boolean; data?: { sourceId: number }; error?: { message: string } };
+        if (res.ok) {
+          addToast('来源已添加', 'success');
+          await loadSources();
+          return true;
+        }
+        setSourceFormError(res.error?.message ?? '添加失败');
+        return false;
+      } catch {
+        setSourceFormError('添加失败');
+        return false;
+      } finally {
+        setSavingSource(false);
+      }
+    },
+    [addToast, loadSources]
+  );
+
+  const handleSourceRemove = useCallback(
+    async (source: SourceListEntry) => {
+      const confirmed = window.confirm(
+        `仅移除「${source.name}」的索引记录，不会删除磁盘上的媒体文件。确定移除？`
+      );
+      if (!confirmed) return;
+      const res = (await window.electronAPI.removeSource(source.id)) as {
+        ok: boolean;
+        error?: { message: string };
+      };
+      if (res.ok) {
+        addToast('来源已移除（媒体文件未受影响）', 'success');
+        await loadSources();
+      } else {
+        addToast(res.error?.message ?? '移除失败', 'error');
+      }
+    },
+    [addToast, loadSources]
+  );
+
+  const handleScanToggle = useCallback(
+    async (source: SourceListEntry) => {
+      if (scanningIds.has(source.id)) {
+        const res = (await window.electronAPI.cancelScan(source.id)) as { ok: boolean; error?: { message: string } };
+        if (!res.ok) addToast(res.error?.message ?? '取消失败', 'error');
+        return;
+      }
+      const res = (await window.electronAPI.startScan(source.id)) as { ok: boolean; error?: { message: string } };
+      if (res.ok) {
+        setScanningIds((prev) => new Set(prev).add(source.id));
+        addToast('扫描已开始', 'info');
+        loadSources();
+      } else {
+        addToast(res.error?.message ?? '扫描启动失败', 'error');
+      }
+    },
+    [scanningIds, addToast, loadSources]
+  );
 
   const resetForm = useCallback(() => {
     setForm(EMPTY_FORM);
@@ -181,6 +314,119 @@ export default function Settings() {
   return (
     <div className="p-8 max-w-2xl">
       <h1 className="text-2xl font-bold tracking-tight mb-8">设置</h1>
+
+      {/* Local media sources */}
+      <section className="mb-10" aria-label="本地媒体来源">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <HardDrive size={14} />
+            本地媒体来源
+          </h2>
+          <button
+            onClick={() => setShowSourceForm((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium focus-ring"
+          >
+            <Plus size={14} />
+            {showSourceForm ? '取消' : '添加'}
+          </button>
+        </div>
+
+        {showSourceForm && (
+          <SourceForm
+            saving={savingSource}
+            testing={testingSource}
+            formError={sourceFormError}
+            onChange={() => undefined}
+            onPick={() => window.electronAPI.pickDirectory()}
+            onTest={handleSourceTest}
+            onSave={handleSourceSave}
+            onCancel={() => {
+              setShowSourceForm(false);
+              setSourceFormError(null);
+            }}
+          />
+        )}
+
+        <div className="space-y-2">
+          {sources.map((source) => {
+            // Live push events win over the persisted last run while scanning.
+            const live = liveProgress[source.id];
+            const progress = live
+              ? { status: live.state, processed: live.processed, total: live.total, message: live.message }
+              : source.lastRun;
+            const scanning =
+              scanningIds.has(source.id) ||
+              progress?.status === 'queued' ||
+              progress?.status === 'discovering' ||
+              progress?.status === 'indexing' ||
+              progress?.status === 'enriching';
+            return (
+              <div
+                key={source.id}
+                className="p-4 bg-card border border-border rounded-xl"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{source.name}</span>
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground text-[10px] font-medium">
+                        本地
+                      </span>
+                      {source.readOnly && (
+                        <span className="text-[10px] text-muted-foreground">只读</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate" title={source.root}>
+                      {source.root}
+                    </div>
+                    {scanning ? (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1" aria-live="polite">
+                        <Loader2 size={12} className="animate-spin" />
+                        扫描中
+                        {progress?.total ? `（${progress.processed ?? 0}/${progress.total}）` : ''}
+                      </div>
+                    ) : progress ? (
+                      <div className="text-[11px] text-muted-foreground mt-1">
+                        上次扫描：
+                        {progress.status === 'completed'
+                          ? `完成，共 ${progress.processed ?? 0} 项`
+                          : progress.status === 'failed'
+                            ? `失败${progress.message ? `：${progress.message}` : ''}`
+                            : progress.status}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground mt-1">尚未扫描</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => handleScanToggle(source)}
+                      className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
+                      aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
+                      title={scanning ? '取消扫描' : '扫描'}
+                    >
+                      {scanning ? <X size={15} /> : <RefreshCw size={15} />}
+                    </button>
+                    <button
+                      onClick={() => handleSourceRemove(source)}
+                      className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
+                      aria-label={`移除 ${source.name}（不删除文件）`}
+                      title="移除（不删除文件）"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {sources.length === 0 && !showSourceForm && (
+            <div className="text-center py-10 text-muted-foreground text-sm">
+              暂无本地来源，点击上方「添加」按钮选择目录
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Servers Section */}
       <section className="mb-10">

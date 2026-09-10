@@ -45,6 +45,7 @@ export const IPC_CHANNELS = {
   // Phase 2 unified catalog domain (handlers land in QYP2-008+; the channel
   // names are part of the QYP2-002 contract and must not be renamed).
   CATALOG: {
+    PICK_DIR: 'catalog:pick-dir',
     SOURCE_LIST: 'catalog:source-list',
     SOURCE_TEST: 'catalog:source-test',
     SOURCE_SAVE: 'catalog:source-save',
