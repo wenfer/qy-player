@@ -807,16 +807,16 @@ function registerCatalogHandlers(
   // (plan §13). Interrupted imports leave .tmp- files; sweep them once at
   // startup (restart recovery, QYP2-020).
   const subtitleManagedRoot = join(app.getPath('userData'), 'subtitles');
-  try {
-    cleanupTempFiles(subtitleManagedRoot);
-  } catch {
-    // best effort; the next startup retries
-  }
   const subtitleService = new SubtitleService({
     repo: catalogRepo,
     managedRoot: subtitleManagedRoot,
   });
-  const repo = createCatalogRepository(db);
+  try {
+    cleanupTempFiles(subtitleManagedRoot, new Set(catalogRepo.listAllSubtitlePaths()));
+  } catch {
+    // best effort; the next startup retries
+  }
+  const repo = catalogRepo;
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.PICK_DIR, async () => {
     const { dialog } = await import('electron');

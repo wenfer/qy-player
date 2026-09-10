@@ -284,6 +284,35 @@ export function createCatalogRepository(db: Database.Database) {
       return { id: Number(result.lastInsertRowid) };
     },
 
+    /**
+     * Insert + default-switch in one transaction (QYP2-020 review): a
+     * plain insert followed by a separate clear could leave two defaults
+     * or an orphan file if interrupted.
+     */
+    insertSubtitleAsDefault(row: {
+      item_id: number;
+      managed_path: string;
+      language: string | null;
+      title: string | null;
+      format: string;
+      origin: 'sidecar' | 'imported';
+    }): { id: number } {
+      const insert = db.prepare(
+        `INSERT INTO catalog_subtitles (item_id, managed_path, language, title, format, origin, is_default, status)
+         VALUES (?, ?, ?, ?, ?, ?, 1, 'ok')`
+      );
+      const clearOthers = db.prepare(
+        'UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ? AND id != ?'
+      );
+      const tx = db.transaction((r: typeof row): { id: number } => {
+        const result = insert.run(r.item_id, r.managed_path, r.language, r.title, r.format, r.origin);
+        const id = Number(result.lastInsertRowid);
+        clearOthers.run(r.item_id, id);
+        return { id };
+      });
+      return tx(row);
+    },
+
     listSubtitlesByItem(itemId: number): CatalogSubtitleRow[] {
       return db
         .prepare('SELECT * FROM catalog_subtitles WHERE item_id = ? ORDER BY is_default DESC, id')
@@ -309,10 +338,23 @@ export function createCatalogRepository(db: Database.Database) {
       }
     },
 
-    /** Promote one row to default and demote the rest (two statements). */
+    /** Promote one row to default and demote the rest (atomic). */
     setDefaultSubtitle(itemId: number, rowId: number): void {
-      db.prepare('UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ?').run(itemId);
-      db.prepare('UPDATE catalog_subtitles SET is_default = 1 WHERE item_id = ? AND id = ?').run(itemId, rowId);
+      const demote = db.prepare('UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ?');
+      const promote = db.prepare('UPDATE catalog_subtitles SET is_default = 1 WHERE item_id = ? AND id = ?');
+      db.transaction(() => {
+        demote.run(itemId);
+        promote.run(itemId, rowId);
+      })();
+    },
+
+    /** Every subtitle path in the DB (for orphan sweeps across items). */
+    listAllSubtitlePaths(): string[] {
+      return (
+        db.prepare('SELECT managed_path FROM catalog_subtitles') as { all(): Array<{ managed_path: string }> }
+      )
+        .all()
+        .map((r) => r.managed_path);
     },
 
     updateSubtitleStatus(itemId: number, rowId: number, status: 'ok' | 'missing' | 'corrupt'): void {

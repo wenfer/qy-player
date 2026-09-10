@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -67,7 +67,7 @@ describe('subtitle import (QYP2-020)', () => {
     expect(existsSync(row.managed_path)).toBe(true);
     expect(readFileSync(row.managed_path, 'utf8')).toBe('字幕内容');
     // No temp files left behind.
-    const dirFiles = require('fs').readdirSync(join(managedRoot, String(itemId))) as string[];
+    const dirFiles = readdirSync(join(managedRoot, String(itemId)));
     expect(dirFiles.every((f) => !f.startsWith('.tmp-'))).toBe(true);
     // Source file untouched.
     expect(existsSync(src)).toBe(true);
@@ -131,15 +131,33 @@ describe('subtitle import (QYP2-020)', () => {
     if (result.ok) expect(result.data.language).toBe('zh-TW');
   });
 
-  it('cleanupTempFiles removes leftovers from interrupted imports', () => {
+  it('cleanupTempFiles removes temp leftovers and DB-orphaned finals, keeps known files', () => {
     const dir = join(managedRoot, String(itemId));
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '.tmp-aborted.srt'), 'partial');
-    writeFileSync(join(dir, 'sub-real.srt'), 'final');
-    const removed = cleanupTempFiles(managedRoot);
-    expect(removed).toBe(1);
+    writeFileSync(join(dir, 'sub-known.srt'), 'final');
+    writeFileSync(join(dir, 'sub-orphan.srt'), 'no-row');
+    const known = new Set([join(dir, 'sub-known.srt')]);
+    const removed = cleanupTempFiles(managedRoot, known);
+    expect(removed).toBe(2);
     expect(existsSync(join(dir, '.tmp-aborted.srt'))).toBe(false);
-    expect(existsSync(join(dir, 'sub-real.srt'))).toBe(true);
+    expect(existsSync(join(dir, 'sub-orphan.srt'))).toBe(false);
+    expect(existsSync(join(dir, 'sub-known.srt'))).toBe(true);
+  });
+
+  it('list sweep restores missing→ok when the file comes back', () => {
+    const imported = service.import({ itemId, sourcePath: makeSubtitleFile('a.srt') });
+    if (!imported.ok) throw new Error('import failed');
+    const path = imported.data.managed_path;
+    rmSync(path, { force: true });
+    let listed = service.list(itemId);
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.data[0].status).toBe('missing');
+    // File restored (e.g. volume remount): status flips back.
+    writeFileSync(path, '字幕内容');
+    listed = service.list(itemId);
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.data[0].status).toBe('ok');
   });
 });
 

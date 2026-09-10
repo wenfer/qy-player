@@ -1,6 +1,7 @@
 import { extname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
+import { basename } from 'path';
 import { detectLanguage } from '../subtitle-engine/lang-map';
 import { isSupportedSubtitleExt } from '../subtitle-engine/scanner';
 
@@ -70,6 +71,15 @@ export interface SubtitleRepo {
   deleteSubtitle(itemId: number, rowId: number): void;
   clearDefaultSubtitles(itemId: number, exceptId?: number): void;
   setDefaultSubtitle(itemId: number, rowId: number): void;
+  insertSubtitleAsDefault(row: {
+    item_id: number;
+    managed_path: string;
+    language: string | null;
+    title: string | null;
+    format: string;
+    origin: 'sidecar' | 'imported';
+  }): { id: number };
+  listAllSubtitlePaths(): string[];
   updateSubtitleStatus(itemId: number, rowId: number, status: 'ok' | 'missing' | 'corrupt'): void;
 }
 
@@ -103,8 +113,10 @@ export function validateSubtitleSource(sourcePath: string, maxBytes: number): { 
   return null;
 }
 
-/** Remove leftover temp files from interrupted imports (startup recovery). */
-export function cleanupTempFiles(managedRoot: string): number {
+/** Startup recovery: sweep temp files AND final files the DB lost track
+ * of (crash between rename and insert). `knownPaths` = all managed_path
+ * values still referenced by catalog_subtitles. */
+export function cleanupTempFiles(managedRoot: string, knownPaths: Set<string> = new Set()): number {
   if (!existsSync(managedRoot)) return 0;
   let removed = 0;
   for (const entry of readdirSync(managedRoot)) {
@@ -115,9 +127,12 @@ export function cleanupTempFiles(managedRoot: string): number {
       continue;
     }
     for (const file of readdirSync(dir)) {
-      if (!file.startsWith(TEMP_PREFIX)) continue;
+      const isTemp = file.startsWith(TEMP_PREFIX);
+      const fullPath = join(dir, file);
+      const isOrphan = !isTemp && !knownPaths.has(fullPath);
+      if (!isTemp && !isOrphan) continue;
       try {
-        rmSync(join(dir, file), { force: true });
+        rmSync(fullPath, { force: true });
         removed += 1;
       } catch {
         // best effort; the next startup retries
@@ -162,8 +177,8 @@ export class SubtitleService {
     const dir = this.itemDir(input.itemId);
     try {
       mkdirSync(dir, { recursive: true });
-    } catch (err) {
-      return { ok: false, error: { code: 'IO_ERROR', message: err instanceof Error ? err.message : '创建字幕目录失败' } };
+    } catch {
+      return { ok: false, error: { code: 'IO_ERROR', message: '创建字幕目录失败' } };
     }
 
     // Opaque managed name: only the validated extension survives from the
@@ -175,54 +190,70 @@ export class SubtitleService {
 
     try {
       copyFileSync(input.sourcePath, tempPath);
+      // TOCTOU re-check: the source may have grown past the cap between
+      // validation and copy; the managed copy is what actually lands.
+      if (statSync(tempPath).size > this.maxBytes) {
+        rmSync(tempPath, { force: true });
+        return { ok: false, error: { code: 'TOO_LARGE', message: `字幕文件超过 ${Math.round(this.maxBytes / 1024 / 1024)} MiB 上限` } };
+      }
       // Atomic within the same filesystem; a crash mid-copy leaves only a
       // .tmp- file that cleanupTempFiles removes on the next startup.
       renameAtomic(tempPath, finalPath);
-    } catch (err) {
+    } catch {
       try {
         rmSync(tempPath, { force: true });
       } catch {
         // nothing to clean
       }
-      return { ok: false, error: { code: 'IO_ERROR', message: err instanceof Error ? err.message : '字幕复制失败' } };
+      return { ok: false, error: { code: 'IO_ERROR', message: '字幕复制失败' } };
     }
 
-    const language = input.language?.trim() || detectLanguage(input.sourcePath).code || null;
+    // Length caps keep arbitrary renderer input out of the DB/UI.
+    const language = (input.language?.trim() || detectLanguage(basename(input.sourcePath)).code || '').slice(0, 32) || null;
+    const title = input.title?.trim().slice(0, 200) || null;
     try {
-      const row = this.repo.insertSubtitle({
-        item_id: input.itemId,
-        managed_path: finalPath,
-        language: language || null,
-        title: input.title?.trim() || null,
-        format: ext.slice(1),
-        origin: 'imported',
-        is_default: input.isDefault ? 1 : 0,
-      });
-      if (input.isDefault) {
-        this.repo.clearDefaultSubtitles(input.itemId, row.id);
-      }
+      // insert + default switch are one transaction: no two-defaults or
+      // orphan-file states even if interrupted.
+      const row = input.isDefault
+        ? this.repo.insertSubtitleAsDefault({
+            item_id: input.itemId,
+            managed_path: finalPath,
+            language,
+            title,
+            format: ext.slice(1),
+            origin: 'imported',
+          })
+        : this.repo.insertSubtitle({
+            item_id: input.itemId,
+            managed_path: finalPath,
+            language,
+            title,
+            format: ext.slice(1),
+            origin: 'imported',
+            is_default: 0,
+          });
       return {
         ok: true,
         data: {
           id: row.id,
           item_id: input.itemId,
           managed_path: finalPath,
-          language: language || null,
-          title: input.title?.trim() || null,
+          language,
+          title,
           format: ext.slice(1),
           origin: 'imported',
           is_default: input.isDefault ? 1 : 0,
           status: 'ok',
         },
       };
-    } catch (err) {
+    } catch {
       // No orphan files: the row failed, so the managed copy must go.
       try {
         rmSync(finalPath, { force: true });
       } catch {
         // best effort
       }
-      return { ok: false, error: { code: 'IO_ERROR', message: err instanceof Error ? err.message : '字幕记录写入失败' } };
+      return { ok: false, error: { code: 'IO_ERROR', message: '字幕记录写入失败' } };
     }
   }
 
@@ -240,8 +271,12 @@ export class SubtitleService {
     }
     for (const row of this.repo.listSubtitlesByItem(itemId)) {
       const exists = existsSync(row.managed_path);
+      // Bidirectional sweep: missing must not stick when the file comes
+      // back (volume remounted, manual restore); corrupt stays untouched.
       if (!exists && row.status !== 'missing') {
         this.repo.updateSubtitleStatus(itemId, row.id, 'missing');
+      } else if (exists && row.status === 'missing') {
+        this.repo.updateSubtitleStatus(itemId, row.id, 'ok');
       }
     }
     return { ok: true, data: this.repo.listSubtitlesByItem(itemId) };
@@ -256,16 +291,18 @@ export class SubtitleService {
     if (!row) {
       return { ok: false, error: { code: 'ITEM_NOT_FOUND', message: '字幕关联不存在' } };
     }
+    this.repo.deleteSubtitle(itemId, rowId);
     // Imported rows own their managed copy; sidecar rows reference files
-    // outside our control and must never be deleted.
+    // outside our control and must never be deleted. Row goes first: a
+    // file-delete failure then self-heals via the list() sweep instead of
+    // leaving a dangling row.
     if (row.origin === 'imported' && existsSync(row.managed_path)) {
       try {
         rmSync(row.managed_path, { force: true });
-      } catch (err) {
-        return { ok: false, error: { code: 'IO_ERROR', message: err instanceof Error ? err.message : '字幕文件删除失败' } };
+      } catch {
+        return { ok: false, error: { code: 'IO_ERROR', message: '字幕文件删除失败，稍后将显示为缺失' } };
       }
     }
-    this.repo.deleteSubtitle(itemId, rowId);
     return { ok: true, data: { removed: true } };
   }
 
