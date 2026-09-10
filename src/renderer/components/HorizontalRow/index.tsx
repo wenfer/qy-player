@@ -14,6 +14,10 @@ export interface MediaItem {
   serverType?: string;
   /** Raw ISO date from the server, used for cross-library "recently added" sorting. */
   dateCreated?: string;
+  /** Catalog identity for local sources (QYP2-011). */
+  catalogRef?: import('../../../shared/types').MediaRef;
+  /** Persisted progress from catalog_user_state. */
+  catalogProgress?: { position: number; duration: number; isFinished: boolean };
 }
 
 interface HorizontalRowProps {

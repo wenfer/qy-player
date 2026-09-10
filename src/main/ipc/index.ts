@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import { readFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { basename, extname } from 'path';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
@@ -30,6 +31,8 @@ import {
   removeSource,
 } from '../modules/catalog/source-service';
 import { createCatalogRepository } from '../modules/catalog/repository';
+import { createCatalogQueryService } from '../modules/catalog/query-service';
+import { migrateLegacyProgressForSource } from '../modules/catalog/legacy-progress';
 import {
   isCreateLocalSourceInput,
   err,
@@ -42,6 +45,11 @@ import type {
   SourceCapabilities,
   SourceListEntry,
 } from '../../shared/types';
+import {
+  isCatalogBrowseQuery,
+  isCatalogSearchQuery,
+} from '../../shared/types';
+import type { CatalogBrowseQuery, CatalogSearchQuery } from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
 
@@ -706,7 +714,14 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
       ...adapter,
       list: (path: string, signal: AbortSignal) => walkSourceTree(adapter, path, signal),
     };
-    const driver = createLocalScanDriver({ repo, sourceId });
+    const driver = createLocalScanDriver({
+      repo,
+      sourceId,
+      // NFO contents are read through the adapter's containment check, so
+      // a stored relative path can never escape the source root.
+      readNfo: async (relativePath) =>
+        readFile((adapter as LocalSourceAdapter).resolveInside(relativePath)),
+    });
     const controller = new ScanJobController({
       repo,
       adapter: scanningAdapter,
@@ -724,6 +739,16 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
         const run = repo.getScanRun(runId);
         if (run?.status === 'completed') {
           markAvailabilityAfterScan(repo, sourceId, driver.seen, { fullScan: true });
+          // Idempotent: legacy local_media progress migrates onto catalog
+          // items once the files exist (plan §6.4 / QYP2-011 acceptance).
+          try {
+            const legacy = migrateLegacyProgressForSource(db, sourceId);
+            if (legacy.migrated > 0) {
+              console.log(`[SCAN] 来源 ${sourceId} 旧进度迁移完成: ${legacy.migrated} 条`);
+            }
+          } catch (e) {
+            console.error('[SCAN] 旧进度迁移失败（不影响扫描结果）:', e instanceof Error ? e.message : e);
+          }
         }
       })
       .catch((e) => {
@@ -745,6 +770,69 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     }
     job.cancel();
     return ok(true);
+  });
+
+  // ---- Browse / search / detail / playback (QYP2-011) -------------------
+
+  const queryService = createCatalogQueryService(db);
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.LIST, (_event, input: CatalogBrowseQuery): ActionResult<unknown> => {
+    if (!isCatalogBrowseQuery(input)) {
+      return err('VALIDATION_FAILED', '浏览查询不合法');
+    }
+    try {
+      return ok(queryService.listPage(input));
+    } catch (e) {
+      console.error('[CATALOG] 浏览失败:', e instanceof Error ? e.message : e);
+      return err('INTERNAL', '浏览目录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.SEARCH, (_event, input: CatalogSearchQuery): ActionResult<unknown> => {
+    if (!isCatalogSearchQuery(input)) {
+      return err('VALIDATION_FAILED', '搜索查询不合法');
+    }
+    try {
+      return ok(queryService.search(input));
+    } catch (e) {
+      console.error('[CATALOG] 搜索失败:', e instanceof Error ? e.message : e);
+      return err('INTERNAL', '搜索失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.GET, (_event, sourceId: number, itemId: number): ActionResult<unknown> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0 || !Number.isInteger(itemId) || itemId <= 0) {
+      return err('VALIDATION_FAILED', '来源或条目 ID 不合法');
+    }
+    try {
+      const detail = queryService.getDetail(sourceId, itemId);
+      return detail ? ok(detail) : err('NOT_FOUND', '条目不存在');
+    } catch (e) {
+      console.error('[CATALOG] 详情失败:', e instanceof Error ? e.message : e);
+      return err('INTERNAL', '加载详情失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CATALOG.RESOLVE, (_event, sourceId: number, itemId: number): ActionResult<unknown> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0 || !Number.isInteger(itemId) || itemId <= 0) {
+      return err('VALIDATION_FAILED', '来源或条目 ID 不合法');
+    }
+    try {
+      const intent = queryService.getPlayback(sourceId, itemId);
+      if (!intent) return err('NOT_FOUND', '条目不存在或没有可播放的文件');
+      const resolved = getAdapterForSource(db, sourceId);
+      if (!(resolved.adapter instanceof LocalSourceAdapter)) {
+        return err('UNAVAILABLE', '该来源类型暂不支持本地播放路径解析');
+      }
+      // The adapter enforces string + realpath containment; the stored
+      // relative path can never escape the source root.
+      const path = resolved.adapter.resolveInside(intent.relativePath);
+      const { relativePath: _rp, ...rest } = intent;
+      return ok({ ...rest, path });
+    } catch (e) {
+      console.error('[CATALOG] 解析播放路径失败:', e instanceof Error ? e.message : e);
+      return err('INTERNAL', '解析播放路径失败');
+    }
   });
 
   // Push channel: renderers subscribe through preload (single dispatcher per

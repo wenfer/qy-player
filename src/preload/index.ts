@@ -62,6 +62,13 @@ const electronAPI = {
   sourceHealth: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, sourceId),
   startScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_START, sourceId),
   cancelScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_CANCEL, sourceId),
+  // Catalog browse / search / detail / playback resolution (QYP2-011)
+  browseCatalog: (query: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.LIST, query),
+  searchCatalog: (query: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SEARCH, query),
+  getCatalogItem: (sourceId: number, itemId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CATALOG.GET, sourceId, itemId),
+  resolveCatalogMedia: (sourceId: number, itemId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CATALOG.RESOLVE, sourceId, itemId),
   onScanProgress: (callback: (event: unknown) => void) => {
     // Single dispatcher: multiple renderer subscribers share one IPC listener.
     const callbacks = scanProgressCallbacks;

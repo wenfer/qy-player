@@ -57,5 +57,6 @@ export const IPC_CHANNELS = {
     LIST: 'catalog:list',
     GET: 'catalog:get',
     SEARCH: 'catalog:search',
+    RESOLVE: 'catalog:resolve',
   },
 } as const;

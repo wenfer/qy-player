@@ -23,6 +23,8 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/detail/:type/:id" element={<Detail />} />
             <Route path="/library/:serverId/:viewId" element={<LibraryBrowse />} />
+            <Route path="/browse/:sourceId" element={<LibraryBrowse />} />
+            <Route path="/browse/:sourceId/item/:itemId" element={<LibraryBrowse />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />

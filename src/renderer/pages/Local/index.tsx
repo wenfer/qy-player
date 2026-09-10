@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from 'react';
-import { FolderOpen, FileVideo, Play, Clock, Film, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FolderOpen, FileVideo, Play, Clock, Film, Trash2, Library, ArrowRight, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import type { SourceListEntry, ScanProgressEvent } from '../../../shared/types';
 
 interface HistoryItem {
   media_id: string;
@@ -24,6 +26,71 @@ export default function Local() {
   const [loading, setLoading] = useState(true);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
+  const navigate = useNavigate();
+  const [sources, setSources] = useState<SourceListEntry[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+  const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
+
+  const loadSources = useCallback(async () => {
+    setSourcesLoading(true);
+    setSourcesError(null);
+    try {
+      const result = (await window.electronAPI.listSources()) as Array<SourceListEntry>;
+      setSources(result);
+    } catch (err) {
+      setSourcesError(err instanceof Error ? err.message : '加载来源失败');
+    } finally {
+      setSourcesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  // Keep scan badges live via the push channel (deduped per sender).
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onScanProgress((event) => {
+      const e = event as ScanProgressEvent;
+      if (e.state === 'indexing' || e.state === 'discovering' || e.state === 'enriching' || e.state === 'queued') {
+        setScanningIds((prev) => new Set(prev).add(e.sourceId));
+      } else {
+        setScanningIds((prev) => {
+          const next = new Set(prev);
+          next.delete(e.sourceId);
+          return next;
+        });
+        loadSources();
+      }
+    });
+    return unsubscribe;
+  }, [loadSources]);
+
+  const handleScanToggle = useCallback(
+    async (source: SourceListEntry) => {
+      const running = scanningIds.has(source.id);
+      try {
+        const result = running
+          ? await window.electronAPI.cancelScan(source.id)
+          : await window.electronAPI.startScan(source.id);
+        const r = result as { ok: boolean; error?: { message: string } };
+        if (!r.ok) {
+          addToast(r.error?.message ?? '操作失败', 'error');
+          return;
+        }
+        if (running) {
+          addToast('扫描已请求停止', 'info');
+        } else {
+          setScanningIds((prev) => new Set(prev).add(source.id));
+          addToast('扫描已开始', 'success');
+        }
+      } catch (err) {
+        addToast(`扫描操作失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+      }
+    },
+    [scanningIds, addToast]
+  );
 
   const loadHistory = useCallback(async () => {
     try {
@@ -152,6 +219,88 @@ export default function Local() {
           打开文件夹
         </button>
       </div>
+
+      {/* Catalog sources */}
+      <section className="mb-12">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Library size={14} />
+            媒体库
+          </h2>
+        </div>
+        {sourcesLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground p-4" role="status">
+            <Loader2 size={14} className="animate-spin" /> 加载来源中…
+          </div>
+        ) : sourcesError ? (
+          <div className="flex flex-col items-start gap-2 p-4 bg-card border border-border rounded-xl" role="alert">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <AlertCircle size={14} /> {sourcesError}
+            </div>
+            <button onClick={loadSources} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent focus-ring">
+              重试
+            </button>
+          </div>
+        ) : sources.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 bg-card border border-dashed border-border rounded-xl">
+            <Library size={28} className="text-muted-foreground/40 mb-2" />
+            <p className="text-sm text-muted-foreground">还没有媒体库来源</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-3">在设置中添加本地目录并扫描后，即可在这里浏览</p>
+            <button
+              onClick={() => navigate('/settings')}
+              className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 focus-ring"
+            >
+              前往设置
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {sources.map((source) => {
+              const scanning = scanningIds.has(source.id) || (source.lastRun && ['queued', 'discovering', 'indexing', 'enriching'].includes(source.lastRun.status));
+              return (
+                <div
+                  key={source.id}
+                  className="flex items-center gap-3 p-3 bg-card border border-border rounded-xl hover:border-primary/30 transition-colors min-w-0 flex-1 basis-64"
+                >
+                  <button
+                    onClick={() => navigate(`/browse/${source.id}`, { state: { name: source.name } })}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left focus-ring rounded-lg"
+                    aria-label={`浏览 ${source.name}`}
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                      <Library size={16} className="text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{source.name}</div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {scanning
+                          ? '扫描中…'
+                          : source.lastRun
+                            ? source.lastRun.status === 'completed'
+                              ? `已扫描 ${source.lastRun.processed ?? 0} 项`
+                              : source.lastRun.status === 'failed'
+                                ? '上次扫描失败'
+                                : '尚未扫描'
+                            : '尚未扫描'}
+                      </div>
+                    </div>
+                    <ArrowRight size={14} className="text-muted-foreground flex-shrink-0" />
+                  </button>
+                  <button
+                    onClick={() => handleScanToggle(source)}
+                    disabled={source.kind !== 'local'}
+                    className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring flex-shrink-0 disabled:opacity-40"
+                    aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
+                    title={scanning ? '取消扫描' : '扫描'}
+                  >
+                    {scanning ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* History */}
       <section>

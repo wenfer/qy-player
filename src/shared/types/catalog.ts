@@ -66,6 +66,8 @@ export interface CatalogItemSummary {
   kind: CatalogKind;
   title: string;
   year?: number;
+  /** Merged winner rating (manual > nfo > scraper > filename), 0-10. */
+  rating?: number;
   posterUrl?: string;
   availability: Availability;
   progress?: CatalogProgress;
@@ -156,6 +158,101 @@ export interface SourceListEntry extends SourceSummary {
     /** Unix timestamp in milliseconds. */
     at: number;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Browse / search / detail queries (QYP2-011)
+// ---------------------------------------------------------------------------
+
+/** Query for catalog:list — one source, one parent level, optional kind. */
+export interface CatalogBrowseQuery {
+  sourceId: number;
+  /** Null = the source's top level. */
+  parentId?: number | null;
+  kind?: CatalogKind;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Query for catalog:search — full-text over one or all sources. */
+export interface CatalogSearchQuery {
+  query: string;
+  sourceId?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Winner metadata for one field, as displayed by detail views. */
+export interface FieldProvenanceInfo {
+  provider: 'manual' | 'nfo' | 'scraper' | 'filename';
+  value: unknown;
+  revision: number;
+}
+
+/** catalog:get payload: summary + merged metadata + children + files. */
+export interface CatalogItemDetail {
+  item: CatalogItemSummary;
+  /** Merged winner metadata (manual > nfo > scraper > filename). */
+  metadata: {
+    plot?: string;
+    tagline?: string;
+    rating?: number;
+    contentRating?: string;
+    premiered?: string;
+    runtime?: number;
+    genres?: string[];
+    studios?: string[];
+    countries?: string[];
+    directors?: string[];
+    actors?: Array<{ name: string; role?: string; thumb?: string }>;
+    originalTitle?: string;
+    sortTitle?: string;
+    set?: string;
+  };
+  /** Per-field winner provenance, for the UI's 来源 display. */
+  fieldProviders: Record<string, FieldProvenanceInfo>;
+  files: Array<{ relativePath: string; size?: number; mtime?: number }>;
+  /** Children (seasons of a series / episodes of a season), sorted. */
+  children: CatalogItemSummary[];
+  progress?: CatalogProgress;
+}
+
+/** catalog:resolve payload for catalog playback (QYP2-015 unifies this). */
+export interface CatalogPlayback {
+  /** Absolute, containment-verified filesystem path (local sources). */
+  path: string;
+  title: string;
+  kind: CatalogKind;
+  /** Resume position in seconds (catalog_user_state). */
+  position: number;
+  duration?: number;
+  seriesTitle?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  itemId: number;
+}
+
+export function isCatalogBrowseQuery(value: unknown): value is CatalogBrowseQuery {
+  if (typeof value !== 'object' || value === null) return false;
+  const q = value as Record<string, unknown>;
+  if (!isPositiveInt(q.sourceId)) return false;
+  if (q.parentId !== undefined && q.parentId !== null && !isPositiveInt(q.parentId)) return false;
+  if (
+    q.kind !== undefined &&
+    q.kind !== 'movie' && q.kind !== 'series' && q.kind !== 'season' &&
+    q.kind !== 'episode' && q.kind !== 'video'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isCatalogSearchQuery(value: unknown): value is CatalogSearchQuery {
+  if (typeof value !== 'object' || value === null) return false;
+  const q = value as Record<string, unknown>;
+  if (typeof q.query !== 'string' || q.query.length === 0 || q.query.length > 200) return false;
+  if (q.sourceId !== undefined && !isPositiveInt(q.sourceId)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------

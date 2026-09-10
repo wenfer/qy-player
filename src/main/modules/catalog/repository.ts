@@ -409,6 +409,127 @@ export function createCatalogRepository(db: Database.Database) {
       return row?.item_id;
     },
 
+    // -- Metadata sources (plan §9.2: per-field provider provenance) --------
+
+    /**
+     * Upsert one (item, field, provider) slot. Values are JSON-encoded so
+     * scalars, arrays and actor lists round-trip uniformly.
+     */
+    upsertMetadataSource(itemId: number, field: string, provider: string, value: unknown): void {
+      db.prepare(
+        `INSERT INTO catalog_metadata_sources (item_id, field, provider, value, revision, updated_at)
+         VALUES (?, ?, ?, ?, 1, unixepoch())
+         ON CONFLICT(item_id, field, provider) DO UPDATE SET
+           value = excluded.value,
+           revision = revision + 1,
+           updated_at = unixepoch()`
+      ).run(itemId, field, provider, JSON.stringify(value));
+    },
+
+    listMetadataSources(itemId: number): Array<{
+      field: string;
+      provider: string;
+      value: string | null;
+      revision: number;
+      updated_at: number | null;
+    }> {
+      return db
+        .prepare(
+          'SELECT field, provider, value, revision, updated_at FROM catalog_metadata_sources WHERE item_id = ?'
+        )
+        .all(itemId) as Array<{
+        field: string;
+        provider: string;
+        value: string | null;
+        revision: number;
+        updated_at: number | null;
+      }>;
+    },
+
+    /** Metadata rows for many items in one query (list overlay). */
+    listMetadataSourcesForItems(itemIds: number[]): Array<{
+      item_id: number;
+      field: string;
+      provider: string;
+      value: string | null;
+      revision: number;
+    }> {
+      if (itemIds.length === 0) return [];
+      const placeholders = itemIds.map(() => '?').join(', ');
+      return db
+        .prepare(
+          `SELECT item_id, field, provider, value, revision
+           FROM catalog_metadata_sources WHERE item_id IN (${placeholders})`
+        )
+        .all(...itemIds) as Array<{
+        item_id: number;
+        field: string;
+        provider: string;
+        value: string | null;
+        revision: number;
+      }>;
+    },
+
+    /**
+     * Filtered, paginated item listing (browse/search share this).
+     * `search` matches item titles with LIKE (input pre-escaped by caller).
+     */
+    listItemsFiltered(
+      filter: {
+        sourceId: number;
+        parentId?: number | null;
+        kind?: CatalogKind;
+        search?: string;
+      },
+      limit: number,
+      offset: number
+    ): { rows: CatalogItemRow[]; total: number } {
+      const where: string[] = ['source_id = ?'];
+      const values: Array<string | number> = [filter.sourceId];
+      if (filter.parentId === null) {
+        where.push('parent_id IS NULL');
+      } else if (filter.parentId !== undefined) {
+        where.push('parent_id = ?');
+        values.push(filter.parentId);
+      }
+      if (filter.kind) {
+        where.push('kind = ?');
+        values.push(filter.kind);
+      }
+      if (filter.search) {
+        // Titles plus metadata winners (NFO title/originalTitle/sortTitle).
+        where.push(
+          `(title LIKE ? ESCAPE '\\' OR id IN (
+             SELECT item_id FROM catalog_metadata_sources
+             WHERE field IN ('title', 'originalTitle', 'sortTitle') AND value LIKE ? ESCAPE '\\'
+           ))`
+        );
+        values.push(filter.search, filter.search);
+      }
+      const whereSql = where.join(' AND ');
+      // Episodes sort by season/episode; everything else by title (NOCASE).
+      const orderSql =
+        filter.kind === 'episode'
+          ? 'season_number, episode_number, title COLLATE NOCASE'
+          : 'title COLLATE NOCASE, season_number, episode_number';
+      const rows = db
+        .prepare(`SELECT * FROM catalog_items WHERE ${whereSql} ORDER BY ${orderSql} LIMIT ? OFFSET ?`)
+        .all(...values, limit, offset) as CatalogItemRow[];
+      const total = (
+        db.prepare(`SELECT COUNT(*) AS n FROM catalog_items WHERE ${whereSql}`).get(...values) as { n: number }
+      ).n;
+      return { rows, total };
+    },
+
+    /** User states for many items (progress display on cards). */
+    listUserStatesForItems(itemIds: number[]): CatalogUserStateRow[] {
+      if (itemIds.length === 0) return [];
+      const placeholders = itemIds.map(() => '?').join(', ');
+      return db
+        .prepare(`SELECT item_id, position, duration, is_finished, updated_at FROM catalog_user_state WHERE item_id IN (${placeholders})`)
+        .all(...itemIds) as CatalogUserStateRow[];
+    },
+
     // -- Scan runs -----------------------------------------------------------
 
     createScanRun(sourceId: number): number {

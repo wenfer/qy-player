@@ -1,6 +1,9 @@
 import type { SourceAdapter, SourceEntry, ScanDriver } from '../library-sources/types';
 import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
+import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
+import { applyNfoMetadata } from '../metadata/metadata-merger';
+import type { MetadataValue, NfoMetadata, ProviderStore } from '../metadata/types';
 
 /**
  * Local media scanner core (plan §6, QYP2-009).
@@ -123,6 +126,61 @@ export interface LocalScanDriver extends ScanDriver {
   readonly seen: ReadonlySet<string>;
 }
 
+/** filename without extension, lowercased (episode/video NFO matching). */
+function stemOf(relativePath: string): string {
+  const fileName = relativePath.split('/').pop() ?? relativePath;
+  const dot = fileName.lastIndexOf('.');
+  return (dot === -1 ? fileName : fileName.slice(0, dot)).toLowerCase();
+}
+
+/** Directory of a relative path ('' at root). */
+function dirOf(relativePath: string): string {
+  return relativePath.includes('/') ? relativePath.slice(0, relativePath.lastIndexOf('/')) : '';
+}
+
+/**
+ * The series-level directory for an episode path: strip a trailing season
+ * segment ("Season 01", "s1", "Specials"); otherwise the episode dir itself.
+ */
+function seriesDirOf(episodeDir: string): string {
+  if (/\/(?:season[\s._-]?\d{1,2}|s\d{1,2}|specials)$/i.test(episodeDir)) {
+    return episodeDir.slice(0, episodeDir.lastIndexOf('/'));
+  }
+  return episodeDir;
+}
+
+/**
+ * Persist a parsed NFO payload as per-field provenance rows (plan §9.2).
+ * Sparse application: fields the NFO does not carry keep their previous
+ * values; a parse failure never erases anything.
+ */
+function persistNfoMetadata(
+  repo: CatalogRepository,
+  itemId: number,
+  meta: NfoMetadata
+): void {
+  const existing: ProviderStore = {};
+  for (const row of repo.listMetadataSources(itemId)) {
+    let decoded: unknown = null;
+    try {
+      decoded = row.value === null ? null : JSON.parse(row.value);
+    } catch {
+      decoded = row.value; // non-JSON legacy row: kept as plaintext
+    }
+    const slot = existing[row.field] ?? (existing[row.field] = {});
+    slot[row.provider as keyof (typeof slot)] = {
+      value: decoded as MetadataValue,
+      revision: row.revision,
+      updatedAt: row.updated_at ?? 0,
+    };
+  }
+  const outcome = applyNfoMetadata(existing, meta);
+  for (const field of outcome.changedFields) {
+    const slot = outcome.store[field]?.nfo;
+    if (slot) repo.upsertMetadataSource(itemId, field, 'nfo', slot.value);
+  }
+}
+
 /**
  * Driver factory. Note `maxEntries` must stay aligned with the job
  * controller's cap so the walker fails the run before the controller
@@ -131,6 +189,11 @@ export interface LocalScanDriver extends ScanDriver {
 export function createLocalScanDriver(deps: {
   repo: CatalogRepository;
   sourceId: number;
+  /**
+   * Containment-checked NFO content reader (wired by the IPC layer through
+   * the source adapter). When absent, NFO files are skipped silently.
+   */
+  readNfo?: (relativePath: string, signal: AbortSignal) => Promise<Buffer>;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   // Existing files snapshot: cheap in-driver change detection without extra
@@ -139,6 +202,47 @@ export function createLocalScanDriver(deps: {
     repo.listFilesBySource(sourceId).map((f) => [f.relative_path, { fingerprint: f.fingerprint }])
   );
   const seen = new Set<string>();
+  // NFO enrichment state (per run): stem → itemId for episode/video NFOs;
+  // dir-keyed payloads for movie.nfo / tvshow.nfo / season.nfo; dir → item
+  // registrations so late-arriving NFOs (DFS sort order) still find their
+  // series/season items.
+  const stemItem = new Map<string, number>();
+  const seriesItemByDir = new Map<string, number>();
+  const seasonItemByDir = new Map<string, number>();
+  const dirMovieNfo = new Map<string, NfoMetadata>();
+  const dirShowNfo = new Map<string, NfoMetadata>();
+  const dirSeasonNfo = new Map<string, NfoMetadata>();
+
+  async function enrichFromNfo(relativePath: string, signal: AbortSignal): Promise<void> {
+    if (!deps.readNfo) return;
+    const fileName = relativePath.split('/').pop() ?? relativePath;
+    const dir = relativePath.includes('/') ? relativePath.slice(0, relativePath.lastIndexOf('/')) : '';
+    const stem = fileName.replace(/\.nfo$/i, '').toLowerCase();
+    try {
+      const meta = parseNfoXml(decodeNfoBuffer(await deps.readNfo(relativePath, signal)));
+      let target: number | undefined;
+      if (meta.kind === 'tvshow') {
+        target = seriesItemByDir.get(dir);
+        if (target === undefined) dirShowNfo.set(dir, meta);
+      } else if (meta.kind === 'season') {
+        target = seasonItemByDir.get(dir);
+        if (target === undefined) dirSeasonNfo.set(dir, meta);
+      } else if (stem === 'movie') {
+        // Applied to the movie group at flush time (same dir).
+        dirMovieNfo.set(dir, meta);
+      } else {
+        target = stemItem.get(stem);
+      }
+      if (target !== undefined) persistNfoMetadata(repo, target, meta);
+    } catch (err) {
+      // Plan §9.2: a bad NFO never erases metadata; record and continue.
+      console.error(
+        '[NFO] 解析失败（保留旧值）:', relativePath,
+        err instanceof NfoParseError ? err.message : err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   const driver: LocalScanDriver = {
     seen,
 
@@ -146,8 +250,12 @@ export function createLocalScanDriver(deps: {
       throwIfAborted(signal);
       if (entry.isDirectory) return;
       const parsed = classifyPath(entry.relativePath);
-      // NFO/sidecar/ignored files are recognized but not indexed; NFO and
-      // sidecar metadata consumption arrives with QYP2-010.
+      if (parsed.fileClass === 'nfo') {
+        await enrichFromNfo(entry.relativePath, signal);
+        return;
+      }
+      // Other sidecar/ignored files are recognized but not indexed; image
+      // sidecar display is a later task.
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
 
       seen.add(entry.relativePath);
@@ -172,6 +280,16 @@ export function createLocalScanDriver(deps: {
           kind: 'series',
           title: e.seriesTitle,
         });
+        // Register for tvshow.nfo lookups (series dir = parent of the
+        // season dir, or the episode's own dir when there is none).
+        const episodeDir = dirOf(entry.relativePath);
+        const seriesDir = seriesDirOf(episodeDir);
+        seriesItemByDir.set(seriesDir, seriesId);
+        const pendingShow = dirShowNfo.get(seriesDir);
+        if (pendingShow) {
+          dirShowNfo.delete(seriesDir);
+          persistNfoMetadata(repo, seriesId, pendingShow);
+        }
         const seasonKey = `${seriesKey}:s${e.season}`;
         const seasonId = repo.upsertItem({
           sourceId,
@@ -181,6 +299,12 @@ export function createLocalScanDriver(deps: {
           seasonNumber: e.season,
           title: e.season === 0 ? '特别篇' : `第 ${e.season} 季`,
         });
+        seasonItemByDir.set(episodeDir, seasonId);
+        const pendingSeason = dirSeasonNfo.get(episodeDir);
+        if (pendingSeason) {
+          dirSeasonNfo.delete(episodeDir);
+          persistNfoMetadata(repo, seasonId, pendingSeason);
+        }
         const episodeId = repo.upsertItem({
           sourceId,
           sourceKey: `${seriesKey}:s${e.season}e${e.episode}`,
@@ -190,6 +314,7 @@ export function createLocalScanDriver(deps: {
           episodeNumber: e.episode,
           ...(e.episodeTitle ? { title: e.episodeTitle } : {}),
         });
+        stemItem.set(stemOf(entry.relativePath), episodeId);
         repo.upsertFile({
           sourceId,
           itemId: episodeId,
@@ -237,6 +362,7 @@ export function createLocalScanDriver(deps: {
   }
 
   function flushGroup(): void {
+    const groupDir = bufferedDir;
     if (buffer.length === 0) {
       bufferedDir = null;
       return;
@@ -248,38 +374,68 @@ export function createLocalScanDriver(deps: {
     if (candidates.length === 0) return; // extras-only directory: nothing to index
     // Main file: largest non-extra (size unknown counts as 0).
     const main = candidates.reduce((a, b) => ((b.entry.size ?? 0) > (a.entry.size ?? 0) ? b : a));
+    // Grouping (main-file selection + extras attach) only applies when the
+    // main candidate is a high-confidence movie. Unrelated low-confidence
+    // videos must stay separate items (QYP2-011: five root files are five
+    // videos, not one), per-file identity by path (plan §6.2 低置信).
+    const isMovieGroup = main.parsed.confidence === 'high' && main.parsed.movie;
     const title = main.parsed.movie?.title ?? main.parsed.videoTitle ?? '';
     const year = main.parsed.movie?.year;
-    const itemId =
-      main.parsed.confidence === 'high' && main.parsed.movie
-        ? repo.upsertItem({
-            sourceId,
-            sourceKey: `movie:${normalizeNameKey(title)}${year ? `:${year}` : ''}`,
-            kind: 'movie',
-            title,
-            year,
-          })
-        : // Low-confidence content keeps its own path-based identity; it
-          // can be reclassified manually later (plan §6.2).
-          repo.upsertItem({
-            sourceId,
-            sourceKey: `video:${main.entry.relativePath}`,
-            kind: 'video',
-            title,
-          });
-    for (const c of [...candidates, ...extras]) {
+
+    const attach = (c: BufferedCandidate, targetItem: number): void => {
       const fp =
         c.entry.size !== undefined && c.entry.mtime !== undefined
           ? `${c.entry.size}:${Math.floor(c.entry.mtime)}`
           : undefined;
       repo.upsertFile({
         sourceId,
-        itemId,
+        itemId: targetItem,
         relativePath: c.entry.relativePath,
         size: c.entry.size,
         mtime: c.entry.mtime,
         fingerprint: fp,
       });
+      // Every attached file's stem can own a matching NFO.
+      stemItem.set(stemOf(c.entry.relativePath), targetItem);
+    };
+
+    let primaryItem: number;
+    if (isMovieGroup) {
+      primaryItem = repo.upsertItem({
+        sourceId,
+        sourceKey: `movie:${normalizeNameKey(title)}${year ? `:${year}` : ''}`,
+        kind: 'movie',
+        title,
+        year,
+      });
+      for (const c of [...candidates, ...extras]) attach(c, primaryItem);
+    } else {
+      // Low-confidence content keeps per-file path-based identity; it can
+      // be reclassified manually later (plan §6.2). Extras are dropped.
+      primaryItem = repo.upsertItem({
+        sourceId,
+        sourceKey: `video:${main.entry.relativePath}`,
+        kind: 'video',
+        title,
+      });
+      for (const c of candidates) {
+        if (c === main) {
+          attach(c, primaryItem);
+          continue;
+        }
+        const own = repo.upsertItem({
+          sourceId,
+          sourceKey: `video:${c.entry.relativePath}`,
+          kind: 'video',
+          title: c.parsed.videoTitle ?? stemOf(c.entry.relativePath),
+        });
+        attach(c, own);
+      }
+    }
+    const movieNfo = dirMovieNfo.get(groupDir ?? '');
+    if (movieNfo) {
+      dirMovieNfo.delete(groupDir ?? '');
+      persistNfoMetadata(repo, primaryItem, movieNfo);
     }
   }
 
