@@ -54,6 +54,12 @@ import type {
   SourceCapabilities,
   SourceListEntry,
 } from '../../shared/types';
+import { isMediaRef } from '../../shared/types';
+import {
+  bindOnlineServer,
+  resolvePlayback,
+  ResolverError,
+} from '../modules/player-core/playback-resolver';
 import {
   isCatalogBrowseQuery,
   isCatalogSearchQuery,
@@ -234,6 +240,54 @@ export function registerIpcHandlers(player: PlayerCore): void {
     }
   });
 
+  // Unified playback entry (QYP2-015): the renderer passes a MediaRef and
+  // receives a ready-to-load payload. URLs are built main-side; credentials
+  // travel as an opaque stream session. Strict per-serverId routing.
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYER.RESOLVE,
+    async (
+      _event,
+      ref: unknown,
+      options: { mode?: 'direct' | 'transcode'; mediaSourceId?: string } = {}
+    ): Promise<ActionResult<unknown>> => {
+      if (!isMediaRef(ref)) {
+        return err('VALIDATION_FAILED', '播放引用不合法');
+      }
+      const mode = options?.mode === 'transcode' ? 'transcode' : 'direct';
+      const mediaSourceId =
+        typeof options?.mediaSourceId === 'string' && options.mediaSourceId.length <= 128
+          ? options.mediaSourceId
+          : undefined;
+      try {
+        const resolution = await resolvePlayback(
+          {
+            db,
+            storage,
+            secretStore,
+            streamHeaders,
+            getResumePosition: (mediaType: string, mediaId: string) =>
+              playbackStateManager!.getResumePosition(mediaType, mediaId),
+            createOnlineClient: createClient,
+          },
+          { ref, mode, ...(mediaSourceId ? { mediaSourceId } : {}) }
+        );
+        return ok(resolution);
+      } catch (e) {
+        if (e instanceof ResolverError) {
+          if (e.code === 'SERVER_NOT_FOUND' || e.code === 'ITEM_NOT_FOUND') {
+            return err('NOT_FOUND', e.message);
+          }
+          if (e.code === 'NO_CREDENTIAL') {
+            return err('AUTH_REQUIRED', e.message);
+          }
+          return err('UNAVAILABLE', e.message, { retryable: true });
+        }
+        console.error('[PLAYBACK-RESOLVE] 解析失败:', e instanceof Error ? e.message : e);
+        return err('INTERNAL', '解析播放地址失败');
+      }
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.PLAYER.CONTROL, async (_event, action: string, ...args: unknown[]) => {
     switch (action) {
       case 'play':
@@ -396,22 +450,35 @@ export function registerIpcHandlers(player: PlayerCore): void {
   // WebDAV form uses it to set storage expectations honestly (plan §8.3).
   ipcMain.handle(IPC_CHANNELS.SETTINGS.SECRETS_PERSISTENT, () => secretStore.isPersistent());
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS.SAVE_SERVER, (_event, server: ServerConfig) => {
-    // The API key goes to the SecretStore, never into the DB column. When no
-    // key is provided (editing without re-auth), the existing secret and any
-    // legacy column value are left untouched.
+  ipcMain.handle(IPC_CHANNELS.SETTINGS.SAVE_SERVER, async (_event, server: ServerConfig & { password?: string }) => {
+    // QYP2-015: the renderer passes the password (not a token). The main
+    // process authenticates and stores the token in the SecretStore; tokens
+    // never round-trip through the renderer anymore. Editing without a new
+    // password keeps the stored secret untouched.
+    let userId = server.userId;
+    let freshToken: string | undefined;
+    if (server.password) {
+      if (!server.username) throw new Error('保存需要用户名');
+      const client = createClient({
+        type: server.type,
+        baseUrl: server.baseUrl,
+      } as ServerConfig);
+      const auth = await client.authenticate(server.username, server.password);
+      userId = auth.userId;
+      freshToken = auth.accessToken;
+    }
     const id = storage.saveServer({
       id: server.id,
       type: server.type,
       name: server.name ?? '',
       baseUrl: server.baseUrl,
       username: server.username,
-      userId: server.userId,
+      userId,
       isActive: server.isActive,
     });
-    if (server.apiKey) {
+    if (freshToken) {
       // Throws on readback failure; nothing is cleared before that.
-      secretStore.setSecret(MEDIA_SERVER_NAMESPACE, String(id), server.apiKey);
+      secretStore.setSecret(MEDIA_SERVER_NAMESPACE, String(id), freshToken);
     }
     return id;
   });
@@ -423,11 +490,11 @@ export function registerIpcHandlers(player: PlayerCore): void {
       // If credentials provided, verify them and return the token
       if (server.username && server.password) {
         try {
-          const auth = await client.authenticate(server.username, server.password);
-          // Transitional (QYP2-013/015): the fresh token still round-trips
-          // through the renderer for the save flow; PlaybackResolver will
-          // own auth injection and remove this pass-through later.
-          return { ok: true, accessToken: auth.accessToken, userId: auth.userId };
+          await client.authenticate(server.username, server.password);
+          // QYP2-015: credentials are verified here, but the token never
+          // leaves the main process — SAVE_SERVER authenticates again and
+          // stores directly into the SecretStore.
+          return { ok: true };
         } catch (authErr) {
           console.error('[SERVER-TEST] 认证失败:', authErr);
           const status = (authErr as { response?: { status?: number } })?.response?.status;
@@ -493,7 +560,28 @@ export function registerIpcHandlers(player: PlayerCore): void {
     return results;
   });
 
-  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEMS, async (_event, parentId: string, options?: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEMS, async (_event, parentId: string, options?: unknown, serverId?: number) => {
+    // QYP2-015: strict routing when the caller knows the server.
+    if (Number.isInteger(serverId) && (serverId as number) > 0) {
+      const providers = ['jellyfin', 'emby'] as const;
+      for (const provider of providers) {
+        try {
+          const binding = bindOnlineServer(storage, secretStore, provider, serverId as number);
+          const client = createClient({
+            type: binding.type,
+            baseUrl: binding.baseUrl,
+            apiKey: binding.apiKey,
+            userId: binding.userId,
+          });
+          return await client.getItems(parentId, options as Record<string, unknown>);
+        } catch (e) {
+          if (e instanceof ResolverError && e.code === 'SERVER_NOT_FOUND') continue;
+          console.error('[GET-ITEMS] 服务器列表获取失败:', e instanceof Error ? e.message : e);
+          return [];
+        }
+      }
+      return [];
+    }
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         return await client.getItems(parentId, options as Record<string, unknown>);
@@ -505,7 +593,30 @@ export function registerIpcHandlers(player: PlayerCore): void {
     return [];
   });
 
-  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, async (_event, itemId: string) => {
+  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, async (_event, itemId: string, serverId?: number) => {
+    // QYP2-015: when the caller knows the server, route strictly to it
+    // (bindOnlineServer throws on mismatch; no cross-server fallthrough).
+    if (Number.isInteger(serverId) && (serverId as number) > 0) {
+      const providers = ['jellyfin', 'emby'] as const;
+      for (const provider of providers) {
+        try {
+          const binding = bindOnlineServer(storage, secretStore, provider, serverId as number);
+          const client = createClient({
+            type: binding.type,
+            baseUrl: binding.baseUrl,
+            apiKey: binding.apiKey,
+            userId: binding.userId,
+          });
+          return await client.getItemDetails(itemId);
+        } catch (e) {
+          if (e instanceof ResolverError && e.code === 'SERVER_NOT_FOUND') continue;
+          console.error('[GET-ITEM-DETAILS] 服务器详情获取失败:', e instanceof Error ? e.message : e);
+          return null;
+        }
+      }
+      console.error('[GET-ITEM-DETAILS] 指定服务器无法获取详情');
+      return null;
+    }
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
         return await client.getItemDetails(itemId);

@@ -116,7 +116,7 @@ export default function Search() {
                   year={item.year}
                   rating={item.rating}
                   type={item.type}
-                  onClick={() => navigate(`/detail/${item.serverType}/${item.id}`)}
+                  onClick={() => navigate(`/detail/${item.serverType}/${item.serverId}/${item.id}`)}
                   onPlay={() => handleItemPlay(item)}
                 />
               ))}

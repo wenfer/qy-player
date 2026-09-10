@@ -104,10 +104,12 @@ const electronAPI = {
 
   // Online
   getLibraries: () => ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_LIBRARIES),
-  getItems: (parentId: string, options?: unknown) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEMS, parentId, options),
-  getItemDetails: (itemId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, itemId),
+  getItems: (parentId: string, options?: unknown, serverId?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEMS, parentId, options, serverId),
+  getItemDetails: (itemId: string, serverId?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, itemId, serverId),
+  resolvePlayback: (ref: unknown, options?: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYER.RESOLVE, ref, options),
   getStreamUrl: (itemId: string, mediaSourceId: string, mode?: 'direct' | 'transcode') =>
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_STREAM_URL, itemId, mediaSourceId, mode),
   getContinueWatching: () => ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_CONTINUE_WATCHING),

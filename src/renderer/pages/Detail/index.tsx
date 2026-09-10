@@ -60,7 +60,9 @@ const TYPE_BADGE: Record<string, { icon: React.ReactNode; label: string }> = {
 };
 
 export default function Detail() {
-  const { type, id } = useParams<{ type: string; id: string }>();
+  // serverId is part of the route (QYP2-015 exact routing): playback and
+  // details are always bound to one server, never try-every-server.
+  const { type, serverId: serverIdParam, id } = useParams<{ type: string; serverId: string; id: string }>();
   const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const [details, setDetails] = useState<ItemDetails | null>(null);
@@ -71,6 +73,7 @@ export default function Detail() {
   const [error, setError] = useState<string | null>(null);
 
   const serverType = type || 'jellyfin';
+  const serverId = Number(serverIdParam);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
 
   const loadDetails = useCallback(async () => {
@@ -83,7 +86,7 @@ export default function Detail() {
       const server = Array.from(serverMap.values()).find((s) => s.type === serverType);
       setBaseUrl(server?.base_url ?? null);
 
-      const data = await window.electronAPI.getItemDetails(id);
+      const data = await window.electronAPI.getItemDetails(id, Number.isInteger(serverId) ? serverId : undefined);
       const item = data as ItemDetails;
       setDetails(item);
 
@@ -91,7 +94,7 @@ export default function Detail() {
         const items = await window.electronAPI.getItems(id, {
           includeItemTypes: 'Season',
           recursive: true,
-        });
+        }, Number.isInteger(serverId) ? serverId : undefined);
         const seasonList = (items as Season[]).sort((a, b) => a.IndexNumber - b.IndexNumber);
         setSeasons(seasonList);
         if (seasonList.length > 0) {
@@ -106,114 +109,79 @@ export default function Detail() {
     } finally {
       setLoading(false);
     }
-  }, [id, serverType, addToast]);
+  }, [id, serverId, serverType, addToast]);
 
   const loadEpisodes = useCallback(async (seasonId: string) => {
     try {
-      const items = await window.electronAPI.getItems(seasonId, { includeItemTypes: 'Episode' });
+      const items = await window.electronAPI.getItems(seasonId, { includeItemTypes: 'Episode' }, Number.isInteger(serverId) ? serverId : undefined);
       setEpisodes(items as Episode[]);
     } catch {
       setEpisodes([]);
     }
-  }, []);
+  }, [serverId]);
 
   useEffect(() => {
     loadDetails();
   }, [loadDetails]);
 
+  // Playback goes through the unified resolver (QYP2-015): one MediaRef
+  // in, one ready-to-load payload out. Series/Season containers resolve to
+  // their first playable episode main-side.
   const handlePlay = useCallback(async (itemId?: string, mediaSourceId?: string, mode?: 'direct' | 'transcode', startPosition?: number) => {
     const targetId = itemId || id;
     const playMode = mode || 'direct';
+    if (!targetId || !Number.isInteger(serverId)) {
+      addToast('无法确定媒体来源的服务器', 'error');
+      return;
+    }
     try {
-      let targetDetails: ItemDetails;
-      if (itemId && itemId !== id) {
-        const data = await window.electronAPI.getItemDetails(itemId);
-        if (!data) {
-          addToast('获取媒体详情失败，请稍后重试', 'error');
-          return;
-        }
-        targetDetails = data as ItemDetails;
-      } else {
-        targetDetails = details!;
-        if (!targetDetails) {
-          addToast('详情未加载完成，请稍后重试', 'error');
-          return;
-        }
+      const result = (await window.electronAPI.resolvePlayback(
+        { provider: serverType, serverId, itemId: targetId },
+        { mode: playMode, ...(mediaSourceId ? { mediaSourceId } : {}) }
+      )) as {
+        ok: boolean;
+        data?: {
+          url: string;
+          streamSessionId?: string;
+          startPosition: number;
+          mediaContext: {
+            mediaType: string;
+            mediaId: string;
+            title?: string;
+            seriesName?: string;
+            seasonNumber?: number;
+            episodeNumber?: number;
+            mediaSourceId?: string;
+          };
+        };
+        error?: { message: string };
+      };
+      if (!result.ok || !result.data) {
+        addToast(result.error?.message ?? '无法获取播放地址，请稍后重试', 'error');
+        return;
       }
-
-      let ms = mediaSourceId || targetDetails.MediaSources?.[0]?.Id;
-      let playId = targetId;
-
-      // Container items (Series/Season/Folder/BoxSet) have no MediaSources
-      // of their own - resolve a playable child instead.
-      if (!ms) {
-        if (targetDetails.Type === 'Series' || targetDetails.Type === 'Season') {
-          // Prefer the first episode (stable episode ordering)
-          let epList = episodes;
-          if (epList.length === 0) {
-            epList = (await window.electronAPI.getItems(targetDetails.Id, {
-              includeItemTypes: 'Episode',
-              recursive: true,
-              sortBy: 'ParentIndexNumber,IndexNumber',
-              sortOrder: 'Ascending',
-              limit: 1,
-            })) as Episode[];
-          }
-          const first = epList[0];
-          const epMs = first?.MediaSources?.[0]?.Id;
-          if (first && epMs) {
-            playId = first.Id;
-            ms = epMs;
-          }
-        }
-        if (!ms) {
-          // Generic container (e.g. Jellyfin Folder wrapping one movie):
-          // recursively find the first child that has a MediaSource.
-          const children = (await window.electronAPI.getItems(targetDetails.Id, {
-            recursive: true,
-            sortBy: 'SortName',
-            limit: 20,
-          })) as Array<Record<string, unknown>>;
-          const playable = children.find(
-            (it) => ((it.MediaSources as Array<Record<string, unknown>> | undefined)?.length ?? 0) > 0
-          );
-          const playMs = playable?.MediaSources as Array<Record<string, unknown>> | undefined;
-          if (playable && playMs?.[0]) {
-            playId = playable.Id as string;
-            ms = playMs[0].Id as string;
-          }
-        }
-        if (!ms) {
-          addToast('未找到可播放的媒体文件', 'error');
-          return;
-        }
-      }
-
-      const stream = (await window.electronAPI.getStreamUrl(playId!, ms, playMode)) as {
-        url: string;
-        sessionId?: string;
-      } | null;
-      if (stream?.url) {
-        await window.electronAPI.playerLoadFile(stream.url, startPosition, undefined, {
-          mediaType: serverType,
-          mediaId: playId!,
-          title: targetDetails.Name,
-          seriesName: targetDetails.SeriesName,
-          seasonNumber: targetDetails.ParentIndexNumber,
-          episodeNumber: targetDetails.IndexNumber,
-          mediaSourceId: ms,
-        }, stream.sessionId);
-        addToast(
-          playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
-          'success'
-        );
-      } else {
-        addToast('无法获取播放地址（服务器未响应），请稍后重试', 'error');
-      }
+      const resolved = result.data;
+      const position =
+        startPosition !== undefined && startPosition > 0
+          ? startPosition
+          : resolved.startPosition > 0
+            ? Math.floor(resolved.startPosition)
+            : undefined;
+      await window.electronAPI.playerLoadFile(
+        resolved.url,
+        position,
+        undefined,
+        resolved.mediaContext,
+        resolved.streamSessionId
+      );
+      addToast(
+        playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
+        'success'
+      );
     } catch (err) {
       addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
     }
-  }, [id, details, episodes, addToast]);
+  }, [id, serverId, serverType, addToast]);
 
   const handleSeasonChange = useCallback((seasonIndex: number, seasonId: string) => {
     setSelectedSeason(seasonIndex);

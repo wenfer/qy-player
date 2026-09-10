@@ -21,7 +21,7 @@ function App() {
         <main className="flex-1 ml-60 min-h-screen">
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/detail/:type/:id" element={<Detail />} />
+            <Route path="/detail/:type/:serverId/:id" element={<Detail />} />
             <Route path="/library/:serverId/:viewId" element={<LibraryBrowse />} />
             <Route path="/browse/:sourceId" element={<LibraryBrowse />} />
             <Route path="/browse/:sourceId/item/:itemId" element={<LibraryBrowse />} />

@@ -1,6 +1,7 @@
 export const IPC_CHANNELS = {
   PLAYER: {
     LOAD_FILE: 'player:load-file',
+    RESOLVE: 'player:resolve',
     CONTROL: 'player:control',
     GET_STATE: 'player:get-state',
     GET_TRACKS: 'player:get-tracks',

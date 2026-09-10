@@ -517,7 +517,7 @@ export default function LibraryBrowse() {
       if (item.serverType === 'local') {
         handleCatalogItemClick(item);
       } else {
-        navigate(`/detail/${item.serverType}/${item.id}`);
+        navigate(`/detail/${item.serverType}/${item.serverId}/${item.id}`);
       }
     },
     [handleCatalogItemClick, navigate]

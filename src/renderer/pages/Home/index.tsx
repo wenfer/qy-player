@@ -286,7 +286,7 @@ export default function Home() {
   }, [loadData]);
 
   const handleItemClick = useCallback((item: MediaItem) => {
-    navigate(`/detail/${item.serverType}/${item.id}`);
+    navigate(`/detail/${item.serverType}/${item.serverId}/${item.id}`);
   }, [navigate]);
 
   const handleItemPlay = usePlayItem();

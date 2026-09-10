@@ -2,92 +2,67 @@ import { useCallback } from 'react';
 import { useToastStore } from '../stores/toast-store';
 import type { MediaItem } from '../components/HorizontalRow';
 
+interface ResolveResult {
+  ok: boolean;
+  data?: {
+    url: string;
+    streamSessionId?: string;
+    startPosition: number;
+    mediaContext: {
+      mediaType: string;
+      mediaId: string;
+      title?: string;
+      seriesName?: string;
+      seasonNumber?: number;
+      episodeNumber?: number;
+      mediaSourceId?: string;
+    };
+  };
+  error?: { code: string; message: string };
+}
+
+/**
+ * Play-action hook (QYP2-015): the renderer builds only a MediaRef and
+ * hands playback resolution to the main process. URLs are never spliced
+ * here, credentials never appear, and online routing is strict per serverId.
+ */
 export function usePlayItem() {
   const addToast = useToastStore((s) => s.addToast);
 
-  const playItem = useCallback(async (item: MediaItem) => {
+  const playItem = useCallback(async (item: MediaItem, mode: 'direct' | 'transcode' = 'direct') => {
     try {
-      const details = await window.electronAPI.getItemDetails(item.id);
-      const detailsRecord = details as Record<string, unknown> | null;
-      if (!detailsRecord) {
-        addToast('获取媒体详情失败，请稍后重试', 'error');
-        return;
-      }
-      let mediaSource = (
-        detailsRecord.MediaSources as Array<Record<string, unknown>> | undefined
-      )?.[0];
-      let playId = item.id;
-
-      // Container items (Series/Season/Folder) have no direct MediaSources -
-      // resolve a playable child (first episode, or first playable file).
-      // Keep the episode's own numbering/series context for watch history.
-      let resolvedTitle = (detailsRecord?.Name as string) || item.name;
-      let resolvedSeriesName = detailsRecord?.SeriesName as string | undefined;
-      let resolvedSeason = detailsRecord?.ParentIndexNumber as number | undefined;
-      let resolvedEpisode = detailsRecord?.IndexNumber as number | undefined;
-      if (!mediaSource && (item.type === 'Series' || item.type === 'Season')) {
-        const eps = (await window.electronAPI.getItems(item.id, {
-          includeItemTypes: 'Episode',
-          recursive: true,
-          sortBy: 'ParentIndexNumber,IndexNumber',
-          sortOrder: 'Ascending',
-          limit: 1,
-        })) as Array<Record<string, unknown>>;
-        const first = eps[0];
-        const epMs = first?.MediaSources as Array<Record<string, unknown>> | undefined;
-        if (first && epMs?.[0]) {
-          playId = first.Id as string;
-          mediaSource = epMs[0];
-          resolvedTitle = (first.Name as string) || resolvedTitle;
-          resolvedSeriesName = (item.type === 'Series' ? item.name : (first.SeriesName as string)) || item.name;
-          resolvedSeason = (first.ParentIndexNumber as number) ?? resolvedSeason;
-          resolvedEpisode = (first.IndexNumber as number) ?? resolvedEpisode;
+      let result: ResolveResult;
+      if (item.catalogRef) {
+        result = (await window.electronAPI.resolvePlayback(item.catalogRef, { mode })) as ResolveResult;
+      } else if (item.serverType === 'jellyfin' || item.serverType === 'emby') {
+        if (typeof item.serverId !== 'number') {
+          addToast('无法确定媒体来源的服务器', 'error');
+          return;
         }
-      }
-      if (!mediaSource) {
-        // Generic container fallback (e.g. Folder wrapping one movie)
-        const children = (await window.electronAPI.getItems(item.id, {
-          recursive: true,
-          sortBy: 'SortName',
-          limit: 20,
-        })) as Array<Record<string, unknown>>;
-        const playable = children.find(
-          (it) => ((it.MediaSources as Array<Record<string, unknown>> | undefined)?.length ?? 0) > 0
-        );
-        const playMs = playable?.MediaSources as Array<Record<string, unknown>> | undefined;
-        if (playable && playMs?.[0]) {
-          playId = playable.Id as string;
-          mediaSource = playMs[0];
-          resolvedTitle = (playable.Name as string) || resolvedTitle;
-        }
-      }
-
-      if (!mediaSource) {
-        addToast('无可用的媒体源', 'error');
-        return;
-      }
-
-      const stream = (await window.electronAPI.getStreamUrl(
-        playId,
-        mediaSource.Id as string,
-        'direct'
-      )) as { url: string; sessionId?: string } | null;
-      if (stream?.url) {
-        // Credentials stay main-side; the renderer passes back the opaque
-        // session id it received from getStreamUrl.
-        await window.electronAPI.playerLoadFile(stream.url, undefined, undefined, {
-          mediaType: item.serverType || 'jellyfin',
-          mediaId: playId,
-          title: resolvedTitle,
-          seriesName: resolvedSeriesName,
-          seasonNumber: resolvedSeason,
-          episodeNumber: resolvedEpisode,
-          mediaSourceId: mediaSource.Id as string,
-        }, stream.sessionId);
-        addToast(`开始播放: ${item.name}`, 'success');
+        result = (await window.electronAPI.resolvePlayback(
+          { provider: item.serverType, serverId: item.serverId, itemId: item.id },
+          { mode }
+        )) as ResolveResult;
       } else {
-        addToast('无法获取播放地址（服务器未响应），请稍后重试', 'error');
+        addToast('未知媒体类型，无法播放', 'error');
+        return;
       }
+      if (!result.ok || !result.data) {
+        addToast(result.error?.message ?? '无法获取播放地址，请稍后重试', 'error');
+        return;
+      }
+      const resolved = result.data;
+      await window.electronAPI.playerLoadFile(
+        resolved.url,
+        resolved.startPosition > 0 ? resolved.startPosition : undefined,
+        undefined,
+        resolved.mediaContext,
+        resolved.streamSessionId
+      );
+      addToast(
+        mode === 'transcode' ? `开始播放（转码）: ${item.name}` : `开始播放: ${item.name}`,
+        'success'
+      );
     } catch (err) {
       addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
     }

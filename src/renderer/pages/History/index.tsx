@@ -105,6 +105,15 @@ export default function HistoryPage() {
     }
   }, [addToast]);
 
+  // Online history records carry no serverId (phase-1 schema): resolve the
+  // single matching active server; when several exist the record is
+  // ambiguous and we refuse to guess (QYP2-015 exact routing).
+  const resolveHistoryServer = useCallback(async (mediaType: string): Promise<number | null> => {
+    const serverMap = await getServerMap();
+    const matches = Array.from(serverMap.values()).filter((s) => s.is_active && s.type === mediaType);
+    return matches.length === 1 ? matches[0].id : null;
+  }, []);
+
   const handlePlay = useCallback(async (record: HistoryRecord) => {
     if (record.media_type === 'local' && record.path) {
       try {
@@ -118,18 +127,28 @@ export default function HistoryPage() {
 
     // Online media: redirect to detail page
     const serverType = record.media_type === 'emby' ? 'emby' : 'jellyfin';
-    navigate(`/detail/${serverType}/${record.media_id}`);
-  }, [navigate, addToast]);
+    const serverId = await resolveHistoryServer(serverType);
+    if (serverId === null) {
+      addToast('无法确定该记录的服务器，请从媒体库进入播放', 'warning');
+      return;
+    }
+    navigate(`/detail/${serverType}/${serverId}/${record.media_id}`);
+  }, [navigate, addToast, resolveHistoryServer]);
 
-  const handleClickTitle = useCallback((record: HistoryRecord) => {
+  const handleClickTitle = useCallback(async (record: HistoryRecord) => {
     if (record.media_type === 'local' && record.path) {
       // Local files don't have a detail page; play directly
       handlePlay(record);
       return;
     }
     const serverType = record.media_type === 'emby' ? 'emby' : 'jellyfin';
-    navigate(`/detail/${serverType}/${record.media_id}`);
-  }, [navigate, handlePlay]);
+    const serverId = await resolveHistoryServer(serverType);
+    if (serverId === null) {
+      addToast('无法确定该记录的服务器，请从媒体库进入播放', 'warning');
+      return;
+    }
+    navigate(`/detail/${serverType}/${serverId}/${record.media_id}`);
+  }, [navigate, handlePlay, addToast, resolveHistoryServer]);
 
   return (
     <div className="p-8 max-w-4xl">

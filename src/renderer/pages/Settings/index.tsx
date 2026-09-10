@@ -8,7 +8,6 @@ import type { SourceListEntry, ScanProgressEvent } from '../../../shared/types';
 
 interface AuthResult {
   ok: boolean;
-  accessToken?: string;
   userId?: string;
   error?: string;
 }
@@ -246,11 +245,7 @@ export default function Settings() {
       })) as AuthResult;
 
       if (result?.ok) {
-        if (result.accessToken) {
-          addToast('连接成功，登录凭证有效', 'success');
-        } else {
-          addToast('服务器可达', 'success');
-        }
+        addToast(form.username ? '连接成功，登录凭证有效' : '服务器可达', 'success');
       } else {
         setFormError(result?.error || '连接失败');
       }
@@ -280,24 +275,17 @@ export default function Settings() {
     setSaving(true);
     setFormError(null);
     try {
-      let apiKey: string | undefined;
-      let userId: string | undefined;
-
+      // QYP2-015: the password (never a token) goes to saveServer; the
+      // main process authenticates and keeps the token in the SecretStore.
       if (form.username && form.password) {
-        // Re-authenticate to obtain fresh credentials
+        // Verify first so a typo surfaces here instead of a stored dud.
         const auth = await authenticate();
         if (!auth?.ok) {
           setFormError(auth?.error || '认证失败，请检查用户名和密码');
           setSaving(false);
           return;
         }
-        apiKey = auth.accessToken;
-        userId = auth.userId;
-      } else if (editingServer?.user_id && editingServer?.hasCredential) {
-        // Editing without a new password: the main process keeps the stored
-        // secret; the token itself never round-trips through the renderer.
-        userId = editingServer.user_id;
-      } else {
+      } else if (!(editingServer?.user_id && editingServer?.hasCredential)) {
         // Either new server without credentials, or editing a server that
         // has no stored credentials - a password is required to log in
         setFormError('该服务器尚未登录，请填写用户名和密码以完成登录');
@@ -311,8 +299,8 @@ export default function Settings() {
         name: form.name,
         baseUrl: form.baseUrl,
         username: form.username || undefined,
-        apiKey,
-        userId,
+        password: form.password || undefined,
+        userId: editingServer?.user_id,
         isActive: true,
       });
       addToast(editingServer ? '服务器已更新' : '服务器已保存', 'success');
