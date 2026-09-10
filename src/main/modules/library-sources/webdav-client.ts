@@ -241,6 +241,8 @@ export interface WebDavClient {
   list(relativePath: string, signal?: AbortSignal): Promise<WebDavEntry[]>;
   get(relativePath: string, range?: { rangeHeader?: string; signal?: AbortSignal }): Promise<WebDavResponse>;
   readText(relativePath: string, signal?: AbortSignal): Promise<string>;
+  /** DELETE with an optional If-Match precondition (plan §14.2.7). */
+  remove(relativePath: string, options?: { ifMatch?: string; signal?: AbortSignal }): Promise<void>;
 }
 
 export function createWebDavClient(options: WebDavClientOptions): WebDavClient {
@@ -420,6 +422,32 @@ export function createWebDavClient(options: WebDavClientOptions): WebDavClient {
         ...(size !== undefined && Number.isFinite(size) ? { size } : {}),
         supportsRange: isPartial,
       };
+    },
+
+    async remove(
+      relativePath: string,
+      removeOptions?: { ifMatch?: string; signal?: AbortSignal }
+    ): Promise<void> {
+      const requestPath = relativePathToRequestPath(relativePath, base);
+      // DELETE is never auto-retried beyond the network-error policy in
+      // request(); an ambiguous outcome (network drop after send) must
+      // surface as an error so the caller marks it unknown (§14.2.7).
+      const res = await requestWithRedirects('DELETE', requestPath, {
+        headers: {
+          ...(removeOptions?.ifMatch ? { 'If-Match': removeOptions.ifMatch } : {}),
+        },
+        signal: removeOptions?.signal,
+      });
+      if (res.status === 404) {
+        // Already gone counts as success for idempotent cleanup flows.
+        res.stream.destroy();
+        return;
+      }
+      if (res.status >= 200 && res.status < 300) {
+        res.stream.destroy();
+        return;
+      }
+      assertStatus(res.status, 'DELETE');
     },
 
     async readText(relativePath: string, callSignal?: AbortSignal): Promise<string> {

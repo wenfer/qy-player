@@ -76,4 +76,8 @@ export const IPC_CHANNELS = {
     PICK_IMAGE: 'metadata:pick-image',
     IMPORT_IMAGES: 'metadata:import-images',
   },
+  MEDIA: {
+    DELETE_PREVIEW: 'media:delete-preview',
+    DELETE_EXECUTE: 'media:delete-execute',
+  },
 } as const;

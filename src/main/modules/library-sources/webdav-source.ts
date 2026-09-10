@@ -128,6 +128,28 @@ export class WebDavSourceAdapter implements SourceAdapter {
     }
   }
 
+  /** DELETE a collection with an If-Match precondition (plan §14.2.7).
+   * Network errors propagate so the safe-delete service can mark the
+   * outcome unknown instead of guessing. */
+  async deleteTree(
+    relativePath: string,
+    signal: AbortSignal,
+    ifMatch?: string
+  ): Promise<{ status: 'deleted' | 'unknown' }> {
+    try {
+      await this.client.remove(relativePath, { ...(ifMatch ? { ifMatch } : {}), signal });
+      return { status: 'deleted' };
+    } catch (err) {
+      // 4xx from assertStatus is a definite refusal; network/timeout is
+      // ambiguous. Map both, never report success blindly.
+      const status = (err as { status?: number } | null)?.status;
+      if (status !== undefined && status >= 400 && status < 500) {
+        throw err;
+      }
+      return { status: 'unknown' };
+    }
+  }
+
   async stat(locator: MediaLocator, signal: AbortSignal): Promise<SourceStat> {
     const entry = await this.client.stat(locator.relativePath, signal);
     return {

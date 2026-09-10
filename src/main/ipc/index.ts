@@ -19,6 +19,7 @@ import {
 } from '../modules/security/secret-store';
 import type { SecretStore, StreamHeaderCache } from '../modules/security/secret-store';
 import { LocalSourceAdapter } from '../modules/library-sources/local-source';
+import { WebDavSourceAdapter } from '../modules/library-sources/webdav-source';
 import type { SourceAdapter } from '../modules/library-sources/types';
 import { ScanJobController } from '../modules/library-scanner/job-controller';
 import {
@@ -76,6 +77,7 @@ import {
   toEditorActionResult,
   type ManualPatch,
 } from '../modules/metadata/editor-service';
+import { SafeDeleteService } from '../modules/media-operations/delete-service';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -833,6 +835,32 @@ function registerCatalogHandlers(
   });
   // Metadata editor (QYP2-023): images live under <userData>/images/.
   const metadataImagesDir = join(app.getPath('userData'), 'images');
+  // Two-phase safe delete (QYP2-024, plan §14.2): short-lived single-use
+  // tokens; renderer supplies only {sourceId, itemId}, never paths.
+  const safeDelete = new SafeDeleteService({
+    repo: catalogRepo,
+    resolveInside: (id, relativePath) => {
+      const { adapter } = getAdapterForSource(db, id, secretStore);
+      if (!(adapter instanceof LocalSourceAdapter)) {
+        throw new Error('非本地来源不支持本地路径解析');
+      }
+      return adapter.resolveInside(relativePath);
+    },
+    trashFn: async (absolutePath) => {
+      const { shell } = await import('electron');
+      // shell.trashItem throws when the trash move fails; the service
+      // treats that as TRASH_FAILED and never falls back to a real delete.
+      await shell.trashItem(absolutePath);
+    },
+    webdavDelete: async ({ sourceId, relativePath, ifMatch }) => {
+      const { adapter } = getAdapterForSource(db, sourceId, secretStore);
+      if (!(adapter instanceof WebDavSourceAdapter)) {
+        throw new Error('非 WebDAV 来源不支持远程删除');
+      }
+      return adapter.deleteTree(relativePath, new AbortController().signal, ifMatch);
+    },
+    managedCacheRoots: [subtitleManagedRoot, metadataImagesDir],
+  });
   try {
     cleanupTempFiles(subtitleManagedRoot, new Set(catalogRepo.listAllSubtitlePaths()));
   } catch {
@@ -1175,6 +1203,43 @@ function registerCatalogHandlers(
         );
       }
       return ok({ imported: result.imported });
+    }
+  );
+
+  // ---- Safe delete (QYP2-024, plan §14.2) ----
+  ipcMain.handle(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, (_event, ref: { sourceId?: unknown; itemId?: unknown }) => {
+    const sourceId = Number(ref?.sourceId);
+    const itemId = Number(ref?.itemId);
+    const result = safeDelete.preview(sourceId, itemId);
+    if (!result.ok) {
+      const code = result.code === 'ITEM_NOT_FOUND' ? 'NOT_FOUND' : result.code === 'READ_ONLY' || result.code === 'NO_OWNERSHIP' ? 'UNAVAILABLE' : 'VALIDATION_FAILED';
+      return err(code, result.message);
+    }
+    return ok(result.preview);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEDIA.DELETE_EXECUTE,
+    async (_event, args: { token?: unknown; confirmTitle?: unknown }) => {
+      if (typeof args?.token !== 'string') {
+        return err('VALIDATION_FAILED', '缺少确认令牌');
+      }
+      const result = await safeDelete.execute(args.token, {
+        ...(typeof args.confirmTitle === 'string' ? { confirmTitle: args.confirmTitle } : {}),
+      });
+      if (!result.ok) {
+        return err(
+          result.code === 'ITEM_NOT_FOUND'
+            ? 'NOT_FOUND'
+            : result.code === 'TRASH_FAILED' || result.code === 'WEBDAV_UNKNOWN' || result.code === 'WEBDAV_FAILED'
+              ? 'UNAVAILABLE'
+              : result.code === 'FINGERPRINT_CHANGED'
+                ? 'UPSTREAM_CHANGED'
+                : 'VALIDATION_FAILED',
+          result.message
+        );
+      }
+      return ok({ status: result.status, itemId: result.itemId });
     }
   );
 

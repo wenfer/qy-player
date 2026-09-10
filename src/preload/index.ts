@@ -125,6 +125,11 @@ const electronAPI = {
   pickImageFile: () => ipcRenderer.invoke(IPC_CHANNELS.METADATA.PICK_IMAGE),
   importImages: (itemId: number, inputs: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.METADATA.IMPORT_IMAGES, itemId, inputs),
+  // Safe delete (QYP2-024): preview/execute two-phase
+  previewMediaDeletion: (ref: { sourceId: number; itemId: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, ref),
+  executeMediaDeletion: (args: { token: string; confirmTitle?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEDIA.DELETE_EXECUTE, args),
   resolvePlayback: (ref: unknown, options?: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.RESOLVE, ref, options),
   probeItem: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.PROBE_ITEM, input),
