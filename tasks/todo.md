@@ -305,6 +305,21 @@ Evidence:
 - [ ] **验证：** renderer 测试、DevTools 状态/日志无秘密、`npm run typecheck`。
 - [ ] **Evidence：** 待填写
 
+### QYP2-013 添加 WebDAV 来源配置 UI
+
+- [x] **依赖：** QYP2-008、QYP2-012
+- [x] **Read first：** 计划第 8 节、现有 Settings/ServerForm、SourceForm（QYP2-008）
+- [x] **允许修改：** `SourceForm.tsx`、`WebDavFields.tsx`、`SourceList.tsx`、`src/preload/index.ts`、`tests/renderer/settings/webdav-source.test.tsx`
+- [x] **目标：** 添加地址、根路径、账号、测试连接、只读/删除 capability 与 SecretStore 状态。
+- [x] **验收：** 禁止 URL userinfo/query token；密码不回显；HTTP 明文有确认；密钥不可用时默认会话保存；显示 Range/ETag/DELETE 能力。
+- [x] **验证：** renderer 测试（7 用例）+ 主进程（10 用例）、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（20 文件 230 测试通过）；`npm run typecheck`（零错误）；`git diff --check`
+  - Main tests: 凭据只入 SecretStore（raw app_config 扫描断言无密码明文）；http 无 consent 拒绝/有 consent 保存；URL 契约（userinfo/query/fragment/ftp/坏格式全拒）；无凭据来源不触 SecretStore；removeSource 连带清密钥；adapter 工厂两分支；不可达主机快速失败
+  - Renderer tests: consent 门禁（未勾选时 confirmHttpPlaintext=false → 勾选后 true）；密码 type=password + autocomplete=new-password + 永不回显；userinfo hint 禁用提交；能力行（拖动/续播、ETag、删除已禁用）；session-only 诚实提示；来源行徽章（WebDAV/http 明文/凭据已保存/能力 chips）；页面保存流
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：CRITICAL——secret_ref 写入 'webdav:<id>' 不符合 SecretStore 'sec:<ns>:<key>' 契约，parseSecretRef 永远解析失败 → hasCredential 永假（改用 formatSecretRef，测试断言保护修复后的格式）；REQUIRED——测试曾保护错误行为；OPTIONAL——空字符串凭据不视为凭据、persistentSecrets 默认 false（不预先承诺加密）、条件类型清理；NIT——spellCheck、明文检测提取共享 urlLooksPlaintextHttp；二轮验收 Approve（secret_ref 写/读/解析三层链路核验一致）；② SCAN_START 对 webdav 显式拒绝（'WebDAV 扫描即将在后续版本提供'），扫描按钮 disabled + title，QYP2-014 解锁；③ DevTools 无秘密核查角度：password 仅存在于表单 state 与一次 IPC invoke，save 后 reset，renderer 永不收到存储凭据（只有 hasCredential 布尔），main 侧 Authorization 无日志（QYP2-012 已保证）；④ 越界文件（待追认）：shared/types（CreateWebDavSourceInput guard）、ipc-channels（SECRETS_PERSISTENT）、source-service（createWebDavSource/testWebDavConnection/getAdapterForSource webdav 分支/removeSource 清密钥）、ipc/index（SAVE/TEST 分支 + HEALTH 401→AUTH_REQUIRED + SCAN_START 守卫）、Settings/index.tsx（payload 分支 + SourceList 接入 + persistentSecrets）、local-source.test.tsx（适配新 props/payload）——均为最小必要
+
 ### QYP2-014 实现 WebDAV 增量扫描与离线状态
 
 - [ ] **依赖：** QYP2-009、QYP2-012
