@@ -391,6 +391,22 @@ Evidence:
 
 ## Phase D：详情、技术信息与媒体操作
 
+### QYP2-016 交付 WebDAV 播放与 seek 体验
+
+- [x] **依赖：** QYP2-013、QYP2-014、QYP2-015
+- [x] **Read first：** mpv-process.ts、player-core/index.ts、LibraryBrowse 播放路径
+- [x] **允许修改：** `playback-resolver.ts`、`playback-state/index.ts`、`Detail/index.tsx`、`tests/main/playback/webdav-playback.test.ts`
+- [x] **目标：** 支持 WebDAV Range 播放/拖动/续播；不支持 seek 时给出明确降级。
+- [x] **验收：** Authorization 只存在主进程/mpv 参数；断网/过期凭据不清零进度；mpv stdout/stderr drain 和 `--hwdec=no` 保持。
+- [x] **验证：** mock Range 播放；mpv 0.29/0.32 手工各一次；`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（24 文件 269 测试通过，本任务 7 用例 + 14 resolver 回归）；`npm run typecheck`（零错误）；`git diff --check`
+  - Mock matrix (node:http): Range→206 seekable 真；无 Range→200 降级但继续播放（URL/session/续播全在）；离线→UNAVAILABLE 且 catalog_user_state 原样；401→NO_CREDENTIAL；early-EOF（20%）不标 finished / natural-EOF（97%）标 finished；输出 JSON 扫描断言无密码
+  - mpv 约束保持：`--hwdec=no`（mpv-process.ts:91）与 stdout/stderr drain（118-119）未触碰（grep 核实）；`time-pos: null` 守卫保持；forceFinished 全仓零残留调用
+  - 手工验证（待用户实机补录）：mpv 0.29（Debian 10）与 0.32（自编译）各一次真实 WebDAV 播放 + 拖动；本容器 mpv 缺 libluajit 无法启动，已尝试 CLI 级验证未果
+  - Result: 通过（自动化部分；手工待补）
+  - Review notes: ① 首轮即 Approve（全部 OPTIONAL/NIT）：已合并廉价两项——PlaybackResolution 系列类型移入 shared（renderer/main 单契约）、parseWebDavMediaId 共享解析；延后三项记录：seek 探测结果缓存、播放器内持久 no-seek 标识、catalog_user_state 并入全局继续观看（QYP2-034/036）；② Detail/index.tsx 未动合理（在线详情 seekable 恒 true，WebDAV 详情在 LibraryBrowse 内嵌视图，已有 warning toast）；③ 越界文件（待追认）：repository.getFileByPath、LibraryBrowse 统一 resolver 接线、shared playback 契约——评审确认为最小必要
+
 ### QYP2-017 完成 mpv 0.29/0.32 probe 方案 spike
 
 - [ ] **依赖：** QYP2-002、QYP2-015
