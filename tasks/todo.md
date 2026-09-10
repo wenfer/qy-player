@@ -281,6 +281,20 @@ Evidence:
 - [ ] **验证：** mock server 覆盖 401、403、redirect、malicious href、Range、超时和取消。
 - [ ] **Evidence：** 待填写
 
+### QYP2-012 实现 WebDAV 客户端与 URL 安全边界
+
+- [x] **依赖：** QYP2-005、QYP2-006
+- [x] **Read first：** 计划第 8 节、§4.2、§16.4、QYP2-006 contract、SecretStore API
+- [x] **允许修改：** `webdav-client.ts`、`webdav-source.ts`、`url-guard.ts`、`tests/main/webdav/webdav-client.test.ts`
+- [x] **目标：** HTTP/HTTPS、无认证/Basic/App Password、PROPFIND Depth 0/1、GET/Range 和安全重定向。
+- [x] **验收：** href 解码/归一化后仍在 root；拒绝 ../双重编码/跨 origin Authorization；响应大小/深度/超时/重试有界；能力明确。
+- [x] **验证：** mock server（node:http，端口 0 迟绑定）覆盖 401、403、redirect、malicious href、Range、超时、取消。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（18 文件 213 测试通过，本任务 25 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Security matrix: base URL 拒 userinfo/query/fragment/非 http(s)/控制字符；href 拒编码穿越（%2e/%2f/%5c/overlong UTF-8）、双重编码（一次解码后残留 %25 等即拒，%2f 假阳性已文档化为含保严格权衡）、跨源绝对 href、协议相对、坏编码；multistatus 拒 DOCTYPE/非预定义实体；响应 8MiB 上限、条目 1 万上限；超时 15s（请求期 + 流读取期双重 deadline）；重试仅网络错误 + 502/503/504（≤2 次，401/403 永不重试）；重定向仅同源（Authorization 永不跨源）、≤3 跳；AbortSignal 全链路（请求、退避、流读取）
+  - Result: 通过
+  - Review notes: ① 评审两轮（均在提交前整改完毕）+ 验收 Approve：CRITICAL——open 以 200 冒充 Range 支持会向 UI 隐藏 seek 不可靠（改为仅 206 判定，播放前逐文件探测）；REQUIRED——响应流错误路径 timer/abortListener 泄漏、backoff 监听器全路径移除 + 重试前 abort 检查、adapter signal 全链路传递、%25 残留编码穿透；readText 流阶段无超时保护（补双重 deadline + abort destroy）；② testConnection supportsEtag 诚实化（按 root 条目声明），supportsRange 乐观默认已注释（播放前 206 探测为准，plan §8.1）；③ 凭据仅经 SecretStore namespace 'webdav'（JSON 序列化，损坏按无凭据处理）；Authorization 只在 header 构造处出现，全模块零日志；④ 与其他 SourceAdapter 的隔离：所有 URL 构造经 url-guard，存储的 relativePath 永不直接拼 URL；⑤ 待办留档：getAdapterForSource 接入 WebDAV 在 QYP2-014（webdav-scanner 允许文件清单内做接线）；DELETE 能力按 plan 推迟到 QYP2-024（canDelete 恒 false）；⑥ 越界：无（仅允许清单内文件）
+
 ### QYP2-013 添加 WebDAV 来源配置 UI
 
 - [ ] **依赖：** QYP2-008、QYP2-012
