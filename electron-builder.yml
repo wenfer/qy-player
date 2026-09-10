@@ -62,9 +62,6 @@ deb:
     - libuuid1
     - libsecret-1-0
     - libappindicator3-1
-  # electron-builder otherwise emits AppIndicator only as a recommendation;
-  # Deepin's StatusNotifier tray requires it at runtime.
-  recommends: []
 
 # RedHat/CentOS/Fedora/openSUSE 专用配置
 rpm:
