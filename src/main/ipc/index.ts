@@ -57,6 +57,7 @@ import type {
 import { isMediaRef } from '../../shared/types';
 import {
   bindServerById,
+  parseWebDavMediaId,
   resolvePlayback,
   ResolverError,
 } from '../modules/player-core/playback-resolver';
@@ -151,23 +152,17 @@ export function registerIpcHandlers(player: PlayerCore): void {
   playbackStateManager = new PlaybackStateManager(player, storage, {
     save: (mediaType, mediaId, position, duration, isFinished) => {
       if (mediaType !== 'webdav') return;
-      const sep = mediaId.indexOf(':');
-      if (sep <= 0) return;
-      const sourceId = Number(mediaId.slice(0, sep));
-      const relativePath = mediaId.slice(sep + 1);
-      if (!Number.isInteger(sourceId) || !relativePath) return;
-      const file = catalogRepo.getFileByPath(sourceId, relativePath);
+      const parsed = parseWebDavMediaId(mediaId);
+      if (!parsed) return;
+      const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
       if (!file) return;
       catalogRepo.upsertUserState({ itemId: file.item_id, position, duration, isFinished });
     },
     getResumePosition: (mediaType, mediaId) => {
       if (mediaType !== 'webdav') return 0;
-      const sep = mediaId.indexOf(':');
-      if (sep <= 0) return 0;
-      const sourceId = Number(mediaId.slice(0, sep));
-      const relativePath = mediaId.slice(sep + 1);
-      if (!Number.isInteger(sourceId) || !relativePath) return 0;
-      const file = catalogRepo.getFileByPath(sourceId, relativePath);
+      const parsed = parseWebDavMediaId(mediaId);
+      if (!parsed) return 0;
+      const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
       if (!file) return 0;
       const state = catalogRepo.getUserState(file.item_id);
       if (!state) return 0;

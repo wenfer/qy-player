@@ -20,23 +20,12 @@ interface RawItem {
   ImageTags?: { Primary?: string };
 }
 
+// Renderer consumes the shared resolution contract (QYP2-015/016).
+import type { PlaybackResolution } from '../../../shared/types/catalog';
+
 interface ResolvedPlayback {
   ok: boolean;
-  data?: {
-    url: string;
-    streamSessionId?: string;
-    seekable: boolean;
-    startPosition: number;
-    mediaContext: {
-      mediaType: string;
-      mediaId: string;
-      title?: string;
-      seriesName?: string;
-      seasonNumber?: number;
-      episodeNumber?: number;
-      mediaSourceId?: string;
-    };
-  };
+  data?: PlaybackResolution;
   error?: { message: string };
 }
 

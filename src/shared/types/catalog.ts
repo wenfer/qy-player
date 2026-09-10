@@ -290,6 +290,42 @@ export function isCatalogSearchQuery(value: unknown): value is CatalogSearchQuer
 }
 
 // ---------------------------------------------------------------------------
+// Unified playback resolution (QYP2-015/016): renderer builds a MediaRef,
+// main resolves everything else. The Authorization/session material never
+// appears here — only the opaque streamSessionId travels.
+export type ResolveMode = 'direct' | 'transcode';
+
+export interface ResolvePlaybackInput {
+  ref: MediaRef;
+  mode?: ResolveMode;
+  mediaSourceId?: string;
+}
+
+export type ResolvedPlaybackKind = 'local-file' | 'webdav-stream' | 'online-direct' | 'online-transcode';
+
+export interface ResolvedMediaContext {
+  mediaType: string;
+  mediaId: string;
+  title?: string;
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  mediaSourceId?: string;
+}
+
+export interface PlaybackResolution {
+  kind: ResolvedPlaybackKind;
+  /** Ready-to-load path (local file) or stream URL (webdav/online). */
+  url: string;
+  /** Opaque header session; the renderer hands it back, never reads it. */
+  streamSessionId?: string;
+  startPosition: number;
+  /** False = seeking unreliable; play/resume keep working (plan §8.1). */
+  seekable: boolean;
+  mediaContext: ResolvedMediaContext;
+}
+
+// ---------------------------------------------------------------------------
 // Pagination (runtime-checked contract)
 // ---------------------------------------------------------------------------
 

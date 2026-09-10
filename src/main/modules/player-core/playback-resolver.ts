@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
-import type { MediaRef } from '../../../shared/types';
+import type {
+  PlaybackResolution,
+  ResolveMode,
+  ResolvePlaybackInput,
+} from '../../../shared/types';
 import { createCatalogQueryService, type PlaybackIntent } from '../catalog/query-service';
 import { getAdapterForSource } from '../catalog/source-service';
 import { LocalSourceAdapter } from '../library-sources/local-source';
@@ -19,42 +23,6 @@ import type { createClient } from '../online-connector';
  * URLs are built by main, and online sources are routed STRICTLY by
  * serverId — no more try-every-active-server fallthrough.
  */
-
-export type ResolveMode = 'direct' | 'transcode';
-
-export interface ResolvePlaybackInput {
-  ref: MediaRef;
-  mode?: ResolveMode;
-  /** Online items may pin a specific media source id. */
-  mediaSourceId?: string;
-}
-
-export type ResolvedKind = 'local-file' | 'webdav-stream' | 'online-direct' | 'online-transcode';
-
-export interface ResolvedMediaContext {
-  mediaType: string;
-  mediaId: string;
-  title?: string;
-  seriesName?: string;
-  seasonNumber?: number;
-  episodeNumber?: number;
-  mediaSourceId?: string;
-}
-
-export interface PlaybackResolution {
-  kind: ResolvedKind;
-  /** Ready-to-load path (local file) or stream URL (webdav/online). */
-  url: string;
-  /** Opaque header session for transcode/webdav-auth; renderer passes back. */
-  streamSessionId?: string;
-  startPosition: number;
-  /**
-   * Whether the target honors byte ranges (plan §8.1). False means the UI
-   * must show seeking as unreliable while play/resume keep working.
-   */
-  seekable: boolean;
-  mediaContext: ResolvedMediaContext;
-}
 
 export class ResolverError extends Error {
   readonly code:
@@ -103,6 +71,19 @@ export function bindServerById(
     throw new ResolverError('SERVER_NOT_FOUND', '服务器不存在或已被移除');
   }
   return bindOnlineServer(storage, secretStore, record.type, serverId);
+}
+
+/**
+ * Parse a WebDAV progress key `<sourceId>:<relativePath>` (see the sink in
+ * ipc/index.ts and playback-state: both go through here).
+ */
+export function parseWebDavMediaId(mediaId: string): { sourceId: number; relativePath: string } | null {
+  const sep = mediaId.indexOf(':');
+  if (sep <= 0) return null;
+  const sourceId = Number(mediaId.slice(0, sep));
+  const relativePath = mediaId.slice(sep + 1);
+  if (!Number.isInteger(sourceId) || !relativePath) return null;
+  return { sourceId, relativePath };
 }
 
 /** STRICT server lookup by id (plan §4.1/§15: no cross-server fallthrough). */
