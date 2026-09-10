@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Server, HardDrive } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import ServerForm, { ServerForm as ServerFormValues } from './ServerForm';
-import SourceForm, { type SourceFormPayload } from './SourceForm';
+import SourceForm, { type SourceFormCaps, type SourceFormPayload } from './SourceForm';
 import SourceList from './SourceList';
 import type { SourceListEntry, ScanProgressEvent } from '../../../shared/types';
 
@@ -42,7 +42,8 @@ export default function Settings() {
   const [form, setForm] = useState<ServerFormValues>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceListEntry[]>([]);
-  const [persistentSecrets, setPersistentSecrets] = useState(true);
+  // Default false: never promise encryption before main confirms it.
+  const [persistentSecrets, setPersistentSecrets] = useState(false);
   const [showSourceForm, setShowSourceForm] = useState(false);
   const [savingSource, setSavingSource] = useState(false);
   const [testingSource, setTestingSource] = useState(false);
@@ -108,7 +109,7 @@ export default function Settings() {
   const handleSourceTest = useCallback(
     async (
       payload: SourceFormPayload
-    ): Promise<{ ok: boolean; capabilities?: SourceFormPayload extends never ? never : { canSeek: boolean; canDelete: boolean; supportsEtag: boolean; supportsRange: boolean }; error?: string } | null> => {
+    ): Promise<{ ok: boolean; capabilities?: SourceFormCaps; error?: string } | null> => {
       setTestingSource(true);
       try {
         const res = (await window.electronAPI.testSource(payload)) as {

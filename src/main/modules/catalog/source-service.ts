@@ -7,10 +7,12 @@ import {
   deleteWebDavSecret,
   loadWebDavSecret,
   saveWebDavSecret,
+  WEBDAV_SECRET_NAMESPACE,
 } from '../library-sources/webdav-source';
 import { parseWebDavBaseUrl, WebDavUrlError } from '../library-sources/url-guard';
 import type { SourceAdapter } from '../library-sources/types';
 import type { SecretStore } from '../security/secret-store';
+import { formatSecretRef } from '../security/secret-store';
 import type { CreateWebDavSourceInput } from '../../../shared/types';
 
 /**
@@ -72,12 +74,13 @@ export function createWebDavSource(
     root: parsed.url,
     readOnly: true, // plan §14.2: deletion stays disabled by default
   });
-  if (input.username !== undefined && input.password !== undefined && secretStore) {
+  // Empty strings are not credentials; only real pairs reach the store.
+  if (input.username && input.password && secretStore) {
     saveWebDavSecret(secretStore, sourceId, {
       username: input.username,
       password: input.password,
     });
-    repo.setSourceSecret(sourceId, `webdav:${sourceId}`);
+    repo.setSourceSecret(sourceId, formatSecretRef(WEBDAV_SECRET_NAMESPACE, String(sourceId)));
   }
   return { sourceId, root: parsed.url, name };
 }

@@ -1,4 +1,5 @@
 import { Loader2, RefreshCw, Trash2, X, Lock, Unlock, Globe, AlertTriangle } from 'lucide-react';
+import { urlLooksPlaintextHttp } from './WebDavFields';
 import type { SourceListEntry } from '../../../shared/types';
 
 export interface SourceListProps {
@@ -11,10 +12,6 @@ export interface SourceListProps {
 }
 
 const NON_TERMINAL = new Set(['queued', 'discovering', 'indexing', 'enriching']);
-
-function isPlaintextHttp(root: string): boolean {
-  return /^http:\/\//i.test(root);
-}
 
 /** Source rows for 本地 + WebDAV sources (plan §7/§8, QYP2-008/013). */
 export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove }: SourceListProps) {
@@ -38,7 +35,7 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
                     {isWebdav ? 'WebDAV' : '本地'}
                   </span>
                   {source.readOnly && <span className="text-[10px] text-muted-foreground">只读</span>}
-                  {isWebdav && isPlaintextHttp(source.root) && (
+                  {isWebdav && urlLooksPlaintextHttp(source.root) && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 text-[10px] font-medium">
                       <AlertTriangle size={10} />
                       http 明文

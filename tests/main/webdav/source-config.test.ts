@@ -61,7 +61,7 @@ describe('createWebDavSource', () => {
     expect(row.kind).toBe('webdav');
     // The password never lands in the source row or any config column.
     expect(row.root).not.toContain('secret-password');
-    expect(row.secret_ref).toBe(`webdav:${created.sourceId}`);
+    expect(row.secret_ref).toBe(`sec:webdav:${created.sourceId}`);
     expect(secretStore.hasSecret('webdav', String(created.sourceId))).toBe(true);
     const raw = db
       .prepare("SELECT value FROM app_config WHERE key LIKE 'secret:%'")

@@ -24,7 +24,8 @@ interface WebDavFieldsProps {
   persistentSecrets: boolean;
 }
 
-function urlLooksPlaintextHttp(url: string): boolean {
+/** Shared by the form warning and the source list badge (plan §8.1). */
+export function urlLooksPlaintextHttp(url: string): boolean {
   return /^http:\/\//i.test(url.trim());
 }
 
@@ -100,6 +101,7 @@ export default function WebDavFields({
             value={values.password}
             onChange={(e) => onChange({ ...values, password: e.target.value })}
             autoComplete="new-password"
+            spellCheck={false}
             className="mt-1 w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus-ring"
           />
         </label>
