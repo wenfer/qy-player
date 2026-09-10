@@ -61,8 +61,10 @@ deb:
     - libatspi2.0-0
     - libuuid1
     - libsecret-1-0
-  recommends:
     - libappindicator3-1
+  # electron-builder otherwise emits AppIndicator only as a recommendation;
+  # Deepin's StatusNotifier tray requires it at runtime.
+  recommends: []
 
 # RedHat/CentOS/Fedora/openSUSE 专用配置
 rpm:
