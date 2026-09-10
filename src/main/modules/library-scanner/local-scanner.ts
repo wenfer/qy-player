@@ -202,7 +202,8 @@ export function createLocalScanDriver(deps: {
     repo.listFilesBySource(sourceId).map((f) => [f.relative_path, { fingerprint: f.fingerprint }])
   );
   const seen = new Set<string>();
-  // NFO enrichment state (per run): stem → itemId for episode/video NFOs;
+  // NFO enrichment state (per run): "<dir>:<stem>" → itemId (dir-qualified:
+  // same-named videos in different directories must never cross-match);
   // dir-keyed payloads for movie.nfo / tvshow.nfo / season.nfo; dir → item
   // registrations so late-arriving NFOs (DFS sort order) still find their
   // series/season items.
@@ -212,6 +213,9 @@ export function createLocalScanDriver(deps: {
   const dirMovieNfo = new Map<string, NfoMetadata>();
   const dirShowNfo = new Map<string, NfoMetadata>();
   const dirSeasonNfo = new Map<string, NfoMetadata>();
+  // Stem-keyed NFOs whose video item does not exist yet (movie groups flush
+  // on directory change, so "intro.nfo" can precede "intro.mkv"'s item).
+  const pendingStemNfo = new Map<string, NfoMetadata>();
 
   async function enrichFromNfo(relativePath: string, signal: AbortSignal): Promise<void> {
     if (!deps.readNfo) return;
@@ -231,7 +235,8 @@ export function createLocalScanDriver(deps: {
         // Applied to the movie group at flush time (same dir).
         dirMovieNfo.set(dir, meta);
       } else {
-        target = stemItem.get(stem);
+        target = stemItem.get(`${dir}:${stem}`);
+        if (target === undefined) pendingStemNfo.set(`${dir}:${stem}`, meta);
       }
       if (target !== undefined) persistNfoMetadata(repo, target, meta);
     } catch (err) {
@@ -314,7 +319,7 @@ export function createLocalScanDriver(deps: {
           episodeNumber: e.episode,
           ...(e.episodeTitle ? { title: e.episodeTitle } : {}),
         });
-        stemItem.set(stemOf(entry.relativePath), episodeId);
+        stemItem.set(`${dirOf(entry.relativePath)}:${stemOf(entry.relativePath)}`, episodeId);
         repo.upsertFile({
           sourceId,
           itemId: episodeId,
@@ -395,8 +400,14 @@ export function createLocalScanDriver(deps: {
         mtime: c.entry.mtime,
         fingerprint: fp,
       });
-      // Every attached file's stem can own a matching NFO.
-      stemItem.set(stemOf(c.entry.relativePath), targetItem);
+      // Every attached file's stem can own a matching NFO (dir-qualified).
+      const key = `${dirOf(c.entry.relativePath)}:${stemOf(c.entry.relativePath)}`;
+      stemItem.set(key, targetItem);
+      const pending = pendingStemNfo.get(key);
+      if (pending) {
+        pendingStemNfo.delete(key);
+        persistNfoMetadata(repo, targetItem, pending);
+      }
     };
 
     let primaryItem: number;

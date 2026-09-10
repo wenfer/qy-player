@@ -160,23 +160,22 @@ export function createCatalogQueryService(db: Database.Database): CatalogQuerySe
         : repo.listSources().map((s) => s.id);
       const collected: CatalogItemSummary[] = [];
       let remaining = pageSize;
-      let offset = (page - 1) * pageSize;
+      // Per-source skip accounting: earlier sources consume the global
+      // offset first; each fully-passed source reduces what later ones skip.
+      let skip = (page - 1) * pageSize;
       for (const sourceId of sourceIds) {
         if (remaining <= 0) break;
         const { rows, total } = repo.listItemsFiltered(
           { sourceId, search: like },
           remaining,
-          offset
+          skip
         );
         const itemIds = rows.map((r) => r.id);
         const metaRows = repo.listMetadataSourcesForItems(itemIds) as MetadataRow[];
         const states = repo.listUserStatesForItems(itemIds);
         collected.push(...overlaySummaries(rows, sourceId, metaRows, states));
         remaining -= rows.length;
-        // Fan-out continues on the next source only after earlier sources
-        // are fully consumed.
-        if (rows.length < remaining + pageSize) offset = Math.max(0, offset - total);
-        else break;
+        skip = Math.max(0, skip - total);
       }
       const result: Page<CatalogItemSummary> = { items: collected, page, pageSize };
       // Cursor logic stays coarse for fan-out: expose nextCursor only when
@@ -229,6 +228,14 @@ export function createCatalogQueryService(db: Database.Database): CatalogQuerySe
       }
 
       const childRows = repo.listByParent(itemId, sourceId);
+      // A series' detail needs BOTH seasons and their episodes (the UI
+      // renders season → episode grids); flatten grandchildren under the
+      // seasons. Bounded by the catalog size of this source.
+      if (row.kind === 'series') {
+        for (const season of childRows.filter((c) => c.kind === 'season')) {
+          childRows.push(...repo.listByParent(season.id, sourceId));
+        }
+      }
       const childMeta = repo.listMetadataSourcesForItems(
         childRows.map((c) => c.id)
       ) as unknown as MetadataRow[];

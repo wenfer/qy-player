@@ -176,6 +176,31 @@ describe('LibraryBrowse: catalog mode', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeTruthy();
   });
 
+  it('load-more requests the next integer page', async () => {
+    const items = Array.from({ length: 60 }, (_, i) => ({
+      ref: { provider: 'catalog', sourceId: 7, itemId: String(i + 1) },
+      kind: 'movie',
+      title: `电影${i}`,
+      availability: 'online',
+    }));
+    electronAPI.browseCatalog.mockResolvedValue({
+      ok: true,
+      data: { items, page: 1, pageSize: 60, nextCursor: '2' },
+    });
+    renderCatalogRoute('/browse/7');
+    await waitFor(() => expect(screen.getByText('电影0')).toBeTruthy());
+    electronAPI.browseCatalog.mockResolvedValue({
+      ok: true,
+      data: { items: [], page: 2, pageSize: 60 },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /加载更多/ }));
+    await waitFor(() =>
+      expect(electronAPI.browseCatalog).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sourceId: 7, page: 2, pageSize: 60 })
+      )
+    );
+  });
+
   it('searches within the source', async () => {
     electronAPI.browseCatalog.mockResolvedValue({ ok: true, data: { items: [], page: 1, pageSize: 60 } });
     electronAPI.searchCatalog.mockResolvedValue({

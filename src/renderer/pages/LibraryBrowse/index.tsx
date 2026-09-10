@@ -317,6 +317,7 @@ export default function LibraryBrowse() {
   const [searchText, setSearchText] = useState('');
   const [searching, setSearching] = useState(false);
   const startIndexRef = useRef(0);
+  const catalogPageRef = useRef(1);
   const serverMapRef = useRef<Map<number, import('../../utils/server-images').ServerEntry>>(new Map());
 
   const mapItem = useCallback(
@@ -382,14 +383,19 @@ export default function LibraryBrowse() {
   const loadCatalogPage = useCallback(
     async (replace: boolean, nextPage?: number) => {
       if (!isCatalog) return;
-      if (replace) setInitialLoading(true);
-      else setLoadingMore(true);
+      const target = replace ? 1 : (nextPage ?? catalogPageRef.current + 1);
+      if (replace) {
+        setInitialLoading(true);
+        catalogPageRef.current = 1;
+      } else {
+        setLoadingMore(true);
+      }
       setError(null);
       try {
         const result = (await window.electronAPI.browseCatalog({
           sourceId: catalogSourceId,
           parentId: null,
-          page: nextPage ?? 1,
+          page: target,
           pageSize: PAGE_SIZE,
         })) as { ok: boolean; data?: { items: CatalogItemSummary[]; nextCursor?: string }; error?: { message: string } };
         if (!result.ok || !result.data) {
@@ -410,6 +416,7 @@ export default function LibraryBrowse() {
         }));
         setItems((prev) => (replace ? mapped : [...prev, ...mapped]));
         setHasMore(result.data.nextCursor !== undefined);
+        if (replace || result.data.items.length > 0) catalogPageRef.current = target;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '未知错误';
         setError(msg);
@@ -631,7 +638,7 @@ export default function LibraryBrowse() {
           {hasMore && (
             <div className="flex justify-center mt-8">
               <button
-                onClick={() => (isCatalog ? loadCatalogPage(false, Number(items.length / PAGE_SIZE) + 1) : loadPage(false))}
+                onClick={() => (isCatalog ? loadCatalogPage(false) : loadPage(false))}
                 disabled={loadingMore}
                 className="flex items-center gap-2 px-5 py-2.5 border border-border rounded-lg hover:bg-accent transition-colors text-sm focus-ring disabled:opacity-50"
               >

@@ -263,6 +263,36 @@ describe('catalog query service', () => {
     expect(movie.rating).toBeCloseTo(7.9);
   });
 
+  it('matches NFOs per directory when stems collide across directories', async () => {
+    const sourceId = makeSource();
+    await scanTree(
+      sourceId,
+      makeTree({
+        '第一季/intro.mkv': { size: 100, mtime: 1 },
+        '第一季/intro.nfo': { size: 10, mtime: 1, content: '<movie><title>第一季片头</title></movie>' },
+        '第二季/intro.mkv': { size: 100, mtime: 2 },
+        '第二季/intro.nfo': { size: 10, mtime: 2, content: '<movie><title>第二季片头</title></movie>' },
+      })
+    );
+    const titles = query.listPage({ sourceId, parentId: null }).items.map((i) => i.title).sort();
+    expect(titles).toEqual(['第一季片头', '第二季片头']);
+  });
+
+  it('series detail flattens season episodes into children', async () => {
+    const sourceId = makeSource();
+    await scanTree(
+      sourceId,
+      makeTree({
+        '绝命毒师/Season 1/绝命毒师 S01E01.mkv': { size: 100, mtime: 1 },
+        '绝命毒师/Season 2/绝命毒师 S02E01.mkv': { size: 100, mtime: 2 },
+      })
+    );
+    const series = query.listPage({ sourceId, parentId: null }).items.find((i) => i.kind === 'series')!;
+    const detail = query.getDetail(sourceId, Number(series.ref.itemId))!;
+    expect(detail.children.filter((c) => c.kind === 'season')).toHaveLength(2);
+    expect(detail.children.filter((c) => c.kind === 'episode')).toHaveLength(2);
+  });
+
   it('rejects invalid browse/search input shapes at the contract level', () => {
     // The guards are the IPC boundary; exercise them directly.
     expect(isCatalogBrowseQuerySafe({ sourceId: 1 })).toBe(true);
