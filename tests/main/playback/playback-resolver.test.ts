@@ -1,7 +1,8 @@
+import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { createSecretStore, type SecretStore, type StreamHeaderCache, createStreamHeaderCache, MEDIA_SERVER_NAMESPACE } from '../../../src/main/modules/security/secret-store';
@@ -74,6 +75,32 @@ let db: BetterSqlite3.Database;
 let secretStore: SecretStore;
 let streamHeaders: StreamHeaderCache;
 let sessions = 0;
+// Minimal mock WebDAV host: answers the seek probe (Range → 206).
+let mockServer: Server;
+let mockPort = 0;
+
+beforeAll(async () => {
+  mockServer = createServer((req, res) => {
+    if (req.method === 'PROPFIND') {
+      res.writeHead(207, { 'Content-Type': 'application/xml' });
+      res.end('<D:multistatus xmlns:D="DAV:"></D:multistatus>');
+      return;
+    }
+    if (req.headers.range) {
+      res.writeHead(206, { 'Content-Length': 1, 'Content-Range': 'bytes 0-0/100' });
+      res.end('x');
+      return;
+    }
+    res.writeHead(200, { 'Content-Length': 100 });
+    res.end('x'.repeat(100));
+  });
+  await new Promise<void>((resolve) => mockServer.listen(0, '127.0.0.1', resolve));
+  mockPort = (mockServer.address() as { port: number }).port;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve) => mockServer.close(() => resolve()));
+});
 let servers: Array<{
   id: number;
   type: string;
@@ -165,7 +192,7 @@ describe('playback resolver: local catalog', () => {
 describe('playback resolver: webdav stream', () => {
   it('builds the URL main-side and stashes Basic auth opaquely', async () => {
     const repo = createCatalogRepository(db);
-    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: 'https://cloud.example.com/dav' });
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav` });
     secretStore.setSecret('webdav', String(sourceId), JSON.stringify({ username: 'u', password: 'p@ss' }));
     const itemId = repo.upsertItem({ sourceId, sourceKey: 'movie:b', kind: 'movie', title: '电影B' });
     repo.upsertFile({ sourceId, itemId, relativePath: '电影B (2020).mkv', size: 1, mtime: 1 });
@@ -175,7 +202,7 @@ describe('playback resolver: webdav stream', () => {
       ref: { provider: 'catalog', sourceId, itemId: String(itemId) },
     });
     expect(resolution.kind).toBe('webdav-stream');
-    expect(resolution.url).toBe('https://cloud.example.com/dav/%E7%94%B5%E5%BD%B1B%20(2020).mkv');
+    expect(resolution.url).toBe(`http://127.0.0.1:${mockPort}/dav/%E7%94%B5%E5%BD%B1B%20(2020).mkv`);
     expect(resolution.streamSessionId).toBeDefined();
     const header = streamHeaders.take(resolution.streamSessionId!);
     expect(header).toBe(`Authorization: Basic ${Buffer.from('u:p@ss').toString('base64')}`);
@@ -184,7 +211,7 @@ describe('playback resolver: webdav stream', () => {
 
   it('streams without a session when no credential is stored', async () => {
     const repo = createCatalogRepository(db);
-    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: 'https://open.example.com/d' });
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/open` });
     const itemId = repo.upsertItem({ sourceId, sourceKey: 'video:c', kind: 'video', title: 'C' });
     repo.upsertFile({ sourceId, itemId, relativePath: 'c.mkv', size: 1, mtime: 1 });
     const calls: ClientCall[] = [];
@@ -192,7 +219,7 @@ describe('playback resolver: webdav stream', () => {
       ref: { provider: 'catalog', sourceId, itemId: String(itemId) },
     });
     expect(resolution.streamSessionId).toBeUndefined();
-    expect(resolution.url).toBe('https://open.example.com/d/c.mkv');
+    expect(resolution.url).toBe(`http://127.0.0.1:${mockPort}/open/c.mkv`);
   });
 });
 

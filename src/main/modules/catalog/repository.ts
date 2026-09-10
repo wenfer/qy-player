@@ -323,6 +323,12 @@ export function createCatalogRepository(db: Database.Database) {
       return row.id;
     },
 
+    getFileByPath(sourceId: number, relativePath: string): CatalogFileRow | undefined {
+      return db
+        .prepare('SELECT * FROM catalog_files WHERE source_id = ? AND relative_path = ?')
+        .get(sourceId, relativePath) as CatalogFileRow | undefined;
+    },
+
     listFilesByItem(itemId: number): CatalogFileRow[] {
       return db
         .prepare('SELECT * FROM catalog_files WHERE item_id = ? ORDER BY relative_path')

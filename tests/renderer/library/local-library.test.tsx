@@ -23,7 +23,7 @@ const electronAPI = {
   browseCatalog: vi.fn(),
   searchCatalog: vi.fn(),
   getCatalogItem: vi.fn(),
-  resolveCatalogMedia: vi.fn(),
+  resolvePlayback: vi.fn(),
 };
 
 vi.stubGlobal('electronAPI', electronAPI);
@@ -144,22 +144,33 @@ describe('LibraryBrowse: catalog mode', () => {
         pageSize: 60,
       },
     });
-    electronAPI.resolveCatalogMedia.mockResolvedValue({
+    electronAPI.resolvePlayback.mockResolvedValue({
       ok: true,
-      data: { path: '/data/movies/流浪地球 (2019)/流浪地球 (2019).mkv', title: '流浪地球', position: 300 },
+      data: {
+        url: '/data/movies/流浪地球 (2019)/流浪地球 (2019).mkv',
+        seekable: true,
+        startPosition: 300,
+        mediaContext: { mediaType: 'local', mediaId: '/data/movies/流浪地球 (2019)/流浪地球 (2019).mkv', title: '流浪地球' },
+      },
     });
     renderCatalogRoute('/browse/7');
     await waitFor(() => expect(screen.getByText('流浪地球')).toBeTruthy());
     // Card play affordance (PosterCard exposes an onPlay action button).
     const playButtons = screen.getAllByRole('button');
     fireEvent.click(playButtons[playButtons.length - 1]);
-    await waitFor(() => expect(electronAPI.resolveCatalogMedia).toHaveBeenCalledWith(7, 101));
+    await waitFor(() =>
+      expect(electronAPI.resolvePlayback).toHaveBeenCalledWith(
+        { provider: 'catalog', sourceId: 7, itemId: '101' },
+        {}
+      )
+    );
     await waitFor(() =>
       expect(electronAPI.playerLoadFile).toHaveBeenCalledWith(
         '/data/movies/流浪地球 (2019)/流浪地球 (2019).mkv',
         300,
         undefined,
-        expect.objectContaining({ mediaType: 'local', title: '流浪地球' })
+        expect.objectContaining({ mediaType: 'local', title: '流浪地球' }),
+        undefined
       )
     );
   });

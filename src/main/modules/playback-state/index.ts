@@ -20,6 +20,16 @@ export interface ProgressSyncPayload {
   mediaSourceId?: string;
 }
 
+/**
+ * Phase-2 progress sink for catalog media whose keys the phase-1
+ * playback_progress CHECK cannot hold (webdav). Wired by the IPC layer to
+ * catalog_user_state; local path keys stay on the legacy tables.
+ */
+export interface CatalogProgressSink {
+  save(mediaType: string, mediaId: string, position: number, duration: number, isFinished: boolean): void;
+  getResumePosition(mediaType: string, mediaId: string): number;
+}
+
 export class PlaybackStateManager {
   private player: PlayerCore;
   private storage: Storage;
@@ -33,10 +43,12 @@ export class PlaybackStateManager {
   private currentEpisodeNumber: number | null = null;
   private currentMediaSourceId: string | null = null;
   private onProgressSaved?: (payload: ProgressSyncPayload) => void | Promise<void>;
+  private catalogProgress?: CatalogProgressSink;
 
-  constructor(player: PlayerCore, storage: Storage) {
+  constructor(player: PlayerCore, storage: Storage, catalogProgress?: CatalogProgressSink) {
     this.player = player;
     this.storage = storage;
+    this.catalogProgress = catalogProgress;
   }
 
   init(): void {
@@ -51,9 +63,9 @@ export class PlaybackStateManager {
       this.saveCurrentProgress();
     });
 
-    // Save on playback end
+    // Save on playback end (natural EOF only)
     this.player.on('eof', () => {
-      this.saveCurrentProgress(true);
+      this.saveCurrentProgress();
     });
 
     // Save when MPV disconnects (window closed, process killed)
@@ -114,6 +126,11 @@ export class PlaybackStateManager {
   }
 
   getResumePosition(mediaType: string, mediaId: string): number {
+    // WebDAV keys never touch the phase-1 tables (CHECK constraint);
+    // they live in catalog_user_state through the injected sink.
+    if (mediaType === 'webdav' && this.catalogProgress) {
+      return this.catalogProgress.getResumePosition(mediaType, mediaId);
+    }
     const progress = this.storage.getProgress(mediaType, mediaId);
     if (!progress) return 0;
     if (progress.duration && progress.position / progress.duration > 0.9) {
@@ -126,7 +143,7 @@ export class PlaybackStateManager {
     return this.storage.getContinueWatching(limit);
   }
 
-  private saveCurrentProgress(forceFinished = false): void {
+  private saveCurrentProgress(): void {
     if (!this.currentMediaType || !this.currentMediaId) return;
 
     const state = this.player.getState();
@@ -147,9 +164,24 @@ export class PlaybackStateManager {
       episodeNumber: this.currentEpisodeNumber ?? undefined,
     });
 
-    // Only save playback progress if we have valid duration
-    if (duration > 0) {
-      const isFinished = forceFinished || position / duration > 0.9;
+    // WebDAV progress lives in catalog_user_state (the phase-1 CHECK
+    // rejects webdav keys); local path keys stay on the legacy tables.
+    if (this.currentMediaType === 'webdav' && this.catalogProgress) {
+      if (duration > 0) {
+        this.catalogProgress.save(
+          this.currentMediaType,
+          this.currentMediaId,
+          position,
+          duration,
+          position / duration > 0.9
+        );
+      }
+    } else if (duration > 0) {
+      // Finished-ness is position-derived ONLY (plan §12.1): a stream that
+      // dies mid-file fires eof too, and must never be marked finished.
+      // Progress rows are never zeroed here — a network/auth failure keeps
+      // the last known position for resume.
+      const isFinished = position / duration > 0.9;
 
       this.storage.saveProgress({
         mediaType: this.currentMediaType,

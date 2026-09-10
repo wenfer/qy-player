@@ -144,8 +144,37 @@ export function registerIpcHandlers(player: PlayerCore): void {
   // Stream headers are stashed main-side; renderers only see session ids.
   const streamHeaders: StreamHeaderCache = createStreamHeaderCache();
 
-  // Initialize playback state manager
-  playbackStateManager = new PlaybackStateManager(player, storage);
+  // Initialize playback state manager. WebDAV progress keys bypass the
+  // phase-1 tables (media_type CHECK) into catalog_user_state; the key
+  // format is `<sourceId>:<relativePath>` (see PlaybackResolver).
+  const catalogRepo = createCatalogRepository(db);
+  playbackStateManager = new PlaybackStateManager(player, storage, {
+    save: (mediaType, mediaId, position, duration, isFinished) => {
+      if (mediaType !== 'webdav') return;
+      const sep = mediaId.indexOf(':');
+      if (sep <= 0) return;
+      const sourceId = Number(mediaId.slice(0, sep));
+      const relativePath = mediaId.slice(sep + 1);
+      if (!Number.isInteger(sourceId) || !relativePath) return;
+      const file = catalogRepo.getFileByPath(sourceId, relativePath);
+      if (!file) return;
+      catalogRepo.upsertUserState({ itemId: file.item_id, position, duration, isFinished });
+    },
+    getResumePosition: (mediaType, mediaId) => {
+      if (mediaType !== 'webdav') return 0;
+      const sep = mediaId.indexOf(':');
+      if (sep <= 0) return 0;
+      const sourceId = Number(mediaId.slice(0, sep));
+      const relativePath = mediaId.slice(sep + 1);
+      if (!Number.isInteger(sourceId) || !relativePath) return 0;
+      const file = catalogRepo.getFileByPath(sourceId, relativePath);
+      if (!file) return 0;
+      const state = catalogRepo.getUserState(file.item_id);
+      if (!state) return 0;
+      if (state.duration && state.position / state.duration > 0.9) return 0;
+      return state.position;
+    },
+  });
   playbackStateManager.init();
 
   // Player handlers

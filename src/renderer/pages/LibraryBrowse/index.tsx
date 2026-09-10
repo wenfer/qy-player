@@ -20,6 +20,26 @@ interface RawItem {
   ImageTags?: { Primary?: string };
 }
 
+interface ResolvedPlayback {
+  ok: boolean;
+  data?: {
+    url: string;
+    streamSessionId?: string;
+    seekable: boolean;
+    startPosition: number;
+    mediaContext: {
+      mediaType: string;
+      mediaId: string;
+      title?: string;
+      seriesName?: string;
+      seasonNumber?: number;
+      episodeNumber?: number;
+      mediaSourceId?: string;
+    };
+  };
+  error?: { message: string };
+}
+
 function formatTime(seconds: number): string {
   const total = Math.floor(seconds);
   const h = Math.floor(total / 3600);
@@ -107,36 +127,33 @@ function CatalogItemDetailView({
     load();
   }, [load]);
 
+  // Unified resolver (QYP2-016): one call covers local files and WebDAV
+  // streams. When the server ignores Range, seeking is unreliable but
+  // play/resume keep working — the degradation is explicit, not silent.
   const playItem = useCallback(
     async (targetId: number, startPosition?: number) => {
       setPlaying(true);
       try {
-        const result = (await window.electronAPI.resolveCatalogMedia(sourceId, targetId)) as {
-          ok: boolean;
-          data?: {
-            path: string;
-            title: string;
-            position: number;
-            seriesTitle?: string;
-            seasonNumber?: number;
-            episodeNumber?: number;
-          };
-          error?: { message: string };
-        };
+        const result = (await window.electronAPI.resolvePlayback(
+          { provider: 'catalog', sourceId, itemId: String(targetId) },
+          {}
+        )) as ResolvedPlayback;
         if (!result.ok || !result.data) {
           addToast(result.error?.message ?? '无法播放', 'error');
           return;
         }
         const resolved = result.data;
-        const resume = startPosition ?? (resolved.position > 30 ? resolved.position : 0);
-        await window.electronAPI.playerLoadFile(resolved.path, resume, undefined, {
-          mediaType: 'local',
-          mediaId: resolved.path,
-          title: resolved.title,
-          seriesName: resolved.seriesTitle,
-          seasonNumber: resolved.seasonNumber,
-          episodeNumber: resolved.episodeNumber,
-        });
+        if (!resolved.seekable) {
+          addToast('该来源不支持进度拖动，播放与续播正常', 'warning');
+        }
+        const resume = startPosition ?? (resolved.startPosition > 30 ? resolved.startPosition : 0);
+        await window.electronAPI.playerLoadFile(
+          resolved.url,
+          resume,
+          undefined,
+          resolved.mediaContext,
+          resolved.streamSessionId
+        );
         addToast('开始播放', 'success');
       } catch (err) {
         addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
@@ -489,27 +506,28 @@ export default function LibraryBrowse() {
     async (item: MediaItem) => {
       if (!item.catalogRef) return;
       try {
-        const result = (await window.electronAPI.resolveCatalogMedia(catalogSourceId, Number(item.catalogRef.itemId))) as {
-          ok: boolean;
-          data?: { path: string; title: string; position: number };
-          error?: { message: string };
-        };
+        const result = (await window.electronAPI.resolvePlayback(item.catalogRef, {})) as ResolvedPlayback;
         if (!result.ok || !result.data) {
           addToast(result.error?.message ?? '无法播放', 'error');
           return;
         }
-        const resume = result.data.position > 30 ? result.data.position : 0;
-        await window.electronAPI.playerLoadFile(result.data.path, resume, undefined, {
-          mediaType: 'local',
-          mediaId: result.data.path,
-          title: result.data.title,
-        });
+        if (!result.data.seekable) {
+          addToast('该来源不支持进度拖动，播放与续播正常', 'warning');
+        }
+        const resume = result.data.startPosition > 30 ? result.data.startPosition : 0;
+        await window.electronAPI.playerLoadFile(
+          result.data.url,
+          resume,
+          undefined,
+          result.data.mediaContext,
+          result.data.streamSessionId
+        );
         addToast('开始播放', 'success');
       } catch (err) {
         addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
       }
     },
-    [catalogSourceId, addToast]
+    [addToast]
   );
 
   const handleItemClick = useCallback(

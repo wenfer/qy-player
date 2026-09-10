@@ -4,7 +4,7 @@ import type { MediaRef } from '../../../shared/types';
 import { createCatalogQueryService, type PlaybackIntent } from '../catalog/query-service';
 import { getAdapterForSource } from '../catalog/source-service';
 import { LocalSourceAdapter } from '../library-sources/local-source';
-import { loadWebDavSecret } from '../library-sources/webdav-source';
+import { loadWebDavSecret, type WebDavSourceAdapter } from '../library-sources/webdav-source';
 import { parseWebDavBaseUrl, relativePathToRequestPath } from '../library-sources/url-guard';
 import { resolveServerApiKey, type SecretStore, type StreamHeaderCache } from '../security/secret-store';
 import type { createStorage } from '../storage/db';
@@ -48,6 +48,11 @@ export interface PlaybackResolution {
   /** Opaque header session for transcode/webdav-auth; renderer passes back. */
   streamSessionId?: string;
   startPosition: number;
+  /**
+   * Whether the target honors byte ranges (plan §8.1). False means the UI
+   * must show seeking as unreliable while play/resume keep working.
+   */
+  seekable: boolean;
   mediaContext: ResolvedMediaContext;
 }
 
@@ -235,6 +240,7 @@ export async function resolvePlayback(
       return {
         kind: 'local-file',
         url: path,
+        seekable: true,
         startPosition,
         mediaContext: {
           mediaType: 'local',
@@ -262,11 +268,34 @@ export async function resolvePlayback(
       const token = Buffer.from(`${secret.username}:${secret.password}`).toString('base64');
       deps.streamHeaders.stash(streamSessionId, `Authorization: Basic ${token}`);
     }
+    // Seek probe (plan §8.1): a ranged open decides; only a 206 proves
+    // Range support. Probe failures are auth/network errors, never a
+    // verdict on the file — they propagate as resolver errors.
+    let seekable = false;
+    try {
+      const probe = await (adapter as WebDavSourceAdapter).open(
+        { sourceId, relativePath: intent.relativePath },
+        AbortSignal.timeout(8000),
+        'bytes=0-0'
+      );
+      seekable = probe.supportsRange;
+      (probe.stream as unknown as { destroy?: () => void }).destroy?.();
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        throw new ResolverError('NO_CREDENTIAL', '认证失败或已过期，请检查用户名与密码');
+      }
+      if (status === 404) {
+        throw new ResolverError('ITEM_NOT_FOUND', '文件在服务器上不存在');
+      }
+      throw new ResolverError('UNAVAILABLE', err instanceof Error ? err.message : '服务器不可用');
+    }
     const mediaId = `${sourceId}:${intent.relativePath}`;
     return {
       kind: 'webdav-stream',
       url,
       ...(streamSessionId ? { streamSessionId } : {}),
+      seekable,
       startPosition: deps.getResumePosition('webdav', mediaId),
       mediaContext: {
         mediaType: 'webdav',
@@ -336,6 +365,7 @@ export async function resolvePlayback(
     kind: mode === 'transcode' ? 'online-transcode' : 'online-direct',
     url,
     ...(streamSessionId ? { streamSessionId } : {}),
+    seekable: true,
     startPosition,
     mediaContext: {
       mediaType,
