@@ -271,6 +271,22 @@ export function createCatalogRepository(db: Database.Database) {
         .all(parentId) as CatalogItemRow[];
     },
 
+    /**
+     * Availability may only be downgraded after a *successful full scan*
+     * (plan §6.1). Bulk variant keeps the online/missing pass atomic so a
+     * crash cannot leave the catalog half-updated.
+     */
+    setAvailabilityBulk(
+      patches: Array<{ id: number; availability: 'online' | 'offline' | 'missing' }>
+    ): void {
+      const update = db.prepare(
+        'UPDATE catalog_items SET availability = ?, updated_at = unixepoch() WHERE id = ?'
+      );
+      db.transaction((rows: Array<{ id: number; availability: 'online' | 'offline' | 'missing' }>) => {
+        for (const row of rows) update.run(row.availability, row.id);
+      })(patches);
+    },
+
     /** Availability may only be downgraded after a *successful full scan*. */
     setAvailability(
       id: number,

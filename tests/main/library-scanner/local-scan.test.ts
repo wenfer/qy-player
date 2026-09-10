@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository, type CatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { ScanJobController } from '../../../src/main/modules/library-scanner/job-controller';
@@ -89,16 +89,22 @@ describe('classifier', () => {
     expect(c.confidence).toBe('low');
   });
 
-  it('flags sample files', () => {
+  it('flags sample files only when the name starts with the marker', () => {
     expect(classifyPath('Movie (2019)/sample.mkv').isSample).toBe(true);
-    expect(classifyPath('Movie (2019)/Movie.SAMPLE.mkv').isSample).toBe(true);
+    expect(classifyPath('Movie (2019)/sample 2.mkv').isSample).toBe(true);
+    // Real titles must not be swallowed by the sample filter.
+    expect(classifyPath('Movie (2019)/The.Sample.2023.mkv').isSample).toBe(false);
+    expect(classifyPath('Movie (2019)/Movie.SAMPLE.mkv').isSample).toBe(false);
     expect(classifyPath('Movie (2019)/Movie (2019).mkv').isSample).toBe(false);
   });
 
-  it('flags extras markers', () => {
+  it('flags extras markers only at the start of the name', () => {
     expect(classifyPath('Movie (2019)/trailer.mkv').isExtra).toBe(true);
+    expect(classifyPath('Movie (2019)/trailer 2.mkv').isExtra).toBe(true);
     expect(classifyPath('Movie (2019)/deleted.scenes.mkv').isExtra).toBe(true);
     expect(classifyPath('Movie (2019)/behind.the.scenes.mkv').isExtra).toBe(true);
+    // Real titles must not be flagged as extras.
+    expect(classifyPath('The Interview (2014).mkv').isExtra).toBe(false);
     expect(classifyPath('Movie (2019)/Movie (2019).mkv').isExtra).toBe(false);
   });
 
@@ -113,6 +119,35 @@ describe('classifier', () => {
     const c = classifyPath('S01E02.mkv');
     expect(c.episode).toBeUndefined();
     expect(c.confidence).toBe('low');
+  });
+
+  it('recognizes a year at the end of the filename', () => {
+    const c = classifyPath('Movie 2019.mkv');
+    expect(c.movie).toEqual({ title: 'Movie', year: 2019 });
+    expect(c.confidence).toBe('high');
+  });
+
+  it('does not leak release tags into the episode title', () => {
+    const c = classifyPath('Show.S01E02.720p.mkv');
+    expect(c.episode).toBeDefined();
+    expect(c.episode!.episodeTitle).toBeUndefined();
+    const named = classifyPath('Show.S01E02.Pilot.1080p.mkv');
+    expect(named.episode!.episodeTitle).toBe('Pilot');
+  });
+
+  it('treats E-prefixed filenames outside season dirs as low confidence', () => {
+    const c = classifyPath('E03.mkv');
+    expect(c.episode).toBeUndefined();
+    expect(c.confidence).toBe('low');
+  });
+
+  it('keeps same-name different-year movies apart', () => {
+    const a = classifyPath('Flash (1990).mkv');
+    const b = classifyPath('Flash (2014).mkv');
+    expect(a.movie!.year).toBe(1990);
+    expect(b.movie!.year).toBe(2014);
+    // sourceKey includes the year so both items coexist.
+    expect(a.movie!.title).toBe(b.movie!.title);
   });
 
   it('normalizes name keys', () => {
@@ -173,15 +208,17 @@ function scanningAdapterOf(adapter: SourceAdapter): SourceAdapter {
 }
 
 let dbPath: string;
+let dbDir: string;
 let repo: CatalogRepository;
 
 beforeEach(() => {
-  dbPath = join(mkdtempSync(join(tmpdir(), 'qy-local-scan-')), 'catalog.db');
+  dbDir = mkdtempSync(join(tmpdir(), 'qy-local-scan-'));
+  dbPath = join(dbDir, 'catalog.db');
   repo = createCatalogRepository(openDatabaseAtPath(dbPath));
 });
 
-afterAll(() => {
-  rmSync(dbPath, { force: true });
+afterEach(() => {
+  rmSync(dbDir, { recursive: true, force: true });
 });
 
 async function runScan(adapter: SourceAdapter, driver: ScanDriver, sourceId: number): Promise<number> {
@@ -401,6 +438,46 @@ describe('local scan driver', () => {
     const runId = await runScan(scanningAdapterOf(makeTreeAdapter(tree)), driver, sourceId);
     expect(repo.getScanRun(runId)!.status).toBe('completed');
     expect(repo.listFilesBySource(sourceId)).toHaveLength(50);
+  });
+
+  it('resume cursor: skips only up to the cursor, then continues', async () => {
+    const sourceId = makeSource();
+    const tree = {
+      'a.mkv': { size: 1, mtime: 1 },
+      'b/b.mkv': { size: 2, mtime: 2 },
+      'c.mkv': { size: 3, mtime: 3 },
+    };
+    const driver = createLocalScanDriver({ repo, sourceId });
+    const controller = new ScanJobController({
+      repo,
+      adapter: scanningAdapterOf(makeTreeAdapter(tree)),
+      driver,
+      sourceId,
+      root: '/fake-root',
+    });
+    const runId = await controller.start({ fromCursor: 'a.mkv' });
+    expect(repo.getScanRun(runId)!.status).toBe('completed');
+    // Cursor (a.mkv) itself is skipped; everything after it is covered.
+    expect(repo.listFilesBySource(sourceId).map((f) => f.relative_path).sort()).toEqual(['b/b.mkv', 'c.mkv']);
+  });
+
+  it('resume cursor that no longer exists falls back to a full walk', async () => {
+    const sourceId = makeSource();
+    const tree = {
+      'a.mkv': { size: 1, mtime: 1 },
+      'b.mkv': { size: 2, mtime: 2 },
+    };
+    const driver = createLocalScanDriver({ repo, sourceId });
+    const controller = new ScanJobController({
+      repo,
+      adapter: scanningAdapterOf(makeTreeAdapter(tree)),
+      driver,
+      sourceId,
+      root: '/fake-root',
+    });
+    const runId = await controller.start({ fromCursor: 'ghost.mkv' });
+    expect(repo.getScanRun(runId)!.status).toBe('completed');
+    expect(repo.listFilesBySource(sourceId)).toHaveLength(2);
   });
 
   it('handles a 10,000-entry synthetic tree (baseline)', async () => {

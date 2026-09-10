@@ -56,15 +56,15 @@ const BARE_NUMBER = /^[(\s]*(\d{1,3})[)\s]*$/;
 /** "E03" / "EP03", only trusted inside a season directory. */
 const E_PREFIX = /^e(?:p)?[\s._-]*(\d{1,3})$/i;
 /** Four-digit year. */
-const YEAR = /[\(\[\s._-](19\d{2}|20\d{2})[\)\]\s._-]/;
+const YEAR = /[\(\[\s._-](19\d{2}|20\d{2})(?=[\)\]\s._-]|$)/;
 /** Common release tags stripped from titles (from the end). */
 const RELEASE_TAG = /^(?:\d{3,4}[pi]|blu-?ray|web-?dl|webrip|hdrip|brrip|dvdrip|hdtv|h\.?264|x264|x265|h\.?265|hevc|aac|dts(?:-hd)?|ac3|ddp?5\.1|truehd|atmos|hdr|hdr10|dv|dolby|vision|10bit|8bit|remux|repack|proper|extended|unrated|remastered|imax|60fps)$/i;
-const SAMPLE = /(?:^|[.\s_-])sample(?:[.\s_-]|$)/i;
+const SAMPLE = /^sample(?:[\s._-].*)?$/i;
 const EXTRA_MARKERS: ReadonlyArray<RegExp> = [
-  /(?:^|[.\s_-])(?:trailer|featurette|extras|other|interview|interviews)(?:[.\s_-]|$)/i,
-  /(?:^|[.\s_-])deleted(?:[.\s_-])?scenes(?:[.\s_-]|$)/i,
-  /(?:^|[.\s_-])behind(?:[.\s_-])?the(?:[.\s_-])?scenes(?:[.\s_-]|$)/i,
-  /(?:^|[.\s_-])making(?:[.\s_-])?of(?:[.\s_-]|$)/i,
+  /^(?:trailer|featurette|extras|other|interview|interviews)(?:[\s._-].*)?$/i,
+  /^deleted(?:[.\s_-])?scenes(?:[\s._-].*)?$/i,
+  /^behind(?:[.\s_-])?the(?:[.\s_-])?scenes(?:[\s._-].*)?$/i,
+  /^making(?:[.\s_-])?of(?:[\s._-].*)?$/i,
 ];
 
 /** Collapse separators into spaces and trim. */
@@ -72,10 +72,10 @@ function cleanTitle(raw: string): string {
   return raw.replace(/[._]+/g, ' ').replace(/\s*-\s*/g, ' - ').replace(/[\s_]+/g, ' ').trim();
 }
 
-/** Strip trailing release tags ("1080p BluRay x264"). */
+/** Strip trailing release tags ("1080p BluRay x264"); may return ''. */
 function stripReleaseTags(title: string): string {
   const parts = title.split(' ');
-  while (parts.length > 1 && RELEASE_TAG.test(parts[parts.length - 1])) {
+  while (parts.length > 0 && RELEASE_TAG.test(parts[parts.length - 1])) {
     parts.pop();
   }
   return parts.join(' ').trim();
@@ -131,12 +131,11 @@ function seasonContext(dirs: string[]): { season: number; segmentIndex: number }
   return found;
 }
 
-function episodeFromBare(base: string, ctx: number): number | null {
+function episodeFromBare(base: string): number | null {
   const bare = base.match(BARE_NUMBER);
   if (bare) return Number(bare[1]);
   const prefixed = base.match(E_PREFIX);
   if (prefixed) return Number(prefixed[1]);
-  void ctx;
   return null;
 }
 
@@ -168,7 +167,7 @@ export function classifyPath(relativePath: string): Classification {
     const season = Number(sxe[2]);
     const first = Number(sxe[3]);
     const extras = [...sxe[4].matchAll(/e[\s._-]?(\d{1,3})/gi)].map((m) => Number(m[1]));
-    const episodeTitle = cleanTitle(sxe[5]) || undefined;
+    const episodeTitle = stripReleaseTags(cleanTitle(sxe[5])) || undefined;
     if (seriesTitle) {
       const end = extras.length > 0 ? Math.max(...extras) : undefined;
       const episodeEnd = end !== undefined && end > first ? end : undefined;
@@ -206,7 +205,7 @@ export function classifyPath(relativePath: string): Classification {
       (segment) => !(SEASON_DIR.test(segment) || SEASON_DIR_SHORT.test(segment) || SPECIALS_DIR.test(segment))
     );
     const seriesTitle = beforeSeason.length > 0 ? cleanTitle(beforeSeason[beforeSeason.length - 1]) : '';
-    const episodeNumber = episodeFromBare(base, ctx.season);
+    const episodeNumber = episodeFromBare(base);
     if (seriesTitle && episodeNumber !== null) {
       return {
         fileClass,

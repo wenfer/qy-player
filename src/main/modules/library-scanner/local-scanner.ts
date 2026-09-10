@@ -36,7 +36,7 @@ function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
-async function* walkDir(
+async function* walkDirOnce(
   adapter: SourceAdapter,
   dir: string,
   depth: number,
@@ -68,16 +68,36 @@ async function* walkDir(
     }
     yield entry;
     if (entry.isDirectory) {
-      yield* walkDir(adapter, entry.relativePath, depth + 1, state, opts, signal);
+      yield* walkDirOnce(adapter, entry.relativePath, depth + 1, state, opts, signal);
     }
   }
 }
 
+async function* walkDir(
+  adapter: SourceAdapter,
+  state: WalkState,
+  opts: Required<WalkOptions>,
+  signal: AbortSignal
+): AsyncGenerator<SourceEntry> {
+  yield* walkDirOnce(adapter, '', 0, state, opts, signal);
+  if (state.resuming) {
+    // Cursor vanished (path deleted/renamed since the interrupted run):
+    // a skipped-everything walk must not be mistaken for an empty source.
+    // Restart from the root with resume disabled — full coverage is the
+    // safe outcome; the duplicate work is bounded by the entry cap.
+    state.resuming = false;
+    state.cursor = '';
+    state.count = 0;
+    yield* walkDirOnce(adapter, '', 0, state, opts, signal);
+  }
+}
+
 /**
- * Recursive traversal over any adapter. `startPath` doubles as a resume
- * cursor (plan §6.1): when non-empty, every entry up to and including that
- * exact path is skipped; if the cursor no longer exists the walk restarts
- * from the beginning (safe: full coverage beats a partial walk).
+ * Recursive traversal over any adapter, always starting at the source root.
+ * The controller passes the resume cursor as `startPath` (plan §6.1): when
+ * non-empty, entries up to and including that exact path are skipped; if
+ * the cursor no longer exists the walk restarts from the beginning (a
+ * partially-skipped walk must never masquerade as a complete one).
  */
 export async function* walkSourceTree(
   adapter: SourceAdapter,
@@ -90,7 +110,7 @@ export async function* walkSourceTree(
     maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
   };
   const state: WalkState = { count: 0, resuming: startPath !== '', cursor: startPath };
-  yield* walkDir(adapter, startPath || '', 0, state, opts, signal);
+  yield* walkDir(adapter, state, opts, signal);
 }
 
 interface BufferedCandidate {
@@ -131,9 +151,12 @@ export function createLocalScanDriver(deps: {
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
 
       seen.add(entry.relativePath);
+      // Fingerprint is size + mtime (ms). mtime is floored to an integer
+      // for stability; if an adapter ever reports seconds the format must
+      // be bumped so old fingerprints do not silently match.
       const fingerprint =
         entry.size !== undefined && entry.mtime !== undefined
-          ? `${entry.size}:${Math.round(entry.mtime)}`
+          ? `${entry.size}:${Math.floor(entry.mtime)}`
           : undefined;
       const existing = filesIndex.get(entry.relativePath);
       // Incremental skip: identical size+mtime means nothing changed, so no
@@ -192,16 +215,26 @@ export function createLocalScanDriver(deps: {
     },
 
     // The controller's enrich phase provides the end-of-indexing hook for
-    // the trailing movie group. When NFO enrichment lands (QYP2-010) this
-    // grows into the real enrichment pass; unchanged files still skip it
-    // thanks to the fingerprint gate in `index`.
+    // the trailing movie group; the idempotent guard keeps the per-entry
+    // call pattern cheap (first call finalizes, the rest are no-ops).
+    // When NFO enrichment lands (QYP2-010) this grows into the real
+    // enrichment pass; unchanged files still skip it thanks to the
+    // fingerprint gate in `index`.
     async enrich() {
-      flushGroup();
+      finalizeGroups();
     },
   };
 
   let bufferedDir: string | null = null;
   let buffer: BufferedCandidate[] = [];
+  let finalized = false;
+
+  /** End-of-scan finalize: idempotent, runs at most once. */
+  function finalizeGroups(): void {
+    if (finalized) return;
+    finalized = true;
+    flushGroup();
+  }
 
   function flushGroup(): void {
     if (buffer.length === 0) {
@@ -237,7 +270,7 @@ export function createLocalScanDriver(deps: {
     for (const c of [...candidates, ...extras]) {
       const fp =
         c.entry.size !== undefined && c.entry.mtime !== undefined
-          ? `${c.entry.size}:${Math.round(c.entry.mtime)}`
+          ? `${c.entry.size}:${Math.floor(c.entry.mtime)}`
           : undefined;
       repo.upsertFile({
         sourceId,
@@ -288,7 +321,9 @@ export function markAvailabilityAfterScan(
       parent = itemById.get(parent)?.parent_id ?? null;
     }
   }
-  for (const item of items) {
-    repo.setAvailability(item.id, online.has(item.id) ? 'online' : 'missing');
-  }
+  // One transaction: a crash mid-pass must not leave a mixed online/missing
+  // catalog (plan §6.1 — missing marking is only ever all-or-nothing).
+  repo.setAvailabilityBulk(
+    items.map((item) => ({ id: item.id, availability: online.has(item.id) ? 'online' : 'missing' }))
+  );
 }
