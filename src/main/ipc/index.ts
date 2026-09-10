@@ -27,14 +27,17 @@ import {
 } from '../modules/library-scanner/local-scanner';
 import {
   createLocalSourceFromSelection,
+  createWebDavSource,
   getAdapterForSource,
   removeSource,
+  testWebDavConnection,
 } from '../modules/catalog/source-service';
 import { createCatalogRepository } from '../modules/catalog/repository';
 import { createCatalogQueryService } from '../modules/catalog/query-service';
 import { migrateLegacyProgressForSource } from '../modules/catalog/legacy-progress';
 import {
   isCreateLocalSourceInput,
+  isCreateWebDavSourceInput,
   err,
   ok,
 } from '../../shared/types';
@@ -383,6 +386,10 @@ export function registerIpcHandlers(player: PlayerCore): void {
     return storage.getServers().map((server) => sanitizeServerForRenderer(server, secretStore));
   });
 
+  // Capability flag (not a secret): whether secrets survive a restart. The
+  // WebDAV form uses it to set storage expectations honestly (plan §8.3).
+  ipcMain.handle(IPC_CHANNELS.SETTINGS.SECRETS_PERSISTENT, () => secretStore.isPersistent());
+
   ipcMain.handle(IPC_CHANNELS.SETTINGS.SAVE_SERVER, (_event, server: ServerConfig) => {
     // The API key goes to the SecretStore, never into the DB column. When no
     // key is provided (editing without re-auth), the existing secret and any
@@ -624,7 +631,11 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
         name: source.name,
         root: source.root,
         readOnly: source.read_only === 1,
-        capabilities: { ...LOCAL_SOURCE_CAPABILITIES },
+        // WebDAV never offers delete in phase 2; ETag/Range per plan §8.1.
+        capabilities:
+          source.kind === 'webdav'
+            ? { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true }
+            : { ...LOCAL_SOURCE_CAPABILITIES },
         hasCredential: source.secret_ref ? secretStore.hasSecretByRef(source.secret_ref) : false,
         ...(lastRun
           ? {
@@ -643,26 +654,31 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
   });
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_TEST, async (_event, input: unknown): Promise<ActionResult<SourceCapabilities>> => {
-    if (!isCreateLocalSourceInput(input)) {
-      return err('VALIDATION_FAILED', '来源输入不合法');
-    }
     try {
-      const root = LocalSourceAdapter.canonicalizeRoot(input.root);
-      const adapter = LocalSourceAdapter.fromSource(0, root);
-      const capabilities = await adapter.testConnection(new AbortController().signal);
-      return ok(capabilities);
+      if (isCreateWebDavSourceInput(input)) {
+        // Credentials travel once from the form; nothing here is logged.
+        return ok(await testWebDavConnection(input));
+      }
+      if (isCreateLocalSourceInput(input)) {
+        const root = LocalSourceAdapter.canonicalizeRoot(input.root);
+        const adapter = LocalSourceAdapter.fromSource(0, root);
+        return ok(await adapter.testConnection(new AbortController().signal));
+      }
+      return err('VALIDATION_FAILED', '来源输入不合法');
     } catch (e) {
-      return err('UNAVAILABLE', e instanceof Error ? e.message : '目录不可用', { retryable: true });
+      return err('UNAVAILABLE', e instanceof Error ? e.message : '连接不可用', { retryable: true });
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_SAVE, (_event, input: unknown): ActionResult<{ sourceId: number; root: string; name: string }> => {
-    if (!isCreateLocalSourceInput(input)) {
-      return err('VALIDATION_FAILED', '来源输入不合法');
-    }
     try {
-      const created = createLocalSourceFromSelection(db, input.root, { name: input.name });
-      return ok(created);
+      if (isCreateWebDavSourceInput(input)) {
+        return ok(createWebDavSource(db, secretStore, input));
+      }
+      if (isCreateLocalSourceInput(input)) {
+        return ok(createLocalSourceFromSelection(db, input.root, { name: input.name }));
+      }
+      return err('VALIDATION_FAILED', '来源输入不合法');
     } catch (e) {
       return err('VALIDATION_FAILED', e instanceof Error ? e.message : '来源创建失败');
     }
@@ -675,7 +691,7 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     activeScanJobs.get(sourceId)?.cancel();
     activeScanJobs.delete(sourceId);
     try {
-      removeSource(db, sourceId);
+      removeSource(db, sourceId, secretStore);
       return ok(true);
     } catch (e) {
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
@@ -687,10 +703,15 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
       return err('VALIDATION_FAILED', '来源 ID 不合法');
     }
     try {
-      const { adapter } = getAdapterForSource(db, sourceId);
+      const { adapter } = getAdapterForSource(db, sourceId, secretStore);
       const capabilities = await adapter.testConnection(new AbortController().signal);
       return ok(capabilities.canSeek ? 'ok' : 'degraded');
     } catch (e) {
+      // WebDAV 401/403 is auth failure, not offline (plan §6.1 health map).
+      const status = (e as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        return err('AUTH_REQUIRED', '认证失败：请检查用户名与密码');
+      }
       return err('UNAVAILABLE', e instanceof Error ? e.message : '来源不可达', { retryable: true });
     }
   });
@@ -704,9 +725,14 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     }
     let adapter;
     try {
-      ({ adapter } = getAdapterForSource(db, sourceId));
+      ({ adapter } = getAdapterForSource(db, sourceId, secretStore));
     } catch (e) {
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
+    }
+    if (adapter.kind === 'webdav') {
+      // WebDAV scanning arrives with QYP2-014 (bounded traversal, offline
+      // semantics); refusing here beats a silent local-only scan.
+      return err('UNAVAILABLE', 'WebDAV 扫描即将在后续版本提供');
     }
     // Recursive walk over the adapter; deterministic order also drives the
     // movie-group flush and the resume cursor semantics (QYP2-009).

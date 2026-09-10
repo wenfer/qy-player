@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Server, HardDrive, RefreshCw, X, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Server, HardDrive } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import ServerForm, { ServerForm as ServerFormValues } from './ServerForm';
-import SourceForm from './SourceForm';
+import SourceForm, { type SourceFormPayload } from './SourceForm';
+import SourceList from './SourceList';
 import type { SourceListEntry, ScanProgressEvent } from '../../../shared/types';
 
 interface AuthResult {
@@ -41,6 +42,7 @@ export default function Settings() {
   const [form, setForm] = useState<ServerFormValues>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceListEntry[]>([]);
+  const [persistentSecrets, setPersistentSecrets] = useState(true);
   const [showSourceForm, setShowSourceForm] = useState(false);
   const [savingSource, setSavingSource] = useState(false);
   const [testingSource, setTestingSource] = useState(false);
@@ -62,7 +64,13 @@ export default function Settings() {
     loadServers();
   }, [loadServers]);
 
-  // ---- Local media sources (QYP2-008) ----
+  // ---- Media sources (QYP2-008/013) ----
+  useEffect(() => {
+    window.electronAPI
+      .isSecretsPersistent()
+      .then((v: boolean) => setPersistentSecrets(v))
+      .catch(() => setPersistentSecrets(false));
+  }, []);
   const loadSources = useCallback(async () => {
     try {
       const data = await window.electronAPI.listSources();
@@ -98,15 +106,17 @@ export default function Settings() {
   }, [addToast, loadSources]);
 
   const handleSourceTest = useCallback(
-    async (values: { root: string }): Promise<{ ok: boolean; error?: string } | null> => {
+    async (
+      payload: SourceFormPayload
+    ): Promise<{ ok: boolean; capabilities?: SourceFormPayload extends never ? never : { canSeek: boolean; canDelete: boolean; supportsEtag: boolean; supportsRange: boolean }; error?: string } | null> => {
       setTestingSource(true);
       try {
-        const res = (await window.electronAPI.testSource({ kind: 'local', root: values.root })) as {
+        const res = (await window.electronAPI.testSource(payload)) as {
           ok: boolean;
-          data?: unknown;
+          data?: { canSeek: boolean; canDelete: boolean; supportsEtag: boolean; supportsRange: boolean };
           error?: { message: string };
         };
-        return res.ok ? { ok: true } : { ok: false, error: res.error?.message ?? '目录不可用' };
+        return res.ok ? { ok: true, capabilities: res.data } : { ok: false, error: res.error?.message ?? '连接不可用' };
       } catch {
         return { ok: false, error: '测试请求失败' };
       } finally {
@@ -117,19 +127,23 @@ export default function Settings() {
   );
 
   const handleSourceSave = useCallback(
-    async (values: { root: string; name: string }): Promise<boolean> => {
-      if (!values.root) {
+    async (payload: SourceFormPayload): Promise<boolean> => {
+      if (payload.kind === 'local' && !payload.root) {
         setSourceFormError('请先选择目录');
+        return false;
+      }
+      if (payload.kind === 'webdav' && !payload.url.trim()) {
+        setSourceFormError('请先填写服务器地址');
         return false;
       }
       setSavingSource(true);
       setSourceFormError(null);
       try {
-        const res = (await window.electronAPI.saveSource({
-          kind: 'local',
-          root: values.root,
-          name: values.name || undefined,
-        })) as { ok: boolean; data?: { sourceId: number }; error?: { message: string } };
+        const res = (await window.electronAPI.saveSource(payload)) as {
+          ok: boolean;
+          data?: { sourceId: number };
+          error?: { message: string };
+        };
         if (res.ok) {
           addToast('来源已添加', 'success');
           await loadSources();
@@ -336,7 +350,7 @@ export default function Settings() {
             saving={savingSource}
             testing={testingSource}
             formError={sourceFormError}
-            onChange={() => undefined}
+            persistentSecrets={persistentSecrets}
             onPick={() => window.electronAPI.pickDirectory()}
             onTest={handleSourceTest}
             onSave={handleSourceSave}
@@ -347,85 +361,18 @@ export default function Settings() {
           />
         )}
 
-        <div className="space-y-2">
-          {sources.map((source) => {
-            // Live push events win over the persisted last run while scanning.
-            const live = liveProgress[source.id];
-            const progress = live
-              ? { status: live.state, processed: live.processed, total: live.total, message: live.message }
-              : source.lastRun;
-            const scanning =
-              scanningIds.has(source.id) ||
-              progress?.status === 'queued' ||
-              progress?.status === 'discovering' ||
-              progress?.status === 'indexing' ||
-              progress?.status === 'enriching';
-            return (
-              <div
-                key={source.id}
-                className="p-4 bg-card border border-border rounded-xl"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-sm">{source.name}</span>
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground text-[10px] font-medium">
-                        本地
-                      </span>
-                      {source.readOnly && (
-                        <span className="text-[10px] text-muted-foreground">只读</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5 truncate" title={source.root}>
-                      {source.root}
-                    </div>
-                    {scanning ? (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1" aria-live="polite">
-                        <Loader2 size={12} className="animate-spin" />
-                        扫描中
-                        {progress?.total ? `（${progress.processed ?? 0}/${progress.total}）` : ''}
-                      </div>
-                    ) : progress ? (
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        上次扫描：
-                        {progress.status === 'completed'
-                          ? `完成，共 ${progress.processed ?? 0} 项`
-                          : progress.status === 'failed'
-                            ? `失败${progress.message ? `：${progress.message}` : ''}`
-                            : progress.status}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-muted-foreground mt-1">尚未扫描</div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button
-                      onClick={() => handleScanToggle(source)}
-                      className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
-                      aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
-                      title={scanning ? '取消扫描' : '扫描'}
-                    >
-                      {scanning ? <X size={15} /> : <RefreshCw size={15} />}
-                    </button>
-                    <button
-                      onClick={() => handleSourceRemove(source)}
-                      className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
-                      aria-label={`移除 ${source.name}（不删除文件）`}
-                      title="移除（不删除文件）"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {sources.length === 0 && !showSourceForm && (
-            <div className="text-center py-10 text-muted-foreground text-sm">
-              暂无本地来源，点击上方「添加」按钮选择目录
-            </div>
-          )}
-        </div>
+        <SourceList
+          sources={sources}
+          scanningIds={scanningIds}
+          liveProgress={liveProgress}
+          onScanToggle={handleScanToggle}
+          onRemove={handleSourceRemove}
+        />
+        {sources.length === 0 && !showSourceForm && (
+          <div className="text-center py-10 text-muted-foreground text-sm">
+            暂无来源，点击上方「添加」按钮选择目录或填写 WebDAV 地址
+          </div>
+        )}
       </section>
 
       {/* Servers Section */}

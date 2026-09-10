@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
     GET_SERVERS: 'settings:get-servers',
     SAVE_SERVER: 'settings:save-server',
     TEST_SERVER: 'settings:test-server',
+    SECRETS_PERSISTENT: 'settings:secrets-persistent',
   },
   WINDOW: {
     ENTER_PLAYER_MODE: 'window:enter-player-mode',

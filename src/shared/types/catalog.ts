@@ -138,6 +138,33 @@ export interface CreateLocalSourceInput {
   name?: string;
 }
 
+/** Renderer-supplied input for creating a WebDAV source (plan §8.1/8.2). */
+export interface CreateWebDavSourceInput {
+  kind: 'webdav';
+  /** Base URL: origin + root path only; validated main-side again. */
+  url: string;
+  name?: string;
+  username?: string;
+  password?: string;
+  /**
+   * Set by the renderer after the user explicitly confirmed plaintext
+   * transport for http:// (plan §8.1). Required for http URLs at save.
+   */
+  confirmHttpPlaintext?: boolean;
+}
+
+export function isCreateWebDavSourceInput(value: unknown): value is CreateWebDavSourceInput {
+  if (typeof value !== 'object' || value === null) return false;
+  const input = value as Record<string, unknown>;
+  if (input.kind !== 'webdav') return false;
+  if (typeof input.url !== 'string' || input.url.length === 0 || input.url.length > 2048) return false;
+  if (input.name !== undefined && typeof input.name !== 'string') return false;
+  if (input.username !== undefined && (typeof input.username !== 'string' || input.username.length > 256)) return false;
+  if (input.password !== undefined && (typeof input.password !== 'string' || input.password.length > 1024)) return false;
+  if (input.confirmHttpPlaintext !== undefined && typeof input.confirmHttpPlaintext !== 'boolean') return false;
+  return true;
+}
+
 export function isCreateLocalSourceInput(value: unknown): value is CreateLocalSourceInput {
   if (typeof value !== 'object' || value === null) return false;
   const input = value as Record<string, unknown>;

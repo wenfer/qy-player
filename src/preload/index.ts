@@ -125,6 +125,7 @@ const electronAPI = {
   setSettings: (key: string, value: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.SET, key, value),
   getServers: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.GET_SERVERS),
+  isSecretsPersistent: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.SECRETS_PERSISTENT),
   saveServer: (server: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.SAVE_SERVER, server),
   testServer: (server: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.TEST_SERVER, server),
 

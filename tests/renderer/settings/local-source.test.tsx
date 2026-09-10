@@ -29,6 +29,7 @@ function emitScanEvent(event: Record<string, unknown>): void {
 // whole window object would drop jsdom's prototype chain and crash react-dom.
 vi.stubGlobal('electronAPI', {
   getServers: vi.fn(async () => []),
+  isSecretsPersistent: vi.fn(async () => true),
   saveServer: vi.fn(),
   listSources,
   saveSource,
@@ -63,7 +64,8 @@ describe('SourceForm (add local source)', () => {
         saving={false}
         testing={false}
         formError={null}
-        onChange={() => undefined}
+        persistentSecrets={true}
+
         onPick={pickDirectory}
         onTest={testSource}
         onSave={onSave}
@@ -78,7 +80,7 @@ describe('SourceForm (add local source)', () => {
     fireEvent.click(screen.getByRole('button', { name: /添加来源/ }));
 
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith({ root: '/data/movies', name: '电影收藏' })
+      expect(onSave).toHaveBeenCalledWith({ kind: 'local', root: '/data/movies', name: '电影收藏' })
     );
     // 1280x800 no-horizontal-scroll policy: action rows wrap instead.
     expect(document.querySelector('[data-testid="source-form"] .flex-wrap')).toBeTruthy();
@@ -91,7 +93,8 @@ describe('SourceForm (add local source)', () => {
         saving={false}
         testing={false}
         formError={null}
-        onChange={() => undefined}
+        persistentSecrets={true}
+
         onPick={pickDirectory}
         onTest={testSource}
         onSave={onSave}
