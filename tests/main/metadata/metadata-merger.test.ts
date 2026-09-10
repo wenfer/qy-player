@@ -4,6 +4,7 @@ import {
   applyManualField,
   applyNfoMetadata,
   applyProviderFields,
+  clearManualField,
   winnerFor,
 } from '../../../src/main/modules/metadata/metadata-merger';
 import type { NfoMetadata, ProviderStore } from '../../../src/main/modules/metadata/types';
@@ -120,6 +121,30 @@ describe('metadata merger', () => {
     store = applyManualField(store, 'title', '手动2').store;
     expect(store.title!.manual!.revision).toBe(2);
     expect(store.title!.nfo!.revision).toBe(1);
+  });
+
+  it('clearManualField restores the highest remaining provider', () => {
+    let store = applyNfoMetadata({}, nfoMeta({ title: 'NFO标题', plot: 'NFO剧情' })).store;
+    store = applyManualField(store, 'title', '人工标题').store;
+    expect(winnerFor(store, 'title')!.provider).toBe('manual');
+    store = clearManualField(store, 'title');
+    expect(winnerFor(store, 'title')).toMatchObject({ provider: 'nfo', value: 'NFO标题' });
+    // Removing a manual slot keeps its revision history intact.
+    expect(store.title!.manual).toBeUndefined();
+    expect(winnerFor(store, 'plot')!.provider).toBe('nfo');
+  });
+
+  it('expectedRevision 0 creates a new field optimistically', () => {
+    const outcome = applyManualField({}, 'title', '新字段', { expectedRevision: 0 });
+    expect(winnerFor(outcome.store, 'title')).toMatchObject({ provider: 'manual', value: '新字段', revision: 1 });
+  });
+
+  it('key order differences do not bump revisions', () => {
+    const meta = nfoMeta({ actors: [{ name: '甲', role: '主角' }] });
+    const first = applyNfoMetadata({}, meta);
+    const reordered = nfoMeta({ actors: [{ role: '主角', name: '甲' }] });
+    const second = applyNfoMetadata(first.store, reordered);
+    expect(second.changedFields).toEqual([]);
   });
 
   it('null/empty values are ignored (no field erasure)', () => {

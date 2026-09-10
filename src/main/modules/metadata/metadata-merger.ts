@@ -34,8 +34,21 @@ export function winnerFor(store: ProviderStore, field: string): FieldWinner | nu
   return null;
 }
 
+/**
+ * Structural equality with stable key order, so an equivalent payload
+ * written in different key order does not bump revisions.
+ */
+function stableStringify(value: MetadataValue): string {
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)));
+    }
+    return v;
+  });
+}
+
 function deepEqual(a: MetadataValue, b: MetadataValue): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return stableStringify(a) === stableStringify(b);
 }
 
 /**
@@ -146,7 +159,9 @@ export function applyManualField(
 ): MergeOutcome {
   const now = options.now ?? Date.now();
   const winner = winnerFor(store, field);
-  if (options.expectedRevision !== undefined && winner?.revision !== options.expectedRevision) {
+  // A new field has no winner; revision 0 expresses "create optimistically".
+  const currentRevision = winner?.revision ?? 0;
+  if (options.expectedRevision !== undefined && currentRevision !== options.expectedRevision) {
     throw new MetadataConflictError(field, options.expectedRevision, winner);
   }
   const slots = { ...store[field] };

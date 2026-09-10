@@ -114,6 +114,37 @@ interface ParserState {
 const NAME_START = /[A-Za-z_]/;
 const NAME_CHAR = /[A-Za-z0-9_.-]/;
 
+/**
+ * After the root element only whitespace, comments and processing
+ * instructions are tolerated; anything else is a malformed document.
+ */
+function assertTrailingNoise(remaining: string): void {
+  let i = 0;
+  while (i < remaining.length) {
+    const lt = remaining.indexOf('<', i);
+    if (lt === -1) {
+      if (remaining.slice(i).trim().length > 0) {
+        throw new NfoParseError('根元素闭合后存在多余内容');
+      }
+      return;
+    }
+    if (remaining.slice(i, lt).trim().length > 0) {
+      throw new NfoParseError('根元素闭合后存在多余内容');
+    }
+    if (remaining.startsWith('<!--', lt)) {
+      const end = remaining.indexOf('-->', lt + 4);
+      if (end === -1) throw new NfoParseError('根元素闭合后注释未闭合');
+      i = end + 3;
+    } else if (remaining.startsWith('<?', lt)) {
+      const end = remaining.indexOf('?>', lt + 2);
+      if (end === -1) throw new NfoParseError('根元素闭合后处理指令未闭合');
+      i = end + 2;
+    } else {
+      throw new NfoParseError('根元素闭合后存在多余内容');
+    }
+  }
+}
+
 function parseAttributeNameValue(xml: string, pos: number): { name: string; value: string; next: number } {
   let i = pos;
   while (i < xml.length && /\s/.test(xml[i])) i += 1;
@@ -225,10 +256,7 @@ function buildTree(xml: string): XmlNode {
       }
       if (stack.length === 0) {
         root = top;
-        // Only trailing whitespace allowed after the root closes.
-        if (xml.slice(end + 1).trim().length > 0) {
-          throw new NfoParseError('根元素闭合后存在多余内容');
-        }
+        assertTrailingNoise(xml.slice(end + 1));
         return root;
       }
       stack[stack.length - 1].children.push(top);
@@ -244,9 +272,7 @@ function buildTree(xml: string): XmlNode {
     if (parsed.selfClosing) {
       if (stack.length === 0) {
         root = parsed.node;
-        if (xml.slice(parsed.next).trim().length > 0) {
-          throw new NfoParseError('根元素闭合后存在多余内容');
-        }
+        assertTrailingNoise(xml.slice(parsed.next));
         return root;
       }
       stack[stack.length - 1].children.push(parsed.node);
@@ -331,7 +357,8 @@ function uniqueIdsOf(node: XmlNode): NfoUniqueId[] {
 function setOf(node: XmlNode): string | undefined {
   const setNode = node.children.find((child) => child.name === 'set');
   if (!setNode) return textOf(node, 'set');
-  return textOf(setNode, 'name') ?? undefined;
+  // <set><name>X</name></set> is the Kodi form; <set>X</set> is tolerated.
+  return textOf(setNode, 'name') ?? (setNode.text.trim() || undefined);
 }
 
 /** Parse NFO XML text into a normalized metadata payload. */
@@ -390,6 +417,8 @@ export function listSidecarCandidates(dirFileNames: ReadonlyArray<string>, video
     const ext = name.slice(dot).toLowerCase();
     if (!IMAGE_EXTENSIONS.includes(ext)) continue;
     const stem = name.slice(0, dot).toLowerCase();
+    // poster/fanart per plan §9.1; banner/logo are the same sidecar
+    // mechanism and cost nothing — QYP2-011's UI consumes them.
     if (stem === 'poster' || stem === 'fanart' || stem === 'banner' || stem === 'logo') {
       out.push(name);
       continue;

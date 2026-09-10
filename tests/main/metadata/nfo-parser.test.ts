@@ -145,6 +145,37 @@ describe('nfo parser', () => {
     expect(decodeNfoBuffer(Buffer.from(xml, 'utf8'))).toBe(xml);
   });
 
+  it('accepts legal depth exactly at the cap and legal entities', () => {
+    // 32 levels total (root + 31 nested) is within the cap.
+    const legal = '<movie>' + '<a>'.repeat(31) + 'x' + '</a>'.repeat(31) + '</movie>';
+    expect(() => parseNfoXml(legal)).not.toThrow();
+    expect(parseNfoXml('<movie><title>正常 &amp; 合法实体 &#x4E2D;</title></movie>').title)
+      .toBe('正常 & 合法实体 中');
+  });
+
+  it('accepts a self-closing root and trailing comments', () => {
+    expect(parseNfoXml('<movie/>').kind).toBe('movie');
+    expect(parseNfoXml('<movie><!-- 尾部注释 --></movie><!-- 允许 -->').kind).toBe('movie');
+    expect(() => parseNfoXml('</movie><movie></movie>')).toThrow();
+    expect(() => parseNfoXml('<movie></movie>多废话')).toThrow();
+  });
+
+  it('rejects out-of-range and surrogate numeric entities', () => {
+    expect(() => parseNfoXml('<movie><title>&#x110000;</title></movie>')).toThrow(/非法数字实体/);
+    expect(() => parseNfoXml('<movie><title>&#xD800;</title></movie>')).toThrow(/非法数字实体/);
+  });
+
+  it('prefers <contentrating> when both rating tags exist', () => {
+    const meta = parseNfoXml('<movie><mpaa>R</mpaa><contentrating>PG-13</contentrating></movie>');
+    expect(meta.contentRating).toBe('PG-13');
+  });
+
+  it('rejects illegal tag and attribute names', () => {
+    expect(() => parseNfoXml('<123>x</123>')).toThrow(/非法标签名/);
+    expect(() => parseNfoXml('<movie><title!>x</title></movie>')).toThrow();
+    expect(() => parseNfoXml('<movie bad!=x>x</movie>')).toThrow();
+  });
+
   it('parses from a buffer end-to-end', () => {
     const meta = parseNfo(Buffer.from(MOVIE_NFO, 'utf8'));
     expect(meta.kind).toBe('movie');
