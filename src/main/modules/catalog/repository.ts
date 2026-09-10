@@ -541,6 +541,11 @@ export function createCatalogRepository(db: Database.Database) {
       ).run(itemId, field, provider, JSON.stringify(value));
     },
 
+    deleteMetadataSource(itemId: number, field: string, provider: string): void {
+      db.prepare('DELETE FROM catalog_metadata_sources WHERE item_id = ? AND field = ? AND provider = ?')
+        .run(itemId, field, provider);
+    },
+
     listMetadataSources(itemId: number): Array<{
       field: string;
       provider: string;
