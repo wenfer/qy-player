@@ -531,13 +531,20 @@ Evidence:
 
 ### QYP2-024 实现安全删除后端
 
-- [ ] **依赖：** QYP2-012、QYP2-014、QYP2-022
-- [ ] **Read first：** 本文第 14.2、15、16.3 节，安全 hardening 指南
-- [ ] **允许修改：** `src/main/modules/media-operations/delete-service.ts`、`src/main/modules/library-sources/local-source.ts`、`src/main/modules/library-sources/webdav-source.ts`、`src/main/ipc/index.ts`、`tests/main/media-operations/safe-delete.test.ts`
-- [ ] **目标：** 两阶段 preview/token/execute；本地回收站；WebDAV capability + 前置条件删除。
-- [ ] **验收：** root/root外/symlink/指纹变化/只读/无 ownership 全拒绝；检查后复验；回收站失败不永久删除；unknown 不假成功。
-- [ ] **验证：** 隔离临时目录和 mock WebDAV 覆盖攻击/竞态/失败路径。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-012、QYP2-014、QYP2-022
+- [x] **Read first：** 本文第 14.2、15、16.3 节，安全 hardening 指南
+- [x] **允许修改：** `src/main/modules/media-operations/delete-service.ts`、`src/main/modules/library-sources/local-source.ts`、`src/main/modules/library-sources/webdav-source.ts`、`src/main/ipc/index.ts`、`tests/main/media-operations/safe-delete.test.ts`
+- [x] **目标：** 两阶段 preview/token/execute；本地回收站；WebDAV capability + 前置条件删除。
+- [x] **验收：** root/root外/symlink/指纹变化/只读/无 ownership 全拒绝；检查后复验；回收站失败不永久删除；unknown 不假成功。
+- [x] **验证：** 隔离临时目录和 mock WebDAV 覆盖攻击/竞态/失败路径。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（34 文件 416 测试通过，本任务 20 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 两阶段：preview 计算条目独立目录（common parent；共享目录/root 顶层散文件拒绝）+ 可删 kind（movie/series/video，季/集拒绝）+ 非只读 + realpath containment + 同文件系统（st_dev 挂载点检查）→ 签发 10 分钟单次 token（randomBytes，绑定 sourceId+itemId+targetDir+fingerprint+sourceRoot+If-Match etag）；execute 全部复验（文件集/fingerprint/ownership/只读/root 绑定/realpath/挂载点/磁盘 spot check mtime+size）后才动手
+  - 本地：仅 shell.trashItem，失败即 TRASH_FAILED 永不降级为永久删除；WebDAV：标题确认强制（null 标题直接拒绝，空串绕过关闭）、If-Match 服务端复验（preview→execute 间目标被改则 412→FINGERPRINT_CHANGED）、网络歧义→status unknown→标记 offline（绝不假成功/盲重试）
+  - 成功才标 missing 并清缓存（受管目录 + catalog_subtitles/poster/fanart 行）；失败不动索引；renderer 只提交 {sourceId,itemId}/{token,confirmTitle}
+  - Review notes: 评审 Request changes → CRITICAL 3 项全修（If-Match 全链路落地并修正测试断言、token 绑 source.root 防改根劫持、WebDAV execute 经 If-Match 服务端复验）；REQUIRED 4 项全修（挂载点 st_dev、randomBytes、null-title 绕过、磁盘 spot check）+ shared wire 类型与 contract 测试；OPTIONAL 修 2（cache DB 行清理、symlink 错误码保持）
+  - 越界（待追认）：webdav-client.ts（remove()——在允许清单外但为 If-Match 必需）、shared/ipc-channels.ts（MEDIA 组）、shared/types/safe-delete.ts、preload/index.ts（2 个 wrapper）——§16.6 成套所需
+  - Result: 通过
 
 ### QYP2-025 开发删除预览与确认 UI
 
