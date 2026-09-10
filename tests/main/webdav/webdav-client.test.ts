@@ -296,6 +296,24 @@ describe('webdav client', () => {
     await expect(client().list('')).rejects.toThrow(/上限/);
   });
 
+  it('readText collects a small resource within the byte cap', async () => {
+    handler = (_req, res) => {
+      const body = '<movie/>héllo';
+      res.writeHead(200, { 'Content-Type': 'text/xml', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body);
+    };
+    const text = await client().readText('Movies/a.nfo');
+    expect(text).toBe('<movie/>héllo');
+  });
+
+  it('fails with a clear error when the Depth-0 response lacks the self entry', async () => {
+    handler = (_req, res) => {
+      res.writeHead(207, { 'Content-Type': 'application/xml' });
+      res.end('<D:multistatus xmlns:D="DAV:"></D:multistatus>');
+    };
+    await expect(client().stat('')).rejects.toThrow(/缺少自身条目/);
+  });
+
   it('rejects hostile multistatus payloads', () => {
     const parsed = parseWebDavBaseUrl(baseUrl());
     expect(() => parseMultistatus('<!DOCTYPE x><D:multistatus/>', parsed, 10)).toThrow(/DOCTYPE/);

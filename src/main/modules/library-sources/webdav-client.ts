@@ -172,7 +172,13 @@ function singleRequest(
             body: Buffer.concat(chunks),
           });
         });
-        res.on('error', (err: Error) => settle(err));
+        res.on('error', (err: Error) => {
+          // Response-stream failures must not leak the deadline timer or
+          // the abort listener (the response already consumed both).
+          clearTimeout(timer);
+          opts.signal?.removeEventListener('abort', abortListener);
+          settle(err);
+        });
       } else {
         settle(undefined, { status: res.statusCode ?? 0, headers: res.headers, stream: res });
       }
@@ -189,7 +195,10 @@ function singleRequest(
 }
 
 /** PROPFIND multistatus parsing — namespace-tolerant, strictly bounded. */
-export function parseMultistatus(xml: string, base: ParsedWebDavBase, maxEntries: number): WebDavEntry[] {
+export function parseMultistatus(rawXml: string, base: ParsedWebDavBase, maxEntries: number): WebDavEntry[] {
+  // Predefined-entity decoding is part of the parser contract so every
+  // caller (tests included) sees the same normalization.
+  const xml = decodeEntitiesMinimal(rawXml);
   if (/<!(?:[\w-]+:)?DOCTYPE/i.test(xml)) {
     throw new WebDavError('PROPFIND 响应包含 DOCTYPE，已拒绝');
   }
@@ -239,17 +248,18 @@ function decodeEntitiesMinimal(raw: string): string {
     .replace(/&amp;/g, '&');
 }
 
-export function createWebDavClient(options: WebDavClientOptions): {
-  stat(relativePath: string): Promise<WebDavEntry>;
-  list(relativePath: string): Promise<WebDavEntry[]>;
-  get(relativePath: string, range?: { rangeHeader?: string }): Promise<WebDavResponse>;
-  readText(relativePath: string): Promise<string>;
-} {
+export interface WebDavClient {
+  stat(relativePath: string, signal?: AbortSignal): Promise<WebDavEntry>;
+  list(relativePath: string, signal?: AbortSignal): Promise<WebDavEntry[]>;
+  get(relativePath: string, range?: { rangeHeader?: string; signal?: AbortSignal }): Promise<WebDavResponse>;
+  readText(relativePath: string, signal?: AbortSignal): Promise<string>;
+}
+
+export function createWebDavClient(options: WebDavClientOptions): WebDavClient {
   const base = parseWebDavBaseUrl(options.baseUrl);
   const timeoutMs = options.timeoutMs ?? WEBDAV_DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxBytes ?? WEBDAV_DEFAULT_MAX_BYTES;
   const maxRetries = options.maxRetries ?? WEBDAV_MAX_RETRIES;
-  const signal = options.signal;
 
   const authHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {};
@@ -275,10 +285,11 @@ export function createWebDavClient(options: WebDavClientOptions): {
   async function request(
     method: string,
     requestPath: string,
-    init: { headers?: Record<string, string>; body?: Buffer; depth?: PropfindDepth } = {}
+    init: { headers?: Record<string, string>; body?: Buffer; depth?: PropfindDepth; signal?: AbortSignal } = {}
   ): Promise<RawResponse> {
     const headers: Record<string, string> = { ...authHeaders(), ...init.headers };
     if (init.depth !== undefined) headers.Depth = String(init.depth);
+    const signal = init.signal ?? options.signal;
     let attempt = 0;
     for (;;) {
       throwIfAborted(signal);
@@ -288,23 +299,29 @@ export function createWebDavClient(options: WebDavClientOptions): {
       } catch (err) {
         if (!isNetworkError(err) || attempt >= maxRetries) throw err;
         attempt += 1;
-        await backoff(attempt);
+        await backoff(attempt, signal);
         continue;
       }
       if (RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {
         res.stream.destroy();
         attempt += 1;
-        await backoff(attempt);
+        await backoff(attempt, signal);
         continue;
       }
       return res;
     }
   }
 
-  async function backoff(attempt: number): Promise<void> {
+  async function backoff(attempt: number, callSignal: AbortSignal | undefined): Promise<void> {
     await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, 250 * attempt);
-      signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+      const t = setTimeout(done, 250 * attempt);
+      const onAbort = (): void => done();
+      function done(): void {
+        clearTimeout(t);
+        callSignal?.removeEventListener('abort', onAbort);
+        resolve();
+      }
+      callSignal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
@@ -319,7 +336,7 @@ export function createWebDavClient(options: WebDavClientOptions): {
   async function requestWithRedirects(
     method: string,
     requestPath: string,
-    init: { headers?: Record<string, string>; body?: Buffer; depth?: PropfindDepth } = {}
+    init: { headers?: Record<string, string>; body?: Buffer; depth?: PropfindDepth; signal?: AbortSignal } = {}
   ): Promise<RawResponse> {
     let currentPath = requestPath;
     for (let redirects = 0; redirects <= WEBDAV_MAX_REDIRECTS; redirects += 1) {
@@ -368,38 +385,38 @@ export function createWebDavClient(options: WebDavClientOptions): {
   }
 
   return {
-    async stat(relativePath: string): Promise<WebDavEntry> {
+    async stat(relativePath: string, callSignal?: AbortSignal): Promise<WebDavEntry> {
       const requestPath = relativePathToRequestPath(relativePath, base);
       const res = await requestWithRedirects('PROPFIND', requestPath, {
         depth: 0,
         headers: { 'Content-Type': 'application/xml; charset=utf-8' },
         body: Buffer.from(PROPFIND_BODY, 'utf8'),
+        signal: callSignal,
       });
       assertStatus(res.status, 'PROPFIND');
-      const body = res.body ? decodeEntitiesMinimal(res.body.toString('utf8')) : '';
       // Depth-0 responses contain exactly one entry in practice; the cap
       // tolerates sloppy servers while still bounding the parse.
-      const entries = parseMultistatus(body, base, 16);
+      const entries = parseMultistatus(res.body ? res.body.toString('utf8') : '', base, 16);
       return entryForPath(relativePath, entries);
     },
 
-    async list(relativePath: string): Promise<WebDavEntry[]> {
+    async list(relativePath: string, callSignal?: AbortSignal): Promise<WebDavEntry[]> {
       const requestPath = relativePathToRequestPath(relativePath, base);
       const res = await requestWithRedirects('PROPFIND', requestPath, {
         depth: 1,
         headers: { 'Content-Type': 'application/xml; charset=utf-8' },
         body: Buffer.from(PROPFIND_BODY, 'utf8'),
+        signal: callSignal,
       });
       assertStatus(res.status, 'PROPFIND');
-      const body = res.body ? decodeEntitiesMinimal(res.body.toString('utf8')) : '';
-      return parseMultistatus(body, base, 10_000);
+      return parseMultistatus(res.body ? res.body.toString('utf8') : '', base, 10_000);
     },
 
-    async get(relativePath: string, range?: { rangeHeader?: string }): Promise<WebDavResponse> {
+    async get(relativePath: string, range?: { rangeHeader?: string; signal?: AbortSignal }): Promise<WebDavResponse> {
       const requestPath = relativePathToRequestPath(relativePath, base);
       const headers: Record<string, string> = {};
       if (range?.rangeHeader) headers.Range = range.rangeHeader;
-      const res = await requestWithRedirects('GET', requestPath, { headers });
+      const res = await requestWithRedirects('GET', requestPath, { headers, signal: range?.signal });
       const isPartial = res.status === 206;
       if (res.status !== 200 && !isPartial) {
         assertStatus(res.status, 'GET');
@@ -415,8 +432,8 @@ export function createWebDavClient(options: WebDavClientOptions): {
       };
     },
 
-    async readText(relativePath: string): Promise<string> {
-      const res = await this.get(relativePath);
+    async readText(relativePath: string, callSignal?: AbortSignal): Promise<string> {
+      const res = await this.get(relativePath, { signal: callSignal });
       const chunks: Buffer[] = [];
       let bytes = 0;
       await new Promise<void>((resolve, reject) => {

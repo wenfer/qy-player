@@ -134,8 +134,11 @@ export function normalizeServerHref(href: string, base: ParsedWebDavBase): strin
     throw new WebDavUrlError('href 百分号编码无效');
   }
   // Double-encoding tripwire: after one decode there must be no encoded
-  // traversal material left.
-  if (/%(?:2e|2f|5c)/i.test(decoded)) {
+  // traversal material left (%25 = encoded '%', %2e/%2f/%5c = encoded
+  // '.'/'/'/'\\'). A literal '%' in a filename encodes as %25; files whose
+  // NAMES themselves contain '%25' are pathological and rejected on
+  // purpose — containment trumps name exoticism (plan §8.2).
+  if (/%(?:25|2e|2f|5c)/i.test(decoded)) {
     throw new WebDavUrlError('href 存在双重编码，已拒绝');
   }
   if (decoded.includes('\u0000')) {

@@ -53,6 +53,7 @@ export class WebDavSourceAdapter implements SourceAdapter {
   readonly kind = 'webdav' as const;
   private readonly client: WebDavClient;
   private readonly rootUrl: string;
+  private readonly rootBasePath: string;
 
   constructor(
     readonly sourceId: number,
@@ -60,8 +61,11 @@ export class WebDavSourceAdapter implements SourceAdapter {
     auth: WebDavClientOptions['auth'],
     options: Pick<WebDavClientOptions, 'signal' | 'timeoutMs' | 'maxBytes' | 'maxRetries'> = {}
   ) {
-    // Fail fast on contract-violating base URLs.
-    this.rootUrl = parseWebDavBaseUrl(baseUrl).url;
+    // Fail fast on contract-violating base URLs; the parsed shape is cached
+    // for href root-stripping during list().
+    const parsed = parseWebDavBaseUrl(baseUrl);
+    this.rootUrl = parsed.url;
+    this.rootBasePath = parsed.basePath;
     this.client = createWebDavClient({ baseUrl: this.rootUrl, auth, ...options });
   }
 
@@ -77,14 +81,16 @@ export class WebDavSourceAdapter implements SourceAdapter {
     return new WebDavSourceAdapter(sourceId, root, auth, options);
   }
 
-  async testConnection(_signal: AbortSignal): Promise<{
+  async testConnection(signal: AbortSignal): Promise<{
     canSeek: boolean;
     canDelete: boolean;
     supportsEtag: boolean;
     supportsRange: boolean;
   }> {
-    // PROPFIND Depth 0 on the root: reachable + authenticated.
-    await this.client.stat('');
+    // PROPFIND Depth 0 on the root: reachable + authenticated. A 401/403
+    // surfaces as WebDavError with status — the health layer maps it to
+    // 'auth-required' vs 'offline' (plan §6.1).
+    await this.client.stat('', signal);
     // ETag support is declared per-entry by the server; the root tells us
     // the general shape. Range probing happens per-file before playback.
     return { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true };
@@ -93,7 +99,7 @@ export class WebDavSourceAdapter implements SourceAdapter {
   /** One PROPFIND Depth 1 → relativePath entries (no leading slash). */
   async *list(relativePath: string, signal: AbortSignal): AsyncGenerator<SourceEntry> {
     if (signal.aborted) return;
-    const entries = await this.client.list(relativePath);
+    const entries = await this.client.list(relativePath, signal);
     const prefix = relativePath === '' ? '' : `${relativePath.replace(/\/+$/, '')}/`;
     const basePath = this.rootBasePath;
     for (const entry of entries) {
@@ -114,13 +120,8 @@ export class WebDavSourceAdapter implements SourceAdapter {
     }
   }
 
-  private get rootBasePath(): string {
-    return parseWebDavBaseUrl(this.rootUrl).basePath;
-  }
-
   async stat(locator: MediaLocator, signal: AbortSignal): Promise<SourceStat> {
-    void signal;
-    const entry = await this.client.stat(locator.relativePath);
+    const entry = await this.client.stat(locator.relativePath, signal);
     return {
       ...(entry.size !== undefined ? { size: entry.size } : {}),
       ...(entry.mtime !== undefined ? { mtime: entry.mtime } : {}),
@@ -130,12 +131,17 @@ export class WebDavSourceAdapter implements SourceAdapter {
   }
 
   async open(locator: MediaLocator, signal: AbortSignal, rangeHeader?: string): Promise<ReadableResource> {
-    void signal;
-    const res = await this.client.get(locator.relativePath, rangeHeader ? { rangeHeader } : undefined);
+    const res = await this.client.get(locator.relativePath, {
+      ...(rangeHeader ? { rangeHeader } : {}),
+      signal,
+    });
     return {
       stream: res.stream,
       ...(res.size !== undefined ? { size: res.size } : {}),
-      supportsRange: res.supportsRange || res.status === 200,
+      // A 200 is NOT proof of Range support — only a 206 is (plan §8.1:
+      // seek capability is probed per-file before playback, and a false
+      // positive here would hide unreliable seeking from the UI).
+      supportsRange: res.supportsRange,
     };
   }
 }
