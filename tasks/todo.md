@@ -357,6 +357,22 @@ Evidence:
 - [ ] **验证：** 两个测试文件、`npm run typecheck`、现有服务器播放回归。
 - [ ] **Evidence：** 待填写
 
+### QYP2-015 实现统一 PlaybackResolver 与精确路由
+
+- [x] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
+- [x] **Read first：** ipc/index.ts、player-core/index.ts、playback-state/index.ts、use-play-item.ts、jellyfin/emby client 签名
+- [x] **允许修改：** `playback-resolver.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/playback/playback-resolver.test.ts`、`tests/main/online/server-routing.test.ts`
+- [x] **目标：** MediaRef 在主进程解析 locator、headers、resume、subtitle 和 media context；Jellyfin/Emby 严格按 serverId 路由。
+- [x] **验收：** renderer 不接触凭据；同 id 多服务器测试不串库；旧直连/转码/单文件播放行为不回归；URL 不由 renderer 拼接。
+- [x] **验证：** 两个测试文件（14 + 5 用例）、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（23 文件 262 测试通过）；`npm run typecheck`（零错误）；`git diff --check`
+  - Credential isolation: renderer 侧 grep apiKey 零残留；TEST_SERVER 只回 {ok}（userId 亦不回传）；SAVE_SERVER 凭密码主进程认证后直写 SecretStore（先认证后落库，无效不存）；transcode X-Emby-Token 与 webdav Basic 均 stash + opaque session（测试取回断言 + 输出 JSON 扫描断言无密钥）；ServerConfig 删除 apiKey 字段，OnlineClientConfig 主进程独立
+  - Routing: resolver 内 bindOnlineServer 单点严格绑定（双服务器同 itemId 测试断言全部调用落在 A 侧 + A 的 key）；GET_ITEMS/GET_ITEM_DETAILS 的 serverId 可选分支用 bindServerById 单次命中（聚合查询保持 legacy）；History 模糊记录拒绝猜测（单匹配才进，否则 toast 指引）
+  - Behavior: Series/Season 强制解析首集；pinned mediaSourceId 优先；transcode/direct 模式白名单；isMediaRef（prototype pollution 守卫沿用）+ mediaSourceId 长度上限；90% 规则仍在 LOAD_FILE（History 本地回放对齐）；单文件打开直通不变
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：REQUIRED——Detail startPosition 0 被 resume 吞掉（改为 !== undefined 判定）、ServerConfig apiKey 残留（shared 移除 + OnlineClientConfig 独立 + 全调用点更新）；OPTIONAL——provider-array 探测循环改为单次命中、Series/Season 忽略容器级 MediaSources、History 90%/5s 对齐；二轮验收 Approve；② 越界文件（待追认）：renderer 8 文件（App 路由 /detail/:type/:serverId/:id、Detail、use-play-item、Home/Search/LibraryBrowse/History 导航、Settings 保存流）+ shared ServerConfig/ipc-channels PLAYER.RESOLVE——评审确认均为统一解析所必需；③ TEST_SERVER 的 accessToken 透传 Transitional 正式移除（summary 遗留项关闭）
+
 ### QYP2-016 交付 WebDAV 播放与 seek 体验
 
 - [ ] **依赖：** QYP2-013、QYP2-014、QYP2-015
