@@ -330,6 +330,23 @@ Evidence:
 - [ ] **验证：** mock 10,000 项树、峰值内存/并发记录、测试通过。
 - [ ] **Evidence：** 待填写
 
+### QYP2-014 实现 WebDAV 增量扫描与离线状态
+
+- [x] **依赖：** QYP2-009、QYP2-012
+- [x] **Read first：** 计划第 6、8 节、QYP2-009 驱动、QYP2-012 adapter 契约
+- [x] **允许修改：** `webdav-scanner.ts`、`webdav-source.ts`、`tests/main/library-scanner/webdav-scan.test.ts`
+- [x] **目标：** 分层遍历 WebDAV，按 ETag/Last-Modified/size 增量更新，复用本地分类器。
+- [x] **验收：** 不使用 Depth infinity；并发/取消/重试有界；离线/认证失败/取消不标 missing；健康状态持久化。
+- [x] **验证：** mock 10,000 项树、峰值内存/并发记录、测试通过。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（21 文件 243 测试通过，本任务 13 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Baseline: 10,000 项 synthetic（200 Show × S01E01–E50，ETag 全备）~13.9s（门限 <60s）；并发 = controller 有界队列默认 4（webdav ≤4, plan §16.4）；遍历为 DFS 顺序 PROPFIND，无并发 PROPFIND 爆发；walker/entry 上限与本地一致（100k/32）
+  - Offline matrix: 连接失败（ECONNREFUSED）/认证失败（401）/取消全流程断言完整 availability 数组不变；仅 completed + fullScan 触发 missing；resume 不标
+  - Fingerprint: 'etag:<v>' 优先，显式降级 'nofetag:<size>:<mtime>'（无 ETag 服务器仍增量）；ETag 变更但 size/mtime 不变 → 重新索引；不变扫描零重写（updated_at 不动）；钩子在 index 与 group-flush 两条路径统一（提交中途曾修 flush bypass bug，由 etag 测试捕获）
+  - Health: SOURCE_HEALTH 成功/失败均持久化到 library_sources.options（保留其他键）；SOURCE_LIST 返回 health + healthCheckedAt（秒→ms）；渲染徽章四态
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes（WebDAV 扫描按钮 UI/后端就绪脱节已解锁、persistSourceHealth 非对象 JSON 守卫、collectBounded destroy/error 双重 settle、AbortSignal 透传；另有两 OPTIONAL（本地 readNfo signal、已完成—对齐变形？以及 keepalive/cleanup 注解）一并处理）；二轮验收 Approve；② SCAN_START webdav 分支正式上线（先前 QYP2-013 的显式拒绝已移除）；③ 越界文件（待追认）：local-scanner.ts（fingerprintOf 钩子）、shared/types（SourceListEntry.health）、ipc/index.ts（scan 分支 + health 接线）、Settings/SourceList.tsx、Local/index.tsx（扫描解锁）——评审确认为最小必要
+
 ### QYP2-015 实现统一 PlaybackResolver 与精确路由
 
 - [ ] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
