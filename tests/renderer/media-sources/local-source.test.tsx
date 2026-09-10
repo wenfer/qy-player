@@ -109,7 +109,7 @@ describe('SourceForm (add local source)', () => {
   });
 });
 
-describe('Settings page sources section', () => {
+describe('MediaSources page sources section', () => {
   it('lists sources with scan state and removal wording that promises files stay', async () => {
     listSources.mockResolvedValue([
       {

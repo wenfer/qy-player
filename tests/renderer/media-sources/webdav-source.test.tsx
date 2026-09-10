@@ -172,7 +172,7 @@ describe('WebDAV source form', () => {
   });
 });
 
-describe('Settings page: WebDAV source rows', () => {
+describe('MediaSources page: WebDAV source rows', () => {
   it('renders capabilities, credential state and the plaintext badge', async () => {
     listSources.mockResolvedValue([
       {

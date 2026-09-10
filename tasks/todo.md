@@ -397,6 +397,7 @@ Evidence:
 - [x] **改动：** 来源管理（本地+WebDAV 的 SourceForm/SourceList/WebDavFields）从 Settings 整体迁移到新页面 `pages/MediaSources`（路由 `/media-sources`，导航「媒体库」）；Settings 只留媒体服务器等软件配置并加指引文案；AGENTS.md UI 约定补此偏好。
 - [x] **Evidence：** `npm test -- --run`（27 文件 317 测试通过，来源测试迁至 tests/renderer/media-sources/ 并改挂新页面）；`npm run typecheck` 零错误；`git diff --check`
 - [x] **Result:** 通过
+- [x] **Review notes:** 首轮 Approve（0 REQUIRED）；已修：describe 迁移更名、空态/副标题文案改为指向「本地」页；记录待用户定夺：导航项「媒体库」与 Home 页「媒体库」(服务器浏览) 术语撞车，可选改名「来源管理」——因用户原话即「媒体库」而保留
 
 ## Phase D：详情、技术信息与媒体操作
 

@@ -169,7 +169,7 @@ export default function MediaSources() {
       </button>
       <h1 className="text-2xl font-bold tracking-tight mb-2">媒体库</h1>
       <p className="text-sm text-muted-foreground mb-8">
-        管理本地目录与 WebDAV 来源：添加后即可扫描索引，浏览与播放入口在媒体库浏览页。
+        管理本地目录与 WebDAV 来源：添加后即可扫描索引；浏览与播放请到侧边栏「本地」页。
       </p>
 
       <section className="mb-10" aria-label="媒体来源">
