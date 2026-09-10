@@ -58,6 +58,7 @@ import type {
 import { isMediaRef } from '../../shared/types';
 import {
   bindServerById,
+  injectAttachedSubtitles,
   parseWebDavMediaId,
   resolvePlayback,
   ResolverError,
@@ -218,6 +219,14 @@ export function registerIpcHandlers(player: PlayerCore): void {
       playbackStateManager!.setCurrentMedia('local', path, title, undefined, localMediaId);
 
       await player.loadFile(path, finalPosition, effectiveHeaders);
+      // QYP2-021: attach sidecar/imported subtitles (catalog items only);
+      // best-effort - failures never block playback (plan §13).
+      await injectAttachedSubtitles(
+        player,
+        catalogRepo,
+        mediaContext?.mediaType,
+        mediaContext?.mediaId
+      );
     } else {
       // Online streaming: key progress by the ITEM id (not the stream URL,
       // which differs between direct/transcode and would split the record)
@@ -239,6 +248,13 @@ export function registerIpcHandlers(player: PlayerCore): void {
         ? startPosition
         : (resumePosition > 0 ? resumePosition : undefined);
       await player.loadFile(path, finalPosition, effectiveHeaders);
+      // QYP2-021: WebDAV streams accept local subtitles too (plan §13).
+      await injectAttachedSubtitles(
+        player,
+        catalogRepo,
+        mediaContext?.mediaType,
+        mediaContext?.mediaId
+      );
     }
   });
 

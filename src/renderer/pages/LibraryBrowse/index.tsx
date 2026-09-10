@@ -22,6 +22,7 @@ interface RawItem {
 
 // Renderer consumes the shared resolution contract (QYP2-015/016).
 import type { PlaybackResolution } from '../../../shared/types/catalog';
+import SubtitleManager from '../Detail/SubtitleManager';
 
 interface ResolvedPlayback {
   ok: boolean;
@@ -247,6 +248,10 @@ function CatalogItemDetailView({
         {playing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
         {progress && !progress.isFinished && progress.position > 30 ? `续播 ${formatTime(progress.position)}` : '立即播放'}
       </button>
+
+      {/* QYP2-021: sidecar + imported subtitles, one list; playback
+          injection happens main-side after loadFile. */}
+      <SubtitleManager itemId={Number(item.ref.itemId)} />
 
       {seriesItem && seasons.length > 0 && (
         <div className="mt-8">

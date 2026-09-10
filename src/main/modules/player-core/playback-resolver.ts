@@ -73,6 +73,95 @@ export function bindServerById(
   return bindOnlineServer(storage, secretStore, record.type, serverId);
 }
 
+// ---------------------------------------------------------------------------
+// Subtitle injection (QYP2-021, plan §13): sidecar + imported subtitles are
+// attached to the loaded media best-effort; failures never block playback.
+// ---------------------------------------------------------------------------
+
+/** Structural repo surface needed for subtitle lookup (tests may stub). */
+export interface SubtitleLookupRepo {
+  listSources(): Array<{ id: number; kind: string; root: string }>;
+  getFileByPath(sourceId: number, relativePath: string): { item_id: number } | undefined;
+  listSubtitlesByItem(itemId: number): Array<{
+    id: number;
+    managed_path: string;
+    is_default: number;
+    status: 'ok' | 'missing' | 'corrupt';
+  }>;
+}
+
+/** Structural player surface for sub-add (tests may stub). */
+export interface SubtitleInjectionPlayer {
+  addSubtitle(path: string, flag?: 'select' | 'auto'): Promise<void>;
+}
+
+/**
+ * Map a playback key to its catalog item: WebDAV keys are
+ * `<sourceId>:<relativePath>`, local files are the absolute path under a
+ * source root. Online (Jellyfin/Emby) media has no catalog item → null.
+ */
+export function findCatalogItemId(
+  repo: SubtitleLookupRepo,
+  mediaType: string | undefined,
+  mediaId: string | undefined
+): number | null {
+  if (mediaType === 'webdav' && mediaId) {
+    const parsed = parseWebDavMediaId(mediaId);
+    if (!parsed) return null;
+    return repo.getFileByPath(parsed.sourceId, parsed.relativePath)?.item_id ?? null;
+  }
+  if (mediaType === 'local' && mediaId) {
+    for (const source of repo.listSources()) {
+      if (source.kind !== 'local') continue;
+      const root = source.root.endsWith('/') ? source.root : `${source.root}/`;
+      if (mediaId.startsWith(root)) {
+        const relative = mediaId.slice(root.length);
+        return repo.getFileByPath(source.id, relative)?.item_id ?? null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Attach every healthy subtitle row for the item to the freshly loaded
+ * media. The default row (or the first) is selected; the rest join as
+ * auto tracks. mpv 0.29/0.32 accept the select/auto flags (no cached).
+ * Any failure is swallowed: subtitles must never block playback.
+ */
+export async function injectAttachedSubtitles(
+  player: SubtitleInjectionPlayer,
+  repo: SubtitleLookupRepo,
+  mediaType: string | undefined,
+  mediaId: string | undefined
+): Promise<void> {
+  try {
+    const itemId = findCatalogItemId(repo, mediaType, mediaId);
+    if (itemId === null) return;
+    const rows = repo
+      .listSubtitlesByItem(itemId)
+      .filter((row) => row.status === 'ok');
+    if (rows.length === 0) return;
+    const primary = rows.find((row) => row.is_default === 1) ?? rows[0];
+    // Per-track isolation: one failing sub-add must not stop the others.
+    const attempts: Array<{ path: string; flag: 'select' | 'auto' }> = [
+      { path: primary.managed_path, flag: 'select' },
+      ...rows
+        .filter((row) => row.id !== primary.id)
+        .map((row) => ({ path: row.managed_path, flag: 'auto' as const })),
+    ];
+    for (const attempt of attempts) {
+      try {
+        await player.addSubtitle(attempt.path, attempt.flag);
+      } catch {
+        // keep attaching the remaining tracks
+      }
+    }
+  } catch {
+    // plan §13: subtitle problems must not prevent playback
+  }
+}
+
 /**
  * Parse a WebDAV progress key `<sourceId>:<relativePath>` (see the sink in
  * ipc/index.ts and playback-state: both go through here).

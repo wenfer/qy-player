@@ -237,9 +237,10 @@ export class PlayerCore extends EventEmitter {
     await this.ipc.command('cycle', 'sub');
   }
 
-  async addSubtitle(path: string): Promise<void> {
+  async addSubtitle(path: string, flag?: 'select' | 'auto'): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
-    await this.ipc.command('sub-add', path);
+    // Flags exist on mpv 0.29 (select/auto); 'cached' is 0.33+ and unused.
+    await this.ipc.command('sub-add', path, ...(flag ? [flag] : []));
   }
 
   async setSubtitleDelay(delaySeconds: number): Promise<void> {
