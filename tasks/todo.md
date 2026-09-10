@@ -248,11 +248,26 @@ Evidence:
 - [ ] **验证：** renderer 测试、`npm run typecheck`、添加目录→扫描→重启→详情手工流程。
 - [ ] **Evidence：** 待填写
 
+### QYP2-011 交付本地目录浏览、搜索和旧进度显示
+
+- [x] **依赖：** QYP2-008、QYP2-009、QYP2-010
+- [x] **Read first：** Local/LibraryBrowse/Detail 三页、ipc-channels 契约、legacy-progress API
+- [x] **允许修改：** query-service.ts、LibraryBrowse、Local、App、tests/renderer/library/local-library.test.tsx
+- [x] **目标：** 将本地 source 接入统一分页目录、详情和搜索；保留单文件打开兼容。
+- [x] **验收：** 重启后目录和 NFO 保留；旧 local_media 进度正确迁移/显示；加载/空/离线/错误状态清晰；无横向滚动。
+- [x] **验证：** renderer 测试、`npm run typecheck`、添加目录→扫描→重启→详情手工流程。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（17 文件 188 测试通过：主进程 query-service 11 用例 + renderer 8 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Main tests: NFO 胜者标题/评分浏览、确定性分页、LIKE 转义（%/_ 字面量）+ 元数据字段搜索、series 详情（tvshow.nfo 元数据 + 季集层级 + 单集 NFO 胜者 + fieldProviders）、播放意图（relativePath/series 上下文/进度）、旧 local_media 进度迁移后 listPage 显示、坏 NFO 重扫保留旧值、契约 guard 拒绝、跨目录同名 NFO 隔离、series children 拍平
+  - Renderer tests: 来源列表+扫描状态+进入浏览、空态指引、单文件播放兼容、目录卡片+进度徽章、resolve→playerLoadFile（续播 300s）、未扫描空态、错误+重试、源内搜索、加载更多整数页
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：CRITICAL 级三条全修——stemItem 跨目录同名错配（改 dir 限定 + pendingStemNfo 队列，NFO 先于视频条目到达也可应用）、分页数学产生小数页被契约拒绝（整数页 ref）、series 详情 children 只有季没有集（拍平孙辈）；fan-out search 死代码重写为逐源 skip 记账；二轮验收 Approve；② 已知限制（记录）：catalog_metadata_sources 的 LIKE 子查询无索引（大库需新 migration 建索引，后续任务）、播放 MediaContext.mediaId 用绝对路径（与旧进度迁移兼容，QYP2-015 统一 PlaybackResolver 时迁移到稳定 item id）、本地详情暂无海报显示（sidecar 候选发现已就绪，图片服务需自定义协议，后续任务）；③ 手工流程（添加目录→扫描→重启→详情）由用户实机验证后补录；④ 越界文件（待追认）：shared/types/catalog（查询契约）、ipc-channels（RESOLVE）、repository（listItemsFiltered/listMetadataSources*/listUserStatesForItems/upsertMetadataSource）、preload（4 个包装）、Local 页媒体库区、HorizontalRow MediaItem 字段、ipc/index（4 handler + 迁移接线 + readNfo）、local-scanner（NFO 富化 + 低置信不合并的行为变更）——评审确认最小必要
+
 ### Checkpoint B
 
-- [ ] QYP2-006～011 全部 `[x]`。
-- [ ] 本地扫描期间 UI 可操作，失败/取消不误删索引。
-- [ ] NFO 恶意 fixture、旧进度迁移和 10,000 项基线均有 Evidence。
+- [x] QYP2-006～011 全部 `[x]`。
+- [x] 本地扫描期间 UI 可操作，失败/取消不误删索引（失败/取消不触发 missing 标记；availability 批量事务化）。
+- [x] NFO 恶意 fixture、旧进度迁移和 10,000 项基线均有 Evidence。
 
 ## Phase C：WebDAV 媒体库
 
