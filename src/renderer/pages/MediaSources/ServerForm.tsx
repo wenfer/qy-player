@@ -32,8 +32,10 @@ export default function ServerForm({
   formError,
   isEditing,
 }: ServerFormProps) {
+  // Inputs on the card use the secondary track; focus handled by the
+  // global focus-visible ring (theme-consistent with SourceForm).
   const inputClass =
-    'w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent';
+    'w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50';
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -156,7 +158,7 @@ export default function ServerForm({
         <button
           onClick={onSave}
           disabled={saving}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium focus-ring disabled:opacity-50"
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all text-sm font-medium focus-ring disabled:opacity-50 disabled:active:scale-100"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           {isEditing ? '保存修改' : '保存'}

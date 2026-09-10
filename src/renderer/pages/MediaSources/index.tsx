@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, HardDrive, Server as ServerIcon, Trash2, Pencil, CheckCircle2, XCircle } from 'lucide-react';
+import {
+  Plus, Server as ServerIcon, Trash2, Pencil,
+  CheckCircle2, XCircle, Library, ChevronLeft, FolderOpen, Globe,
+} from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import ServerForm, { ServerForm as ServerFormValues } from './ServerForm';
 import SourceForm, { type SourceFormCaps, type SourceFormPayload } from './SourceForm';
@@ -33,10 +36,44 @@ const EMPTY_SERVER_FORM: ServerFormValues = {
   password: '',
 };
 
-/**
- * 媒体库管理页（用户要求：设置页仅保留软件配置，来源管理独立成页）。
- * 本地目录与 WebDAV 来源的添加、连接测试、扫描和移除都在这里。
- */
+/** Shared section header: icon chip + title + count + primary action. */
+function SectionHeader({
+  icon, title, count, actionLabel, actionOpen, onAction,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count: number;
+  actionLabel: string;
+  actionOpen: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
+          {icon}
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            {title}
+            <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground text-[10px] font-medium">
+              {count}
+            </span>
+          </h2>
+        </div>
+      </div>
+      <button
+        onClick={onAction}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all text-sm font-medium focus-ring"
+      >
+        <Plus size={14} />
+        {actionOpen ? '取消' : actionLabel}
+      </button>
+    </div>
+  );
+}
+
+/** 媒体库管理页：Jellyfin/Emby 服务器 + 本地/WebDAV 来源（U-002）。 */
 export default function MediaSources() {
   const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
@@ -99,6 +136,101 @@ export default function MediaSources() {
     });
     return unsubscribe;
   }, [addToast, loadSources]);
+
+  const handleSourceTest = useCallback(
+    async (
+      payload: SourceFormPayload
+    ): Promise<{ ok: boolean; capabilities?: SourceFormCaps; error?: string } | null> => {
+      setTestingSource(true);
+      try {
+        const res = (await window.electronAPI.testSource(payload)) as {
+          ok: boolean;
+          data?: { canSeek: boolean; canDelete: boolean; supportsEtag: boolean; supportsRange: boolean };
+          error?: { message: string };
+        };
+        return res.ok ? { ok: true, capabilities: res.data } : { ok: false, error: res.error?.message ?? '连接不可用' };
+      } catch {
+        return { ok: false, error: '测试请求失败' };
+      } finally {
+        setTestingSource(false);
+      }
+    },
+    []
+  );
+
+  const handleSourceSave = useCallback(
+    async (payload: SourceFormPayload): Promise<boolean> => {
+      if (payload.kind === 'local' && !payload.root) {
+        setSourceFormError('请先选择目录');
+        return false;
+      }
+      if (payload.kind === 'webdav' && !payload.url.trim()) {
+        setSourceFormError('请先填写服务器地址');
+        return false;
+      }
+      setSavingSource(true);
+      setSourceFormError(null);
+      try {
+        const res = (await window.electronAPI.saveSource(payload)) as {
+          ok: boolean;
+          data?: { sourceId: number };
+          error?: { message: string };
+        };
+        if (res.ok) {
+          addToast('来源已添加', 'success');
+          await loadSources();
+          return true;
+        }
+        setSourceFormError(res.error?.message ?? '添加失败');
+        return false;
+      } catch {
+        setSourceFormError('添加失败');
+        return false;
+      } finally {
+        setSavingSource(false);
+      }
+    },
+    [addToast, loadSources]
+  );
+
+  const handleSourceRemove = useCallback(
+    async (source: SourceListEntry) => {
+      const confirmed = window.confirm(
+        `仅移除「${source.name}」的索引记录，不会删除磁盘上的媒体文件。确定移除？`
+      );
+      if (!confirmed) return;
+      const res = (await window.electronAPI.removeSource(source.id)) as {
+        ok: boolean;
+        error?: { message: string };
+      };
+      if (res.ok) {
+        addToast('来源已移除（媒体文件未受影响）', 'success');
+        await loadSources();
+      } else {
+        addToast(res.error?.message ?? '移除失败', 'error');
+      }
+    },
+    [addToast, loadSources]
+  );
+
+  const handleScanToggle = useCallback(
+    async (source: SourceListEntry) => {
+      if (scanningIds.has(source.id)) {
+        const res = (await window.electronAPI.cancelScan(source.id)) as { ok: boolean; error?: { message: string } };
+        if (!res.ok) addToast(res.error?.message ?? '取消失败', 'error');
+        return;
+      }
+      const res = (await window.electronAPI.startScan(source.id)) as { ok: boolean; error?: { message: string } };
+      if (res.ok) {
+        setScanningIds((prev) => new Set(prev).add(source.id));
+        addToast('扫描已开始', 'info');
+        loadSources();
+      } else {
+        addToast(res.error?.message ?? '扫描启动失败', 'error');
+      }
+    },
+    [scanningIds, addToast, loadSources]
+  );
 
   const loadServers = useCallback(async () => {
     try {
@@ -227,129 +359,49 @@ export default function MediaSources() {
     }
   };
 
-  const handleSourceTest = useCallback(
-    async (
-      payload: SourceFormPayload
-    ): Promise<{ ok: boolean; capabilities?: SourceFormCaps; error?: string } | null> => {
-      setTestingSource(true);
-      try {
-        const res = (await window.electronAPI.testSource(payload)) as {
-          ok: boolean;
-          data?: { canSeek: boolean; canDelete: boolean; supportsEtag: boolean; supportsRange: boolean };
-          error?: { message: string };
-        };
-        return res.ok ? { ok: true, capabilities: res.data } : { ok: false, error: res.error?.message ?? '连接不可用' };
-      } catch {
-        return { ok: false, error: '测试请求失败' };
-      } finally {
-        setTestingSource(false);
-      }
-    },
-    []
-  );
-
-  const handleSourceSave = useCallback(
-    async (payload: SourceFormPayload): Promise<boolean> => {
-      if (payload.kind === 'local' && !payload.root) {
-        setSourceFormError('请先选择目录');
-        return false;
-      }
-      if (payload.kind === 'webdav' && !payload.url.trim()) {
-        setSourceFormError('请先填写服务器地址');
-        return false;
-      }
-      setSavingSource(true);
-      setSourceFormError(null);
-      try {
-        const res = (await window.electronAPI.saveSource(payload)) as {
-          ok: boolean;
-          data?: { sourceId: number };
-          error?: { message: string };
-        };
-        if (res.ok) {
-          addToast('来源已添加', 'success');
-          await loadSources();
-          return true;
-        }
-        setSourceFormError(res.error?.message ?? '添加失败');
-        return false;
-      } catch {
-        setSourceFormError('添加失败');
-        return false;
-      } finally {
-        setSavingSource(false);
-      }
-    },
-    [addToast, loadSources]
-  );
-
-  const handleSourceRemove = useCallback(
-    async (source: SourceListEntry) => {
-      const confirmed = window.confirm(
-        `仅移除「${source.name}」的索引记录，不会删除磁盘上的媒体文件。确定移除？`
-      );
-      if (!confirmed) return;
-      const res = (await window.electronAPI.removeSource(source.id)) as {
-        ok: boolean;
-        error?: { message: string };
-      };
-      if (res.ok) {
-        addToast('来源已移除（媒体文件未受影响）', 'success');
-        await loadSources();
-      } else {
-        addToast(res.error?.message ?? '移除失败', 'error');
-      }
-    },
-    [addToast, loadSources]
-  );
-
-  const handleScanToggle = useCallback(
-    async (source: SourceListEntry) => {
-      if (scanningIds.has(source.id)) {
-        const res = (await window.electronAPI.cancelScan(source.id)) as { ok: boolean; error?: { message: string } };
-        if (!res.ok) addToast(res.error?.message ?? '取消失败', 'error');
-        return;
-      }
-      const res = (await window.electronAPI.startScan(source.id)) as { ok: boolean; error?: { message: string } };
-      if (res.ok) {
-        setScanningIds((prev) => new Set(prev).add(source.id));
-        addToast('扫描已开始', 'info');
-        loadSources();
-      } else {
-        addToast(res.error?.message ?? '扫描启动失败', 'error');
-      }
-    },
-    [scanningIds, addToast, loadSources]
+  /** Shared empty state: icon circle + text + CTA (a11y: role=status). */
+  const EmptyState = ({ icon, text }: { icon: React.ReactNode; text: string }) => (
+    <div role="status" className="text-center py-12">
+      <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center rounded-full bg-secondary text-muted-foreground">
+        {icon}
+      </div>
+      <p className="text-sm text-muted-foreground max-w-sm mx-auto leading-relaxed">{text}</p>
+    </div>
   );
 
   return (
     <div className="p-8 max-w-3xl">
       <button
         onClick={() => navigate(-1)}
-        className="text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors focus-ring rounded-md py-1"
+        className="inline-flex items-center gap-1 px-2 py-1 -ml-2 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors focus-ring"
       >
+        <ChevronLeft size={16} />
         返回
       </button>
-      <h1 className="text-2xl font-bold tracking-tight mb-2">媒体库</h1>
-      <p className="text-sm text-muted-foreground mb-8">
-        管理媒体服务器（Jellyfin / Emby）与媒体来源（本地目录 / WebDAV）；浏览与播放请到侧边栏「本地」或「首页」。
-      </p>
+
+      {/* Page header */}
+      <header className="flex items-center gap-4 mb-8 mt-2">
+        <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
+          <Library size={22} />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">媒体库</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            管理媒体服务器（Jellyfin / Emby）与媒体来源（本地目录 / WebDAV）；浏览与播放请到「本地」或「首页」。
+          </p>
+        </div>
+      </header>
 
       {/* Media servers (Jellyfin / Emby) */}
-      <section className="mb-10" aria-label="媒体服务器">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <ServerIcon size={14} />
-            媒体服务器
-          </h2>
-          <button
-            onClick={handleServerAdd}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium focus-ring"
-          >
-            <Plus size={14} />
-            {showServerForm ? '取消' : '添加'}
-          </button>
-        </div>
+      <section className="mb-12" aria-label="媒体服务器">
+        <SectionHeader
+          icon={<ServerIcon size={17} />}
+          title="媒体服务器"
+          count={servers.length}
+          actionLabel="添加"
+          actionOpen={showServerForm}
+          onAction={handleServerAdd}
+        />
 
         {showServerForm && (
           <ServerForm
@@ -372,12 +424,17 @@ export default function MediaSources() {
           {servers.map((server) => (
             <div
               key={server.id}
-              className={`flex items-center justify-between p-4 bg-card border rounded-xl transition-colors ${
-                editingServer?.id === server.id ? 'border-primary/50' : 'border-border'
+              className={`flex items-center gap-3 p-4 bg-card border rounded-xl transition-colors ${
+                editingServer?.id === server.id
+                  ? 'border-primary/50'
+                  : 'border-border hover:border-primary/30'
               }`}
             >
+              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary text-xs font-bold flex-shrink-0">
+                {server.type.slice(0, 2).toUpperCase()}
+              </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-sm">{server.name}</span>
                   {server.hasCredential ? (
                     <span
@@ -432,27 +489,24 @@ export default function MediaSources() {
             </div>
           ))}
           {servers.length === 0 && !showServerForm && (
-            <div className="text-center py-10 text-muted-foreground text-sm">
-              暂无服务器，点击上方「添加」按钮连接 Jellyfin / Emby
-            </div>
+            <EmptyState
+              icon={<ServerIcon size={20} />}
+              text="暂无服务器，点击上方「添加」按钮连接 Jellyfin / Emby"
+            />
           )}
         </div>
       </section>
 
-      <section className="mb-10" aria-label="媒体来源">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <HardDrive size={14} />
-            媒体来源
-          </h2>
-          <button
-            onClick={() => setShowSourceForm((v) => !v)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium focus-ring"
-          >
-            <Plus size={14} />
-            {showSourceForm ? '取消' : '添加来源'}
-          </button>
-        </div>
+      {/* Media sources (local + WebDAV) */}
+      <section className="mb-12" aria-label="媒体来源">
+        <SectionHeader
+          icon={<FolderOpen size={17} />}
+          title="媒体来源"
+          count={sources.length}
+          actionLabel="添加来源"
+          actionOpen={showSourceForm}
+          onAction={() => setShowSourceForm((v) => !v)}
+        />
 
         {showSourceForm && (
           <SourceForm
@@ -478,9 +532,10 @@ export default function MediaSources() {
           onRemove={handleSourceRemove}
         />
         {sources.length === 0 && !showSourceForm && (
-          <div className="text-center py-10 text-muted-foreground text-sm">
-            暂无来源。点击上方「添加来源」，可选择本地目录，或填写 WebDAV 服务器地址（支持 Nextcloud / Alist 等）。
-          </div>
+          <EmptyState
+            icon={<Globe size={20} />}
+            text="暂无来源。点击上方「添加来源」，可选择本地目录，或填写 WebDAV 服务器地址（支持 Nextcloud / Alist 等）。"
+          />
         )}
       </section>
     </div>

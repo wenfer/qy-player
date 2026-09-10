@@ -149,7 +149,8 @@ describe('WebDAV source form', () => {
     );
     fillWebDavForm('https://example.com/dav');
     fireEvent.click(screen.getByRole('button', { name: /测试连接/ }));
-    await waitFor(() => expect(screen.getByText(/连接成功 ✓/)).toBeTruthy());
+    // Success is now conveyed by the icon + tinted banner (no text glyph).
+    await waitFor(() => expect(screen.getByText(/连接成功/)).toBeTruthy());
     expect(screen.getByText(/拖动\/续播: 支持/)).toBeTruthy();
     expect(screen.getByText(/删除已禁用/)).toBeTruthy();
   });

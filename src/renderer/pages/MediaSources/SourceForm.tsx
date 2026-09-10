@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, PlugZap, Loader2, Globe, FolderOpen as Folder } from 'lucide-react';
+import { FolderOpen, PlugZap, Loader2, Globe, FolderOpen as Folder, CheckCircle2, XCircle } from 'lucide-react';
 import WebDavFields, { validateWebDavUrlHint, type WebDavFieldValues } from './WebDavFields';
 
 export type SourceFormMode = 'local' | 'webdav';
@@ -119,15 +119,17 @@ export default function SourceForm({
           {formError}
         </p>
       )}
-      {/* Mode toggle */}
-      <div className="flex items-center gap-2" role="tablist" aria-label="来源类型">
+      {/* Mode toggle: segmented control on a tinted track */}
+      <div className="flex items-center gap-1 p-1 bg-secondary rounded-lg w-fit" role="tablist" aria-label="来源类型">
         <button
           type="button"
           role="tab"
           aria-selected={mode === 'local'}
           onClick={() => setMode('local')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors focus-ring ${
-            mode === 'local' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-all focus-ring ${
+            mode === 'local'
+              ? 'bg-background text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
         >
           <Folder size={14} />
@@ -138,8 +140,10 @@ export default function SourceForm({
           role="tab"
           aria-selected={mode === 'webdav'}
           onClick={() => setMode('webdav')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors focus-ring ${
-            mode === 'webdav' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-all focus-ring ${
+            mode === 'webdav'
+              ? 'bg-background text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
         >
           <Globe size={14} />
@@ -158,8 +162,15 @@ export default function SourceForm({
               <FolderOpen size={15} />
               {root ? '重新选择目录' : '选择目录'}
             </button>
-            <span className="text-sm text-muted-foreground truncate max-w-full" title={root} aria-live="polite">
-              {root || '尚未选择目录'}
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm max-w-full ${
+                root ? 'bg-secondary text-foreground' : 'text-muted-foreground'
+              }`}
+              title={root}
+              aria-live="polite"
+            >
+              <FolderOpen size={13} className="flex-shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-xs">{root || '尚未选择目录'}</span>
             </span>
           </div>
           <label className="block text-sm">
@@ -190,10 +201,20 @@ export default function SourceForm({
       )}
 
       {testResult && (
-        <p role="status" className={`text-xs ${testResult.ok ? 'text-emerald-500' : 'text-destructive'}`}>
-          {testResult.ok
-            ? `连接成功 ✓${testResult.capabilities ? `（${capsText(testResult.capabilities)}）` : ''}`
-            : `不可用：${testResult.error ?? '未知错误'}`}
+        <p
+          role="status"
+          className={`flex items-start gap-1.5 text-xs px-3 py-2 rounded-lg ${
+            testResult.ok
+              ? 'bg-emerald-500/10 text-emerald-500'
+              : 'bg-destructive/10 text-destructive'
+          }`}
+        >
+          {testResult.ok ? <CheckCircle2 size={14} className="flex-shrink-0 mt-0.5" /> : <XCircle size={14} className="flex-shrink-0 mt-0.5" />}
+          <span>
+            {testResult.ok
+              ? `连接成功${testResult.capabilities ? `（${capsText(testResult.capabilities)}）` : ''}`
+              : `不可用：${testResult.error ?? '未知错误'}`}
+          </span>
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -210,9 +231,10 @@ export default function SourceForm({
           type="button"
           onClick={handleSave}
           disabled={!canSubmit || saving}
-          className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors focus-ring disabled:opacity-50"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all focus-ring disabled:opacity-50 disabled:active:scale-100"
         >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : '添加来源'}
+          {saving ? <Loader2 size={15} className="animate-spin" /> : null}
+          添加来源
         </button>
         <button type="button" onClick={onCancel} className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground focus-ring">
           取消
