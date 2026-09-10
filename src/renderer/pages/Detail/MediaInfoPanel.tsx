@@ -16,7 +16,9 @@ export type ProbePhase =
   | 'unsupported'
   | 'timeout'
   | 'no-mpv'
-  | 'offline';
+  | 'offline'
+  /** Probe target refused credentials (expired login). */
+  | 'auth';
 
 export interface MediaInfoPanelProps {
   /** Probe request; when null the panel renders nothing. */
@@ -37,10 +39,11 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-const STATUS_TEXT: Record<Exclude<ProbePhase, 'idle' | 'probing' | 'ok' | 'unsupported'>, string> = {
+const STATUS_TEXT: Record<'timeout' | 'no-mpv' | 'offline' | 'auth', string> = {
   timeout: '读取超时：媒体响应过慢，可稍后重试',
   'no-mpv': '未找到可用的 mpv，无法读取技术信息',
   offline: '来源暂不可达或连接中断',
+  auth: '登录已过期，请重新登录后再试',
 };
 
 export default function MediaInfoPanel({ request, onProbe, outcome, phase }: MediaInfoPanelProps) {
@@ -172,7 +175,7 @@ export default function MediaInfoPanel({ request, onProbe, outcome, phase }: Med
             </p>
           )}
 
-          {(phase === 'timeout' || phase === 'no-mpv' || phase === 'offline') && (
+          {(phase === 'timeout' || phase === 'no-mpv' || phase === 'offline' || phase === 'auth') && (
             <div className="flex flex-wrap items-center gap-3">
               <p
                 className="text-muted-foreground flex items-center gap-2"

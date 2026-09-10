@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Play, Star, Calendar, Clock, ChevronLeft, Film, Users, Clapperboard, Tv } from 'lucide-react';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
@@ -25,7 +25,7 @@ interface ItemDetails {
   ParentIndexNumber?: number;
   ImageTags?: { Primary?: string; Backdrop?: string };
   BackdropImageTags?: string[];
-  MediaSources?: Array<{ Id: string }>;
+  MediaSources?: Array<{ Id: string; Size?: number }>;
   People?: Array<{ Name: string; Type: string; Role?: string }>;
 }
 
@@ -78,6 +78,9 @@ export default function Detail() {
   const [probeRequest, setProbeRequest] = useState<ProbeItemInput | null>(null);
   const [probePhase, setProbePhase] = useState<ProbePhase>('idle');
   const [probeOutcome, setProbeOutcome] = useState<MediaProbeOutcome | null>(null);
+  // Latest request for staleness checks: an old probe resolving after the
+  // item changed must never paint its outcome on the new item.
+  const probeRequestRef = useRef<ProbeItemInput | null>(null);
 
   const serverType = type || 'jellyfin';
   const serverId = Number(serverIdParam);
@@ -134,16 +137,20 @@ export default function Detail() {
   // Probe lifecycle: distinct terminal states (QYP2-018 contract); failures
   // are rendered, never thrown, and never gate the play buttons.
   const runProbe = useCallback(async () => {
-    if (!probeRequest) return;
+    const request = probeRequestRef.current;
+    if (!request) return;
     setProbePhase('probing');
     setProbeOutcome(null);
     try {
-      const result = (await window.electronAPI.probeItem(probeRequest)) as {
+      const result = (await window.electronAPI.probeItem(request)) as {
         ok: boolean;
         data?: MediaProbeOutcome;
+        error?: { code?: string };
       };
+      // Stale response: the item changed while this probe was in flight.
+      if (probeRequestRef.current !== request) return;
       if (!result.ok || !result.data) {
-        setProbePhase('offline');
+        setProbePhase(result.error?.code === 'AUTH_REQUIRED' ? 'auth' : 'offline');
         return;
       }
       const outcome = result.data;
@@ -160,9 +167,9 @@ export default function Detail() {
                 : outcome.status
       );
     } catch {
-      setProbePhase('offline');
+      if (probeRequestRef.current === request) setProbePhase('offline');
     }
-  }, [probeRequest]);
+  }, []);
 
   // Only playable types carry technical info + progress.
   useEffect(() => {
@@ -172,12 +179,17 @@ export default function Detail() {
       setProbeOutcome(null);
       return;
     }
-    const size = details.MediaSources?.[0] as { Size?: number } | undefined;
-    setProbeRequest({
+    const size = details.MediaSources?.[0]?.Size;
+    // Item changed: previous outcome must never leak into the new item.
+    setProbePhase('idle');
+    setProbeOutcome(null);
+    const request: ProbeItemInput = {
       ref: { provider: serverType, serverId: Number.isInteger(serverId) ? serverId : undefined, itemId: details.Id },
       mode: 'direct',
-      fingerprint: `${details.RunTimeTicks ?? 0}:${size?.Size ?? 0}`,
-    });
+      fingerprint: `${details.RunTimeTicks ?? 0}:${size ?? 0}`,
+    };
+    probeRequestRef.current = request;
+    setProbeRequest(request);
   }, [details, serverType, serverId]);
 
   // Playback goes through the unified resolver (QYP2-015): one MediaRef
@@ -411,10 +423,19 @@ export default function Detail() {
               />
             )}
 
-            {/* Technical info: probe 中/失败/离线独立状态，永不阻塞播放 */}
-            {(details.Type === 'Movie' || details.Type === 'Episode') && (
-              <MediaInfoPanel request={probeRequest} onProbe={runProbe} outcome={probeOutcome} phase={probePhase} />
-            )}
+            {/* Technical info: probe 中/失败/离线独立状态，永不阻塞播放。
+                Rendered only when the request matches the shown item, so a
+                stale request can never mount (and never double-probe). */}
+            {(details.Type === 'Movie' || details.Type === 'Episode') &&
+              probeRequest?.ref.itemId === details.Id && (
+                <MediaInfoPanel
+                  key={details.Id}
+                  request={probeRequest}
+                  onProbe={runProbe}
+                  outcome={probeOutcome}
+                  phase={probePhase}
+                />
+              )}
 
             {/* Cast */}
             {details.People && details.People.length > 0 && (

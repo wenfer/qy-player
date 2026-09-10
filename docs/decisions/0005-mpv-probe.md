@@ -49,6 +49,10 @@
 
 `mpv-version` 属性用于记录版本；读不到记 `unknown`，不阻断探测。
 
+## 缓存指纹的已知弱化（QYP2-019 注记）
+
+在线（Jellyfin/Emby）详情页无本地 size/mtime/ETag，probe 缓存指纹退化为 `RunTimeTicks:Size`（服务器元数据）。文件被原地替换而时长与大小不变时，TTL（6h）内可能读到旧缓存；概率低，接受。transcode 模式的 URL 每次带新 PlaySessionId，缓存对其无效——probe 固定用 direct 模式（HLS 容器信息也有限），缓存语义仅对 direct/本地/WebDAV 成立。
+
 ## 后果
 
 - QYP2-018 的 MediaProbe 服务复用 `spawnProbeProcess` + 回退表 + `assembleProbeResult`，加缓存（size+mtime/ETag 版本）与串行队列。

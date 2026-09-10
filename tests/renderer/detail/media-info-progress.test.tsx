@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MediaInfoPanel, { type ProbePhase } from '../../../src/renderer/pages/Detail/MediaInfoPanel';
 import ProgressSummary from '../../../src/renderer/pages/Detail/ProgressSummary';
@@ -158,6 +158,16 @@ describe('ProgressSummary', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('applies the >90% resume rule to legacy unfinished rows', async () => {
+    // is_finished=0 but 95% watched: playback restarts, so the display
+    // must not claim an auto-resume.
+    electronAPI.getProgress.mockResolvedValue({ position: 3420, duration: 3600, is_finished: 0 });
+    render(<ProgressSummary mediaType="jellyfin" mediaId="item-1" />);
+    const status = await screen.findByRole('status');
+    await waitFor(() => expect(status.textContent).toContain('已看过（上次看完）'));
+    expect(status.textContent).not.toContain('自动续播');
+  });
+
   it('stays silent when the progress read fails', async () => {
     electronAPI.getProgress.mockRejectedValue(new Error('db locked'));
     const { container } = render(<ProgressSummary mediaType="jellyfin" mediaId="item-1" />);
@@ -172,12 +182,34 @@ describe('ProgressSummary', () => {
 // Detail page wiring
 // ---------------------------------------------------------------------------
 
-function renderDetail() {
+function renderDetail(itemId = 'item-1') {
   return render(
-    <MemoryRouter initialEntries={['/detail/jellyfin/1/item-1']}>
+    <MemoryRouter initialEntries={[`/detail/jellyfin/1/${itemId}`]}>
       <Routes>
         <Route path="/detail/:type/:serverId/:id" element={<Detail />} />
       </Routes>
+    </MemoryRouter>
+  );
+}
+
+/** Same-router navigation harness: A→B→A keeps the Detail instance alive. */
+function NavHarness() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <Routes>
+        <Route path="/detail/:type/:serverId/:id" element={<Detail />} />
+      </Routes>
+      <button onClick={() => navigate('/detail/jellyfin/1/item-2')}>nav-b</button>
+      <button onClick={() => navigate('/detail/jellyfin/1/item-1')}>nav-a</button>
+    </>
+  );
+}
+
+function renderDetailWithNav() {
+  return render(
+    <MemoryRouter initialEntries={['/detail/jellyfin/1/item-1']}>
+      <NavHarness />
     </MemoryRouter>
   );
 }
@@ -222,6 +254,61 @@ describe('Detail page: technical info + progress wiring', () => {
     expect(electronAPI.probeItem).not.toHaveBeenCalled();
     expect(electronAPI.getProgress).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /技术信息/ })).toBeNull();
+  });
+
+  it('never paints a previous item probe result on a revisited item (A→B→A)', async () => {
+    const detailsA = { ...MOVIE_DETAILS, Id: 'item-1', Name: 'A' };
+    const detailsB = { ...MOVIE_DETAILS, Id: 'item-2', Name: 'B' };
+    electronAPI.getItemDetails.mockImplementation(async (id: string) =>
+      id === 'item-1' ? detailsA : detailsB
+    );
+    // Deterministic probes: each call stays pending until the test settles it.
+    const releases: Array<(v: { ok: boolean; data: MediaProbeOutcome }) => void> = [];
+    electronAPI.probeItem.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releases.push(resolve);
+        })
+    );
+    const settle = (n: number, container: string): void => {
+      releases[n]({
+        ok: true,
+        data: { ...OK_OUTCOME, info: { ...OK_OUTCOME.info!, container } },
+      });
+    };
+
+    renderDetailWithNav();
+    await waitFor(() => expect(electronAPI.probeItem).toHaveBeenCalledTimes(1));
+    settle(0, 'container-1');
+    fireEvent.click(screen.getByRole('button', { name: /技术信息/ }));
+    await waitFor(() => expect(document.body.textContent).toContain('container-1'));
+
+    // Navigate to B: A's panel result must not leak; B probes afresh.
+    fireEvent.click(screen.getByRole('button', { name: 'nav-b' }));
+    await waitFor(() => expect(electronAPI.probeItem).toHaveBeenCalledTimes(2));
+    expect(document.body.textContent).not.toContain('container-1');
+    settle(1, 'container-2');
+    await waitFor(() => expect(document.body.textContent).toContain('container-2'));
+
+    // Back to A: re-probe; B's result never reappears.
+    fireEvent.click(screen.getByRole('button', { name: 'nav-a' }));
+    await waitFor(() => expect(electronAPI.probeItem).toHaveBeenCalledTimes(3));
+    expect(document.body.textContent).not.toContain('container-2');
+    settle(2, 'container-3');
+    await waitFor(() => expect(document.body.textContent).toContain('container-3'));
+    expect(document.body.textContent).not.toContain('container-2');
+  });
+
+  it('maps an AUTH_REQUIRED probe failure to a distinct wording', async () => {
+    electronAPI.getItemDetails.mockResolvedValue(MOVIE_DETAILS);
+    electronAPI.probeItem.mockResolvedValue({
+      ok: false,
+      error: { code: 'AUTH_REQUIRED', message: '登录已过期' },
+    });
+    renderDetail();
+    await waitFor(() => expect(electronAPI.probeItem).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /技术信息/ }));
+    expect(await screen.findByText('登录已过期，请重新登录后再试')).toBeTruthy();
   });
 
   it('maps an ok:false probe response to the offline state without blocking playback', async () => {

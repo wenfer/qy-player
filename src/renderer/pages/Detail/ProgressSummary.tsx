@@ -55,7 +55,10 @@ export default function ProgressSummary({ mediaType, mediaId, durationHint }: Pr
 
   const duration = progress.duration ?? durationHint;
   const percent = duration && duration > 0 ? Math.min(100, Math.round((progress.position / duration) * 100)) : null;
-  const finished = progress.is_finished === 1;
+  // Same >90% rule the resume calculation uses: a legacy row with
+  // is_finished=0 but >90% position would otherwise show a misleading
+  // auto-resume hint while playback actually restarts.
+  const finished = progress.is_finished === 1 || (duration !== undefined && duration > 0 && progress.position / duration > 0.9);
 
   return (
     <div className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" role="status">
