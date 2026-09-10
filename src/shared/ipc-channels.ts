@@ -62,4 +62,11 @@ export const IPC_CHANNELS = {
     SEARCH: 'catalog:search',
     RESOLVE: 'catalog:resolve',
   },
+  SUBTITLES: {
+    PICK_FILE: 'subtitles:pick-file',
+    IMPORT: 'subtitles:import',
+    LIST: 'subtitles:list',
+    REMOVE: 'subtitles:remove',
+    SET_DEFAULT: 'subtitles:set-default',
+  },
 } as const;

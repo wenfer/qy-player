@@ -12,6 +12,11 @@ export interface SubtitleTrack {
 
 const SUBTITLE_EXTS = new Set(['.srt', '.ass', '.ssa', '.sub', '.vtt']);
 
+/** True when the (lowercased) extension is an importable subtitle format. */
+export function isSupportedSubtitleExt(ext: string): boolean {
+  return SUBTITLE_EXTS.has(ext);
+}
+
 export function scanForSubtitles(videoPath: string): SubtitleTrack[] {
   const dir = dirname(videoPath);
   const videoName = basename(videoPath, extname(videoPath));

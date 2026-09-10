@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron';
 import { readFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
-import { basename, extname } from 'path';
+import { basename, extname, join } from 'path';
+import { app } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { PlayerCore } from '../modules/player-core';
 import { getDatabase, createStorage, closeDatabase } from '../modules/storage/db';
@@ -62,6 +63,11 @@ import {
   ResolverError,
 } from '../modules/player-core/playback-resolver';
 import { mediaProbeService } from '../modules/media-probe';
+import {
+  SubtitleService,
+  cleanupTempFiles,
+  type ImportSubtitleInput,
+} from '../modules/media-operations/subtitle-service';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -758,7 +764,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
     closeDatabase();
   });
 
-  registerCatalogHandlers(db, secretStore);
+  registerCatalogHandlers(db, secretStore, catalogRepo);
 }
 
 // ---------------------------------------------------------------------------
@@ -792,7 +798,24 @@ function broadcastScanEvent(event: ScanProgressEvent): void {
  * QYP2-009 replaces this with recursive traversal and movie/series
  * classification; until then only root-level files are indexed.
  */
-function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore: SecretStore): void {
+function registerCatalogHandlers(
+  db: ReturnType<typeof getDatabase>,
+  secretStore: SecretStore,
+  catalogRepo: ReturnType<typeof createCatalogRepository>
+): void {
+  // Subtitle attachments live under <userData>/subtitles/<itemId>/
+  // (plan §13). Interrupted imports leave .tmp- files; sweep them once at
+  // startup (restart recovery, QYP2-020).
+  const subtitleManagedRoot = join(app.getPath('userData'), 'subtitles');
+  try {
+    cleanupTempFiles(subtitleManagedRoot);
+  } catch {
+    // best effort; the next startup retries
+  }
+  const subtitleService = new SubtitleService({
+    repo: catalogRepo,
+    managedRoot: subtitleManagedRoot,
+  });
   const repo = createCatalogRepository(db);
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.PICK_DIR, async () => {
@@ -1051,6 +1074,39 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
       console.error('[CATALOG] 解析播放路径失败:', e instanceof Error ? e.message : e);
       return err('INTERNAL', '解析播放路径失败');
     }
+  });
+
+  // ---- Subtitles (QYP2-020, plan §13) ----
+  ipcMain.handle(IPC_CHANNELS.SUBTITLES.PICK_FILE, async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      title: '选择字幕文件',
+      properties: ['openFile'],
+      filters: [{ name: '字幕', extensions: ['srt', 'ass', 'ssa', 'sub', 'vtt'] }],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SUBTITLES.IMPORT, (_event, input: ImportSubtitleInput) => {
+    return subtitleService.import({
+      itemId: input?.itemId,
+      sourcePath: input?.sourcePath,
+      language: input?.language,
+      title: input?.title,
+      isDefault: input?.isDefault,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SUBTITLES.LIST, (_event, itemId: number) => {
+    return subtitleService.list(itemId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SUBTITLES.REMOVE, (_event, itemId: number, rowId: number) => {
+    return subtitleService.remove(itemId, rowId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SUBTITLES.SET_DEFAULT, (_event, itemId: number, rowId: number) => {
+    return subtitleService.setDefault(itemId, rowId);
   });
 
   // Push channel: renderers subscribe through preload (single dispatcher per

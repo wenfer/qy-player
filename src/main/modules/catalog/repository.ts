@@ -54,6 +54,19 @@ export interface CatalogUserStateRow {
   updated_at: number | null;
 }
 
+export interface CatalogSubtitleRow {
+  id: number;
+  item_id: number;
+  managed_path: string;
+  language: string | null;
+  title: string | null;
+  format: string;
+  origin: 'sidecar' | 'imported';
+  is_default: number;
+  status: 'ok' | 'missing' | 'corrupt';
+  created_at: number | null;
+}
+
 export interface CreateSourceInput {
   kind: SourceKind;
   name: string;
@@ -250,6 +263,60 @@ export function createCatalogRepository(db: Database.Database) {
       return db.prepare('SELECT * FROM catalog_items WHERE id = ?').get(id) as
         | CatalogItemRow
         | undefined;
+    },
+
+    // ---- Subtitle attachments (QYP2-020, catalog_subtitles) ----
+    insertSubtitle(row: {
+      item_id: number;
+      managed_path: string;
+      language: string | null;
+      title: string | null;
+      format: string;
+      origin: 'sidecar' | 'imported';
+      is_default: number;
+    }): { id: number } {
+      const result = db
+        .prepare(
+          `INSERT INTO catalog_subtitles (item_id, managed_path, language, title, format, origin, is_default, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'ok')`
+        )
+        .run(row.item_id, row.managed_path, row.language, row.title, row.format, row.origin, row.is_default);
+      return { id: Number(result.lastInsertRowid) };
+    },
+
+    listSubtitlesByItem(itemId: number): CatalogSubtitleRow[] {
+      return db
+        .prepare('SELECT * FROM catalog_subtitles WHERE item_id = ? ORDER BY is_default DESC, id')
+        .all(itemId) as CatalogSubtitleRow[];
+    },
+
+    getSubtitle(itemId: number, rowId: number): CatalogSubtitleRow | undefined {
+      return db
+        .prepare('SELECT * FROM catalog_subtitles WHERE item_id = ? AND id = ?')
+        .get(itemId, rowId) as CatalogSubtitleRow | undefined;
+    },
+
+    deleteSubtitle(itemId: number, rowId: number): void {
+      db.prepare('DELETE FROM catalog_subtitles WHERE item_id = ? AND id = ?').run(itemId, rowId);
+    },
+
+    /** Unset every default flag for the item except (optionally) one row. */
+    clearDefaultSubtitles(itemId: number, exceptId?: number): void {
+      if (exceptId !== undefined) {
+        db.prepare('UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ? AND id != ?').run(itemId, exceptId);
+      } else {
+        db.prepare('UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ?').run(itemId);
+      }
+    },
+
+    /** Promote one row to default and demote the rest (two statements). */
+    setDefaultSubtitle(itemId: number, rowId: number): void {
+      db.prepare('UPDATE catalog_subtitles SET is_default = 0 WHERE item_id = ?').run(itemId);
+      db.prepare('UPDATE catalog_subtitles SET is_default = 1 WHERE item_id = ? AND id = ?').run(itemId, rowId);
+    },
+
+    updateSubtitleStatus(itemId: number, rowId: number, status: 'ok' | 'missing' | 'corrupt'): void {
+      db.prepare('UPDATE catalog_subtitles SET status = ? WHERE item_id = ? AND id = ?').run(status, itemId, rowId);
     },
 
     listItemsBySource(sourceId: number): CatalogItemRow[] {

@@ -108,6 +108,14 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEMS, parentId, options, serverId),
   getItemDetails: (itemId: string, serverId?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, itemId, serverId),
+  // Subtitles (QYP2-020)
+  pickSubtitleFile: () => ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.PICK_FILE),
+  importSubtitle: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.IMPORT, input),
+  listSubtitles: (itemId: number) => ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.LIST, itemId),
+  removeSubtitle: (itemId: number, rowId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.REMOVE, itemId, rowId),
+  setDefaultSubtitle: (itemId: number, rowId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.SET_DEFAULT, itemId, rowId),
   resolvePlayback: (ref: unknown, options?: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.RESOLVE, ref, options),
   probeItem: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.PROBE_ITEM, input),
