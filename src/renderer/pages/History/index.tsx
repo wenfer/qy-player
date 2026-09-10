@@ -117,7 +117,11 @@ export default function HistoryPage() {
   const handlePlay = useCallback(async (record: HistoryRecord) => {
     if (record.media_type === 'local' && record.path) {
       try {
-        await window.electronAPI.playerLoadFile(record.path, record.position > 5 ? Math.floor(record.position) : undefined);
+        // Same completion rule as the catalog path (plan §12.1): nearly
+        // finished records restart; small offsets are treated as noise.
+        const finished = record.duration ? record.position / record.duration > 0.9 : false;
+        const start = !finished && record.position > 5 ? Math.floor(record.position) : undefined;
+        await window.electronAPI.playerLoadFile(record.path, start);
         addToast(`开始播放: ${record.title}`, 'success');
       } catch (err) {
         addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');

@@ -83,6 +83,23 @@ interface OnlineServerBinding {
   userId?: string;
 }
 
+/**
+ * STRICT server lookup by id without a provider assumption (display
+ * channels: one lookup by id, then bind with the record's actual type —
+ * no provider-array probing, no cross-server fallthrough).
+ */
+export function bindServerById(
+  storage: ResolverDeps['storage'],
+  secretStore: SecretStore,
+  serverId: number
+): OnlineServerBinding {
+  const record = storage.getServers().find((s) => s.id === serverId);
+  if (!record || (record.type !== 'jellyfin' && record.type !== 'emby')) {
+    throw new ResolverError('SERVER_NOT_FOUND', '服务器不存在或已被移除');
+  }
+  return bindOnlineServer(storage, secretStore, record.type, serverId);
+}
+
 /** STRICT server lookup by id (plan §4.1/§15: no cross-server fallthrough). */
 export function bindOnlineServer(
   storage: ResolverDeps['storage'],
@@ -281,22 +298,26 @@ export async function resolvePlayback(
   }
 
   let target: PlayableOnlineTarget;
-  const mediaSources = details.MediaSources ?? [];
-  const pinned = input.mediaSourceId ? mediaSources.find((m) => m.Id === input.mediaSourceId) : undefined;
-  const direct = pinned ?? mediaSources[0];
-  if (direct) {
-    target = {
-      playId: ref.itemId,
-      title: details.Name,
-      seriesName: details.SeriesName,
-      seasonNumber: details.ParentIndexNumber,
-      episodeNumber: details.IndexNumber,
-      mediaSourceId: direct.Id,
-    };
-  } else if (details.Type === 'Series' || details.Type === 'Season') {
+  // Series/Season containers always resolve to a playable child: a
+  // container-level MediaSources entry is never a real episode to play.
+  if (details.Type === 'Series' || details.Type === 'Season') {
     target = await resolvePlayableChild(client, ref.itemId, input.mediaSourceId);
   } else {
-    target = await resolvePlayableChild(client, ref.itemId, input.mediaSourceId);
+    const mediaSources = details.MediaSources ?? [];
+    const pinned = input.mediaSourceId ? mediaSources.find((m) => m.Id === input.mediaSourceId) : undefined;
+    const direct = pinned ?? mediaSources[0];
+    if (direct) {
+      target = {
+        playId: ref.itemId,
+        title: details.Name,
+        seriesName: details.SeriesName,
+        seasonNumber: details.ParentIndexNumber,
+        episodeNumber: details.IndexNumber,
+        mediaSourceId: direct.Id,
+      };
+    } else {
+      target = await resolvePlayableChild(client, ref.itemId, input.mediaSourceId);
+    }
   }
 
   const newId = deps.newSessionId ?? randomUUID;

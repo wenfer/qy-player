@@ -1,11 +1,18 @@
 import { JellyfinClient } from './jellyfin-client';
 import { EmbyClient } from './emby-client';
-import type { ServerConfig } from '../../../shared/types';
 
 export { JellyfinClient, EmbyClient };
 export type * from './jellyfin-client';
 
-export function createClient(server: ServerConfig): JellyfinClient | EmbyClient {
+/** Main-side client config (QYP2-015): tokens live here, never in shared types. */
+export interface OnlineClientConfig {
+  type: 'jellyfin' | 'emby';
+  baseUrl: string;
+  apiKey?: string;
+  userId?: string;
+}
+
+export function createClient(server: OnlineClientConfig): JellyfinClient | EmbyClient {
   if (server.type === 'emby') {
     return new EmbyClient(server.baseUrl, server.apiKey, server.userId);
   }

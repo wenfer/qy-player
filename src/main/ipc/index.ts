@@ -56,7 +56,7 @@ import type {
 } from '../../shared/types';
 import { isMediaRef } from '../../shared/types';
 import {
-  bindOnlineServer,
+  bindServerById,
   resolvePlayback,
   ResolverError,
 } from '../modules/player-core/playback-resolver';
@@ -462,7 +462,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
       const client = createClient({
         type: server.type,
         baseUrl: server.baseUrl,
-      } as ServerConfig);
+      });
       const auth = await client.authenticate(server.username, server.password);
       userId = auth.userId;
       freshToken = auth.accessToken;
@@ -563,24 +563,19 @@ export function registerIpcHandlers(player: PlayerCore): void {
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEMS, async (_event, parentId: string, options?: unknown, serverId?: number) => {
     // QYP2-015: strict routing when the caller knows the server.
     if (Number.isInteger(serverId) && (serverId as number) > 0) {
-      const providers = ['jellyfin', 'emby'] as const;
-      for (const provider of providers) {
-        try {
-          const binding = bindOnlineServer(storage, secretStore, provider, serverId as number);
-          const client = createClient({
-            type: binding.type,
-            baseUrl: binding.baseUrl,
-            apiKey: binding.apiKey,
-            userId: binding.userId,
-          });
-          return await client.getItems(parentId, options as Record<string, unknown>);
-        } catch (e) {
-          if (e instanceof ResolverError && e.code === 'SERVER_NOT_FOUND') continue;
-          console.error('[GET-ITEMS] 服务器列表获取失败:', e instanceof Error ? e.message : e);
-          return [];
-        }
+      try {
+        const binding = bindServerById(storage, secretStore, serverId as number);
+        const client = createClient({
+          type: binding.type,
+          baseUrl: binding.baseUrl,
+          apiKey: binding.apiKey,
+          userId: binding.userId,
+        });
+        return await client.getItems(parentId, options as Record<string, unknown>);
+      } catch (e) {
+        console.error('[GET-ITEMS] 服务器列表获取失败:', e instanceof Error ? e.message : e);
+        return [];
       }
-      return [];
     }
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
@@ -597,25 +592,19 @@ export function registerIpcHandlers(player: PlayerCore): void {
     // QYP2-015: when the caller knows the server, route strictly to it
     // (bindOnlineServer throws on mismatch; no cross-server fallthrough).
     if (Number.isInteger(serverId) && (serverId as number) > 0) {
-      const providers = ['jellyfin', 'emby'] as const;
-      for (const provider of providers) {
-        try {
-          const binding = bindOnlineServer(storage, secretStore, provider, serverId as number);
-          const client = createClient({
-            type: binding.type,
-            baseUrl: binding.baseUrl,
-            apiKey: binding.apiKey,
-            userId: binding.userId,
-          });
-          return await client.getItemDetails(itemId);
-        } catch (e) {
-          if (e instanceof ResolverError && e.code === 'SERVER_NOT_FOUND') continue;
-          console.error('[GET-ITEM-DETAILS] 服务器详情获取失败:', e instanceof Error ? e.message : e);
-          return null;
-        }
+      try {
+        const binding = bindServerById(storage, secretStore, serverId as number);
+        const client = createClient({
+          type: binding.type,
+          baseUrl: binding.baseUrl,
+          apiKey: binding.apiKey,
+          userId: binding.userId,
+        });
+        return await client.getItemDetails(itemId);
+      } catch (e) {
+        console.error('[GET-ITEM-DETAILS] 服务器详情获取失败:', e instanceof Error ? e.message : e);
+        return null;
       }
-      console.error('[GET-ITEM-DETAILS] 指定服务器无法获取详情');
-      return null;
     }
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {

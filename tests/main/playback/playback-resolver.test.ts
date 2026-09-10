@@ -85,14 +85,14 @@ let servers: Array<{
   is_active: number;
 }>;
 
-function makeDeps(clientFactory: ReturnType<typeof makeClientFactory>, resume = 0): ResolverDeps {
+function makeDeps(clientFactory: unknown, resume = 0): ResolverDeps {
   return {
     db,
     storage: { getServers: () => servers } as unknown as ReturnType<typeof createStorage>,
     secretStore,
     streamHeaders,
     getResumePosition: () => resume,
-    createOnlineClient: clientFactory as unknown as ResolverDeps['createOnlineClient'],
+    createOnlineClient: clientFactory as ResolverDeps['createOnlineClient'],
     newSessionId: () => `sess-${(sessions += 1)}`,
   };
 }
@@ -302,13 +302,9 @@ describe('playback resolver: strict online routing', () => {
         },
       };
     };
-    void factory;
-    const resolution = await resolvePlayback(
-      makeDeps(factory as unknown as Parameters<typeof makeDeps>[0]),
-      {
-        ref: { provider: 'jellyfin', serverId: 1, itemId: 's' },
-      }
-    );
+    const resolution = await resolvePlayback(makeDeps(factory), {
+      ref: { provider: 'jellyfin', serverId: 1, itemId: 's' },
+    });
     expect(resolution.url).toContain('/Videos/e1/stream');
     expect(resolution.mediaContext).toMatchObject({
       mediaId: 'e1',

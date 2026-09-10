@@ -25,7 +25,8 @@ export interface ServerConfig {
   type: 'jellyfin' | 'emby';
   name?: string;
   baseUrl: string;
-  apiKey?: string;
+  // No apiKey on the shared contract (QYP2-015): tokens never cross the
+  // renderer boundary. Main-side code keeps its own narrow config type.
   username?: string;
   password?: string;
   userId?: string;

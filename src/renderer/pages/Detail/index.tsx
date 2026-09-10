@@ -162,7 +162,7 @@ export default function Detail() {
       }
       const resolved = result.data;
       const position =
-        startPosition !== undefined && startPosition > 0
+        startPosition !== undefined
           ? startPosition
           : resolved.startPosition > 0
             ? Math.floor(resolved.startPosition)
