@@ -78,7 +78,14 @@ export function isSameOrigin(a: URL, b: URL): boolean {
   return a.protocol === b.protocol && a.host === b.host;
 }
 
-/** Reject anything that smells like an encoded traversal before decoding. */
+/** Reject anything that smells like an encoded traversal before decoding.
+ *
+ * Trade-off (plan §8.2 favors strictness): %2f is rejected even though a
+ * decoded slash alone would not escape containment — servers that encode
+ * literal slashes inside filename segments are rare, and the containment
+ * guarantee is worth the false positive. %c0%ae/%e0%80%ae cover legacy
+ * overlong UTF-8 encodings of '.'.
+ */
 const ENCODED_TRAVERSAL = /%(?:2e|2f|5c)|\.(?:%2e|%2f)|%5c\.|%c0%ae|%e0%80%ae/i;
 
 /**

@@ -221,7 +221,7 @@ describe('webdav client', () => {
     expect(calls).toBe(3); // initial + 2 retries
   });
 
-  it('follows same-origin redirects without re-sending PROPFIND body twice', async () => {
+  it('follows same-origin redirects (Authorization stays same-origin)', async () => {
     let redirects = 0;
     handler = (_req, res) => {
       if (redirects === 0) {
@@ -306,6 +306,16 @@ describe('webdav client', () => {
     expect(text).toBe('<movie/>héllo');
   });
 
+  it('readText aborts and respects the deadline while streaming', async () => {
+    // Slow drip under the byte cap: deadline (1500ms) must cut it off.
+    handler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      const t = setInterval(() => res.write('a'.repeat(10)), 200);
+      res.on('close', () => clearInterval(t));
+    };
+    await expect(client().readText('Movies/slow.txt')).rejects.toThrow(/超时/);
+  });
+
   it('fails with a clear error when the Depth-0 response lacks the self entry', async () => {
     handler = (_req, res) => {
       res.writeHead(207, { 'Content-Type': 'application/xml' });
@@ -347,7 +357,9 @@ describe('webdav source adapter', () => {
     handler = PROPFIND_OK(LIST_BODY);
     const adapter = WebDavSourceAdapter.fromSource(3, baseUrl(), null);
     const caps = await adapter.testConnection(new AbortController().signal);
-    expect(caps).toEqual({ canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true });
+    // The fixture's root entry declares no ETag → honest false; Range stays
+    // optimistic until the per-file 206 probe (plan §8.1).
+    expect(caps).toEqual({ canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true });
   });
 
   it('stats single resources with Depth 0', async () => {

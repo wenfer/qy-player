@@ -85,18 +85,6 @@ interface RawResponse {
   body?: Buffer;
 }
 
-export interface WebDavClient {
-  /** PROPFIND Depth 0: existence + metadata of one resource. */
-  stat(relativePath: string): Promise<WebDavEntry>;
-  /** PROPFIND Depth 1: directory listing. */
-  list(relativePath: string): Promise<WebDavEntry[]>;
-  /** GET (optionally with a Range header) → bounded stream. */
-  get(relativePath: string, options?: { rangeHeader?: string }): Promise<WebDavResponse>;
-  /** Read a small text resource (NFO) fully, capped by maxBytes. */
-  readText(relativePath: string): Promise<string>;
-  /** Parse a PROPFIND multistatus body (exposed for tests). */
-}
-
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     const err = new Error('操作已取消');
@@ -298,12 +286,14 @@ export function createWebDavClient(options: WebDavClientOptions): WebDavClient {
         res = await singleRequest(base, requestPath, { method, headers, body: init.body }, { timeoutMs, maxBytes, signal });
       } catch (err) {
         if (!isNetworkError(err) || attempt >= maxRetries) throw err;
+        throwIfAborted(signal);
         attempt += 1;
         await backoff(attempt, signal);
         continue;
       }
       if (RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {
         res.stream.destroy();
+        throwIfAborted(signal);
         attempt += 1;
         await backoff(attempt, signal);
         continue;
@@ -437,17 +427,36 @@ export function createWebDavClient(options: WebDavClientOptions): WebDavClient {
       const chunks: Buffer[] = [];
       let bytes = 0;
       await new Promise<void>((resolve, reject) => {
+        // The body stream needs its own deadline + abort wiring: after the
+        // response headers arrive, a slow/hostile server could otherwise
+        // hold the connection open under the byte cap.
+        // Deadline on the body phase: a stall is a failure, not a result.
+        const timer = setTimeout(() => {
+          res.stream.destroy(new WebDavError(`读取超时（${timeoutMs}ms）`));
+          done(new WebDavError(`读取超时（${timeoutMs}ms）`));
+        }, timeoutMs);
+        const onAbort = (): void => {
+          res.stream.destroy(new WebDavError('操作已取消'));
+          done();
+        };
+        function done(err?: Error): void {
+          clearTimeout(timer);
+          callSignal?.removeEventListener('abort', onAbort);
+          if (err) reject(err);
+          else resolve();
+        }
+        callSignal?.addEventListener('abort', onAbort, { once: true });
         res.stream.on('data', (chunk: Buffer) => {
           bytes += chunk.length;
           if (bytes > maxBytes) {
             res.stream.destroy(new WebDavError(`响应超过 ${maxBytes} 字节上限`));
-            reject(new WebDavError(`响应超过 ${maxBytes} 字节上限`));
+            done(new WebDavError(`响应超过 ${maxBytes} 字节上限`));
             return;
           }
           chunks.push(chunk);
         });
-        res.stream.on('end', () => resolve());
-        res.stream.on('error', reject);
+        res.stream.on('end', () => done());
+        res.stream.on('error', (err: Error) => done(err));
       });
       return Buffer.concat(chunks).toString('utf8');
     },

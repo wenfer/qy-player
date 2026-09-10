@@ -90,10 +90,18 @@ export class WebDavSourceAdapter implements SourceAdapter {
     // PROPFIND Depth 0 on the root: reachable + authenticated. A 401/403
     // surfaces as WebDavError with status — the health layer maps it to
     // 'auth-required' vs 'offline' (plan §6.1).
-    await this.client.stat('', signal);
-    // ETag support is declared per-entry by the server; the root tells us
-    // the general shape. Range probing happens per-file before playback.
-    return { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true };
+    const root = await this.client.stat('', signal);
+    // supportsEtag reflects what the root entry declared; per-entry ETags
+    // are checked at scan time for incremental fingerprinting.
+    // supportsRange is an optimistic HTTP-level default: real seek
+    // capability is probed per-file (206 on a Range GET) before playback
+    // (plan §8.1), and the UI must not rely on this flag alone.
+    return {
+      canSeek: true,
+      canDelete: false,
+      supportsEtag: root.etag !== undefined,
+      supportsRange: true,
+    };
   }
 
   /** One PROPFIND Depth 1 → relativePath entries (no leading slash). */
