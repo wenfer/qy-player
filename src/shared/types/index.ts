@@ -101,4 +101,5 @@ export interface MediaItem {
 
 // ---- Phase 2 unified catalog & action contracts ----
 export * from './catalog';
+export * from './media-info';
 export * from './actions';
