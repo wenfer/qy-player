@@ -482,13 +482,21 @@ Evidence:
 
 ### QYP2-021 接入字幕播放注入和详情 UI
 
-- [ ] **依赖：** QYP2-019、QYP2-020
-- [ ] **Read first：** `src/main/modules/player-core/index.ts`、`src/renderer/pages/Detail/index.tsx`
-- [ ] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/renderer/pages/Detail/SubtitleManager.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/main/playback/subtitle-injection.test.ts`
-- [ ] **目标：** sidecar 与人工字幕统一管理，播放前自动注入。
-- [ ] **验收：** 重启后仍可用；缺失字幕不阻止播放；操作乐观更新并失败回滚；mpv 可切换人工字幕。
-- [ ] **验证：** main/renderer 测试、mpv 0.29/0.32 手工切换。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-019、QYP2-020
+- [x] **Read first：** `src/main/modules/player-core/index.ts`、`src/renderer/pages/Detail/index.tsx`
+- [x] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/renderer/pages/Detail/SubtitleManager.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/main/playback/subtitle-injection.test.ts`
+- [x] **目标：** sidecar 与人工字幕统一管理，播放前自动注入。
+- [x] **验收：** 重启后仍可用；缺失字幕不阻止播放；操作乐观更新并失败回滚；mpv 可切换人工字幕。
+- [x] **验证：** main/renderer 测试、mpv 0.29/0.32 手工切换。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（31 文件 365 测试通过，本任务 14 注入 + 9 管理器用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 注入：LOAD_FILE 后等 mpv `file-loaded` 事件（≤5s，sub-add 早于 demuxer 就绪在 0.29 会失败）再逐轨挂载——默认行 `select`、其余 `auto`（0.29 兼容，不用 0.33+ 的 cached）；逐轨隔离（单个失败不影响其余）+ 外层 catch（永不阻塞播放）；键映射：webdav `<sourceId>:<path>`、local 绝对路径按全部 source root 前缀（嵌套 root 全尝试）、online → null
+  - UI：SubtitleManager（sidecar/imported 统一列表、语言/格式/来源/默认/缺失标签、导入仅经系统选择器、乐观默认+移除带回滚、非 ok 行禁用设默认）；挂到 LibraryBrowse 目录详情（容器类型不显示）；QYP2-020 延后的 camelCase mapper 落地为 shared `toSubtitleAttachmentInfo`
+  - 重启仍可用：catalog_subtitles 行 + 受管文件持久，注入按 DB 行 → 重启后自动恢复
+  - Review notes: 评审 Request changes → REQUIRED 2 项全修（① 假 contract 测试换成 buildSubAddArgs 实参断言；② 注入等 file-loaded 门）；OPTIONAL 修 4（嵌套 root 全尝试、shared mapper、非 ok 行禁默认、容器隐藏管理器）；延后记录：用户语言偏好选默认轨（plan §13，当前仅 is_default 标记，无偏好设置功能）
+  - 越界（待追认）：player-core/index.ts（addSubtitle flag + waitForFileLoaded）、ipc/index.ts（LOAD_FILE 注入）、LibraryBrowse/index.tsx（接线——目录条目详情实际在此，Detail/index.tsx 为在线详情页不适用）、tests/renderer/detail/subtitle-manager.test.tsx（renderer 分支测试）
+  - 手工验证（待补录）：mpv 0.29（Debian 10）与 0.32（自编译）各一次：播放目录条目→确认字幕自动挂载→cycle 切换人工字幕
+  - Result: 通过（自动化；手工切换待补）
 
 ### QYP2-022 实现 metadata override 服务
 
