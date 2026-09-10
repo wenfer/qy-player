@@ -28,33 +28,69 @@ export function webdavFingerprint(entry: SourceEntry): string | undefined {
 /** Bounded body collector for the NFO reader (2 MiB cap matches NFO limit). */
 async function collectBounded(
   resource: NodeJS.ReadableStream | AsyncIterable<Uint8Array>,
-  maxBytes: number
+  maxBytes: number,
+  signal?: AbortSignal
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   if (Symbol.asyncIterator in resource) {
     for await (const chunk of resource) {
+      if (signal?.aborted) {
+        const err = new Error('操作已取消');
+        err.name = 'AbortError';
+        throw err;
+      }
       bytes += chunk.length;
       if (bytes > maxBytes) throw new Error(`NFO 响应超过 ${maxBytes} 字节上限`);
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
   }
-  const stream = resource as NodeJS.ReadableStream;
+  const stream = resource as NodeJS.ReadableStream & { destroy?: (e?: Error) => void };
   await new Promise<void>((resolve, reject) => {
-    stream.on('data', (chunk: Buffer) => {
+    const oversized = new Error(`NFO 响应超过 ${maxBytes} 字节上限`);
+    const onData = (chunk: Buffer): void => {
       bytes += chunk.length;
       if (bytes > maxBytes) {
-        (stream as NodeJS.ReadableStream & { destroy?: (e?: Error) => void }).destroy?.(
-          new Error(`响应超过 ${maxBytes} 字节上限`)
-        );
-        reject(new Error(`NFO 响应超过 ${maxBytes} 字节上限`));
+        // Tear down first: destroy() re-emits 'error', which must not
+        // double-settle the promise, so listeners are removed before.
+        cleanup();
+        stream.destroy?.(oversized);
+        reject(oversized);
         return;
       }
       chunks.push(chunk);
-    });
-    stream.on('end', () => resolve());
-    stream.on('error', reject);
+    };
+    const onEnd = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (err: Error): void => {
+      cleanup();
+      reject(err);
+    };
+    const onAbort = (): void => {
+      cleanup();
+      const err = new Error('操作已取消');
+      err.name = 'AbortError';
+      stream.destroy?.(err);
+      reject(err);
+    };
+    function cleanup(): void {
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      signal?.removeEventListener('abort', onAbort);
+      clearInterval(keepalive);
+    }
+    // Deadline-free phase: the scan's overall bounds come from the request
+    // layer; this keeps the collector interruptible instead of silent.
+    const keepalive = setInterval(() => undefined, 30_000);
+    keepalive.unref?.();
+    stream.on('data', onData);
+    stream.on('end', onEnd);
+    stream.on('error', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
   return Buffer.concat(chunks);
 }
@@ -75,7 +111,7 @@ export function createWebDavScanDriver(deps: {
     fingerprintOf: webdavFingerprint,
     readNfo: async (relativePath, signal) => {
       const resource = await adapter.open({ sourceId: deps.sourceId, relativePath }, signal);
-      return collectBounded(resource.stream, 2 * 1024 * 1024);
+      return collectBounded(resource.stream, 2 * 1024 * 1024, signal);
     },
   });
 }
@@ -109,7 +145,12 @@ export function persistSourceHealth(
   let options: Record<string, string | number | boolean> = {};
   if (source.options) {
     try {
-      options = JSON.parse(source.options) as Record<string, string | number | boolean>;
+      const parsed: unknown = JSON.parse(source.options);
+      // options must be a plain object; arrays/primitives would break the
+      // merge below with a silent data loss, so they are discarded.
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        options = parsed as Record<string, string | number | boolean>;
+      }
     } catch {
       options = {};
     }

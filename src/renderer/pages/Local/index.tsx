@@ -288,8 +288,7 @@ export default function Local() {
                   </button>
                   <button
                     onClick={() => handleScanToggle(source)}
-                    disabled={source.kind !== 'local'}
-                    className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring flex-shrink-0 disabled:opacity-40"
+                    className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring flex-shrink-0"
                     aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
                     title={scanning ? '取消扫描' : '扫描'}
                   >

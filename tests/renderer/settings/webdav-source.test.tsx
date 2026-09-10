@@ -197,9 +197,9 @@ describe('Settings page: WebDAV source rows', () => {
     expect(screen.getByText('可拖动/续播')).toBeTruthy();
     expect(screen.getByText('ETag')).toBeTruthy();
     expect(screen.getByText('删除已禁用')).toBeTruthy();
-    // Scanning a WebDAV source is explicitly gated until QYP2-014.
+    // Backend ready: WebDAV sources are scannable since QYP2-014.
     const scanButton = screen.getByRole('button', { name: /扫描 家庭云盘/ });
-    expect((scanButton as HTMLButtonElement).disabled).toBe(true);
+    expect((scanButton as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('saves through the page handler and refreshes the list', async () => {

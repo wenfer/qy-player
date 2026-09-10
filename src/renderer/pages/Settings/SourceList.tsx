@@ -107,10 +107,9 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={() => onScanToggle(source)}
-                  disabled={isWebdav}
-                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring disabled:opacity-40 disabled:hover:bg-transparent"
+                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
                   aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
-                  title={isWebdav ? 'WebDAV 扫描即将支持' : scanning ? '取消扫描' : '扫描'}
+                  title={scanning ? '取消扫描' : '扫描'}
                 >
                   {scanning ? <X size={15} /> : <RefreshCw size={15} />}
                 </button>
