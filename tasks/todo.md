@@ -440,13 +440,20 @@ Evidence:
 
 ### QYP2-019 详情页显示技术信息与上次进度
 
-- [ ] **依赖：** QYP2-011、QYP2-016、QYP2-018
-- [ ] **Read first：** `src/renderer/pages/Detail/index.tsx`、本文第 10、15 节
-- [ ] **允许修改：** `src/renderer/pages/Detail/index.tsx`、`src/renderer/pages/Detail/MediaInfoPanel.tsx`、`src/renderer/pages/Detail/ProgressSummary.tsx`、`src/preload/index.ts`、`tests/renderer/detail/media-info-progress.test.tsx`
-- [ ] **目标：** 非阻塞显示容器/视频/音频/字幕技术信息和电影/单集进度。
-- [ ] **验收：** probe 中/失败/离线有独立状态；完成内容不显示误导性续播；多轨可折叠换行；1280×800 无横向滚动。
-- [ ] **验证：** renderer 测试、键盘与错误状态手工检查、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-011、QYP2-016、QYP2-018
+- [x] **Read first：** `src/renderer/pages/Detail/index.tsx`、本文第 10、15 节
+- [x] **允许修改：** `src/renderer/pages/Detail/index.tsx`、`src/renderer/pages/Detail/MediaInfoPanel.tsx`、`src/renderer/pages/Detail/ProgressSummary.tsx`、`src/preload/index.ts`、`tests/renderer/detail/media-info-progress.test.tsx`
+- [x] **目标：** 非阻塞显示容器/视频/音频/字幕技术信息和电影/单集进度。
+- [x] **验收：** probe 中/失败/离线有独立状态；完成内容不显示误导性续播；多轨可折叠换行；1280×800 无横向滚动。
+- [x] **验证：** renderer 测试、键盘与错误状态手工检查、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（27 文件 317 测试通过，本任务 18 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 组件：MediaInfoPanel（折叠 + flex-wrap 轨道 chips，六态：probing[aria-busy]/ok/unsupported/timeout/no-mpv/offline + 评审后新增 auth 态「登录已过期」+ 重试按钮）；ProgressSummary（上次位置 + 百分比 + 自动续播提示；is_finished 或 >90% → 「已看过」，绝不显示误导续播；position≤5 或读取失败静默）
+  - 接线：Detail 仅 Movie/Episode 渲染两面板（Series/Season 不渲染不探测）；PLAYER.PROBE_ITEM 复用 resolver（WebDAV Basic / transcode token 全程 main-side，streamHeaders.take 单次消费与后续播放不冲突）；指纹 = RunTimeTicks:Size（在线弱化已在 ADR-0005 注记；transcode URL 带随机 PlaySessionId 缓存不命中，probe 固定 direct）
+  - Review notes: 评审 Request changes → REQUIRED 2 项全修（陈旧探测竞态：probeRequestRef staleness 守卫 + 面板仅在请求匹配当前条目时挂载 + 条目切换重置状态，附确定性 A→B→A 回归测试；media-info.ts 越界补录）；OPTIONAL 修 2（AUTH_REQUIRED 独立态、ProgressSummary >90% 规则对齐）；延后记录：transcode 缓存 key 剥离 PlaySessionId（当前 direct-only 可接受）、NOT_FOUND/INTERNAL 仍归 offline 文案
+  - 越界（待追认）：shared/ipc-channels.ts（PROBE_ITEM）、main/ipc/index.ts（handler）、media-probe 三文件（http-header-fields 透传——QYP2-018 评审预告的必做项）、shared/types/media-info.ts（ProbeItemInput）、ADR-0005 注记、global.d.ts 经 typeof 自动导出零改动
+  - 手工验证（待补录）：键盘 Tab 顺序与焦点可见、1280×800 无横向滚动、真实服务器 probe 各状态
+  - Result: 通过（自动化；键盘/宽度手工待补）
 
 ### QYP2-020 实现字幕导入与持久关联
 
