@@ -425,13 +425,18 @@ Evidence:
 
 ### QYP2-018 实现 MediaProbe 服务和缓存
 
-- [ ] **依赖：** QYP2-003、QYP2-017
-- [ ] **Read first：** QYP2-017 ADR、`src/main/modules/catalog/repository.ts`
-- [ ] **允许修改：** `src/main/modules/media-probe/index.ts`、`src/main/modules/media-probe/mpv-probe.ts`、`src/shared/types/media-info.ts`、`tests/main/media-probe/media-probe.test.ts`
-- [ ] **目标：** 实现并发 1、15 秒超时、可取消、版本化缓存的 probe service。
-- [ ] **验收：** size/mtime/ETag 变化失效；timeout/缺 mpv/offline/unsupported 可区分；失败不阻止播放。
-- [ ] **验证：** 测试覆盖缓存命中/失效、超时、进程退出和多轨映射。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-003、QYP2-017
+- [x] **Read first：** QYP2-017 ADR、`src/main/modules/catalog/repository.ts`
+- [x] **允许修改：** `src/main/modules/media-probe/index.ts`、`src/main/modules/media-probe/mpv-probe.ts`、`src/shared/types/media-info.ts`、`tests/main/media-probe/media-probe.test.ts`
+- [x] **目标：** 实现并发 1、15 秒超时、可取消、版本化缓存的 probe service。
+- [x] **验收：** size/mtime/ETag 变化失效；timeout/缺 mpv/offline/unsupported 可区分；失败不阻止播放。
+- [x] **验证：** 测试覆盖缓存命中/失效、超时、进程退出和多轨映射。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（26 文件 299 测试通过，本任务 30 用例：12 服务 + 4 映射 + 14 既有 spike 回归）；`npm run typecheck`（零错误）；`git diff --check`
+  - 服务：并发 1（microtask 交接，完成必让位下一项）；缓存 key=target|fingerprint（size:mtime/etag 变化即 miss）+ 读刷新 LRU + TTL 6h + 配额 256；失败四态（timeout/no-mpv/offline/unsupported）可区分、失败与 unsupported-ok 之外的错误一律不缓存（可重试）；单飞合并同 key；取消=按调用方（预中止不入队、排队出队、运行中丢弃结果且不缓存）
+  - Review notes: 评审 Request changes → CRITICAL 1 项已修（合并调用方 abort 会杀死共享 flight 使原始等待者永久挂起 → 取消改为按调用方：只有最后一位等待者离开才拆除队列槽/运行标志，附 2 条回归测试）；REQUIRED 2 项（Evidence 补录、shared/types/index.ts barrel export 待追认）；OPTIONAL 延后记录：① ENOENT 判定改为透传 spawn error.code（现为消息正则兜底）；② 本地文件不可解析归 offline 的语义需在 ADR/UI 明确；③ unsupported 判定缓存 6h 可能锁慢 demux 文件（可议）；④ WebDAV 带凭据 target 探测需 header 透传（QYP2-019 接线前必须解决，否则详情页每次 spawn mpv）；⑤ settle 事件驱动再次顺延；NIT：cancelled 哨兵 fingerprint=''
+  - 越界（待追认）：shared/types/index.ts +1 行 barrel export（QYP2-019 renderer 消费 shared 契约所需）
+  - Result: 通过
 
 ### QYP2-019 详情页显示技术信息与上次进度
 
