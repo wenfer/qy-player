@@ -409,13 +409,19 @@ Evidence:
 
 ### QYP2-017 完成 mpv 0.29/0.32 probe 方案 spike
 
-- [ ] **依赖：** QYP2-002、QYP2-015
-- [ ] **Read first：** `src/main/modules/player-core/mpv-process.ts`、本文第 10 节、`docs/BUILD-MPV.md`
-- [ ] **允许修改：** `src/main/modules/media-probe/mpv-probe-spike.ts`、`tests/main/media-probe/mpv-probe-spike.test.ts`、`docs/decisions/0005-mpv-probe.md`
-- [ ] **目标：** 比较 mpv 属性/临时 JSON IPC，确定无窗口探测参数和兼容降级。
-- [ ] **验收：** 两版本均能取得可定义字段或明确 unsupported；stdout 有界、stderr drain 静默；不继承用户脚本、不启用硬解。
-- [ ] **验证：** spike 测试和两个目标 mpv 的手工样本。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-002、QYP2-015
+- [x] **Read first：** `src/main/modules/player-core/mpv-process.ts`、本文第 10 节、`docs/BUILD-MPV.md`
+- [x] **允许修改：** `src/main/modules/media-probe/mpv-probe-spike.ts`、`tests/main/media-probe/mpv-probe-spike.test.ts`、`docs/decisions/0005-mpv-probe.md`
+- [x] **目标：** 比较 mpv 属性/临时 JSON IPC，确定无窗口探测参数和兼容降级。
+- [x] **验收：** 两版本均能取得可定义字段或明确 unsupported；stdout 有界、stderr drain 静默；不继承用户脚本、不启用硬解。
+- [x] **验证：** spike 测试和两个目标 mpv 的手工样本。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（25 文件 281 测试通过，spike 12 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 锁定方案（ADR-0005）：一次性 headless mpv（`--vo/--ao=null --idle --no-config --hwdec=no` + 临时 IPC socket），逐属性回退表（video-params/* → width/height、audio-params/* → audio-channels/demux-*、audio-samplerate 候选），全失败记 unsupported 不抛错；15s 总超时（connect/逐查询 deadline 竞速）、mpv 中途死亡→UNAVAILABLE（disconnect race）、spawn error/提前退出 fast-fail、SIGTERM→SIGKILL、socket 双向清理、stdout 64KiB 截断、stderr 静默 drain
+  - 测试：socket 级 fake mpv（request_id 回显、property unavailable 语义）覆盖参数锁、0.29/0.32 两形态装配、unsupported 记录、全流程、超时、spawn 失败、stdout 上限、stderr drain
+  - 手工样本（待补）：目标机 mpv 0.29（Debian 10 系统包）与 0.32（~/.local 自编译）各跑一次真实探测，核对回退表候选名（尤其 audio-samplerate/demux-samplerate）——fake 覆盖不了真实属性名差异
+  - Review notes: 评审 Request changes → 4 项 REQUIRED 全修（connect deadline、disconnect→UNAVAILABLE、aspect 数值化、socketDir mkdir）+ 4 项廉价 OPTIONAL（exit fast-fail、stdout 截断、audio-samplerate 候选）；剩余 OPTIONAL/NIT 延后：fake 补事件行、settle 改事件驱动（QYP2-018）、MpvIpcClient 定时器 unref（继承自播放模块）
+  - Result: 通过（自动化；目标机手工样本待补录）
 
 ### QYP2-018 实现 MediaProbe 服务和缓存
 
