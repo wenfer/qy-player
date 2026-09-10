@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Settings from '../../../src/renderer/pages/Settings';
 import SourceForm from '../../../src/renderer/pages/Settings/SourceForm';
@@ -20,7 +20,9 @@ const onScanProgress = vi.fn((cb: ScanListener) => {
 });
 
 function emitScanEvent(event: Record<string, unknown>): void {
-  for (const cb of [...scanListeners]) cb(event);
+  act(() => {
+    for (const cb of [...scanListeners]) cb(event);
+  });
 }
 
 // Stub on globalThis (== window in the jsdom environment); replacing the
@@ -78,6 +80,8 @@ describe('SourceForm (add local source)', () => {
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith({ root: '/data/movies', name: '电影收藏' })
     );
+    // 1280x800 no-horizontal-scroll policy: action rows wrap instead.
+    expect(document.querySelector('[data-testid="source-form"] .flex-wrap')).toBeTruthy();
   });
 
   it('shows a validation error without calling save when no directory is picked', async () => {
@@ -164,8 +168,8 @@ describe('Settings page sources section', () => {
     render(<Settings />);
     await waitFor(() => expect(screen.getByText('电影')).toBeTruthy());
 
-    emitScanEvent({ sourceId: 3, runId: 1, state: 'completed', at: Date.now() });
-    await waitFor(() => expect(screen.getByText('尚未扫描')).toBeTruthy());
+    emitScanEvent({ sourceId: 3, runId: 1, state: 'completed', processed: 7, total: 7, at: Date.now() });
+    await waitFor(() => expect(screen.getByText(/完成，共 7 项/)).toBeTruthy());
   });
 
   it('removing a source calls removeSource after confirm (files untouched)', async () => {

@@ -4,6 +4,7 @@ import type { MediaContext } from '../shared/types';
 
 // Subscribers for the catalog scan progress push channel (see onScanProgress).
 const scanProgressCallbacks = new Set<(event: unknown) => void>();
+let scanProgressHandler: ((_event: unknown, payload: unknown) => void) | null = null;
 
 // Forward renderer console to main process for debugging
 ['log', 'warn', 'error', 'info'].forEach((level) => {
@@ -66,7 +67,10 @@ const electronAPI = {
     const callbacks = scanProgressCallbacks;
     callbacks.add(callback);
     if (callbacks.size === 1) {
-      ipcRenderer.on(IPC_CHANNELS.CATALOG.SCAN_EVENTS, (_event, payload: unknown) => {
+      // Tell the main process to register this sender for pushes; the main
+      // side dedupes per sender, so repeat subscribes stay single-shot.
+      ipcRenderer.send(IPC_CHANNELS.CATALOG.SCAN_EVENTS);
+      scanProgressHandler = (_event: unknown, payload: unknown) => {
         for (const cb of [...callbacks]) {
           try {
             cb(payload);
@@ -74,12 +78,14 @@ const electronAPI = {
             console.error('[SCAN-EVENTS] 订阅者异常:', err);
           }
         }
-      });
+      };
+      ipcRenderer.on(IPC_CHANNELS.CATALOG.SCAN_EVENTS, scanProgressHandler);
     }
     return () => {
       callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        ipcRenderer.removeAllListeners(IPC_CHANNELS.CATALOG.SCAN_EVENTS);
+      if (callbacks.size === 0 && scanProgressHandler) {
+        ipcRenderer.removeListener(IPC_CHANNELS.CATALOG.SCAN_EVENTS, scanProgressHandler);
+        scanProgressHandler = null;
       }
     };
   },

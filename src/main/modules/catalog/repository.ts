@@ -443,7 +443,7 @@ export function createCatalogRepository(db: Database.Database) {
     /** Most recent run of a source (for list views); undefined when never scanned. */
     getLatestScanRun(sourceId: number): ScanRunRow | undefined {
       return db
-        .prepare('SELECT * FROM scan_runs WHERE source_id = ? ORDER BY id DESC LIMIT 1')
+        .prepare('SELECT * FROM scan_runs WHERE source_id = ? ORDER BY started_at DESC, id DESC LIMIT 1')
         .get(sourceId) as ScanRunRow | undefined;
     },
 

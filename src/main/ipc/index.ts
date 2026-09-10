@@ -572,12 +572,13 @@ const LOCAL_SOURCE_CAPABILITIES: SourceCapabilities = {
 };
 
 const activeScanJobs = new Map<number, ScanJobController>();
-const scanEventListeners = new Set<(event: ScanProgressEvent) => void>();
+/** One push callback per registered sender; keyed by webContents id. */
+const scanEventSenders = new Map<number, (event: ScanProgressEvent) => void>();
 
 function broadcastScanEvent(event: ScanProgressEvent): void {
-  for (const listener of scanEventListeners) {
+  for (const push of scanEventSenders.values()) {
     try {
-      listener(event);
+      push(event);
     } catch (err) {
       // One failing listener must not break the others.
       console.error('[SCAN-EVENTS] 监听器异常:', err instanceof Error ? err.message : err);
@@ -694,6 +695,9 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
   });
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0) {
+      return err('VALIDATION_FAILED', '来源 ID 不合法');
+    }
     try {
       const { adapter } = getAdapterForSource(db, sourceId);
       const capabilities = await adapter.testConnection(new AbortController().signal);
@@ -737,6 +741,9 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
   });
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SCAN_CANCEL, (_event, sourceId: number): ActionResult<true> => {
+    if (!Number.isInteger(sourceId) || sourceId <= 0) {
+      return err('VALIDATION_FAILED', '来源 ID 不合法');
+    }
     const job = activeScanJobs.get(sourceId);
     if (!job) {
       return err('NOT_FOUND', '该来源没有正在运行的扫描');
@@ -747,15 +754,17 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
 
   // Push channel: renderers subscribe through preload (single dispatcher per
   // sender) and receive ScanProgressEvent payloads (<= 4Hz by controller).
+  // Registration is deduped per sender: repeat subscribes stay single-shot.
   ipcMain.on(IPC_CHANNELS.CATALOG.SCAN_EVENTS, (event) => {
+    if (scanEventSenders.has(event.sender.id)) return;
     const push = (e: ScanProgressEvent): void => {
       if (!event.sender.isDestroyed()) {
         event.sender.send(IPC_CHANNELS.CATALOG.SCAN_EVENTS, e);
       }
     };
-    scanEventListeners.add(push);
+    scanEventSenders.set(event.sender.id, push);
     event.sender.once('destroyed', () => {
-      scanEventListeners.delete(push);
+      scanEventSenders.delete(event.sender.id);
     });
   });
 }
