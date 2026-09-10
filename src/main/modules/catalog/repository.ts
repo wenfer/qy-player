@@ -32,6 +32,7 @@ export interface CatalogItemRow {
   episode_number: number | null;
   availability: 'online' | 'offline' | 'missing';
   metadata_revision: number;
+  updated_at: number | null;
 }
 
 export interface CatalogFileRow {
@@ -42,6 +43,7 @@ export interface CatalogFileRow {
   size: number | null;
   mtime: number | null;
   fingerprint: string | null;
+  updated_at: number | null;
 }
 
 export interface CatalogUserStateRow {
@@ -248,6 +250,12 @@ export function createCatalogRepository(db: Database.Database) {
       return db.prepare('SELECT * FROM catalog_items WHERE id = ?').get(id) as
         | CatalogItemRow
         | undefined;
+    },
+
+    listItemsBySource(sourceId: number): CatalogItemRow[] {
+      return db
+        .prepare('SELECT * FROM catalog_items WHERE source_id = ? ORDER BY id')
+        .all(sourceId) as CatalogItemRow[];
     },
 
     listByParent(parentId: number | null, sourceId?: number): CatalogItemRow[] {

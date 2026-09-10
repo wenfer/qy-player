@@ -17,15 +17,19 @@ import {
 } from '../modules/security/secret-store';
 import type { SecretStore, StreamHeaderCache } from '../modules/security/secret-store';
 import { LocalSourceAdapter } from '../modules/library-sources/local-source';
-import type { SourceEntry } from '../modules/library-sources/types';
+import type { SourceAdapter } from '../modules/library-sources/types';
 import { ScanJobController } from '../modules/library-scanner/job-controller';
+import {
+  createLocalScanDriver,
+  markAvailabilityAfterScan,
+  walkSourceTree,
+} from '../modules/library-scanner/local-scanner';
 import {
   createLocalSourceFromSelection,
   getAdapterForSource,
   removeSource,
 } from '../modules/catalog/source-service';
 import { createCatalogRepository } from '../modules/catalog/repository';
-import type { CatalogRepository } from '../modules/catalog/repository';
 import {
   isCreateLocalSourceInput,
   err,
@@ -591,30 +595,6 @@ function broadcastScanEvent(event: ScanProgressEvent): void {
  * QYP2-009 replaces this with recursive traversal and movie/series
  * classification; until then only root-level files are indexed.
  */
-function createBasicScanDriver(repo: CatalogRepository, sourceId: number): {
-  index(entry: SourceEntry, signal: AbortSignal): Promise<void>;
-} {
-  return {
-    async index(entry) {
-      if (entry.isDirectory) return;
-      const title = entry.relativePath.replace(/\.[^.]+$/, '').split('/').pop() ?? entry.relativePath;
-      const itemId = repo.upsertItem({
-        sourceId,
-        sourceKey: entry.relativePath,
-        kind: 'video',
-        title,
-      });
-      repo.upsertFile({
-        sourceId,
-        itemId,
-        relativePath: entry.relativePath,
-        size: entry.size,
-        mtime: entry.mtime,
-      });
-    },
-  };
-}
-
 function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore: SecretStore): void {
   const repo = createCatalogRepository(db);
 
@@ -720,10 +700,17 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     } catch (e) {
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
     }
+    // Recursive walk over the adapter; deterministic order also drives the
+    // movie-group flush and the resume cursor semantics (QYP2-009).
+    const scanningAdapter: SourceAdapter = {
+      ...adapter,
+      list: (path: string, signal: AbortSignal) => walkSourceTree(adapter, path, signal),
+    };
+    const driver = createLocalScanDriver({ repo, sourceId });
     const controller = new ScanJobController({
       repo,
-      adapter,
-      driver: createBasicScanDriver(repo, sourceId),
+      adapter: scanningAdapter,
+      driver,
       sourceId,
       root: repo.getSource(sourceId)?.root ?? '',
       onEvent: broadcastScanEvent,
@@ -731,6 +718,14 @@ function registerCatalogHandlers(db: ReturnType<typeof getDatabase>, secretStore
     activeScanJobs.set(sourceId, controller);
     void controller
       .start()
+      .then((runId) => {
+        // Availability downgrade to 'missing' happens only after a
+        // successful FULL scan (plan §6.1); ipc has no resume path yet.
+        const run = repo.getScanRun(runId);
+        if (run?.status === 'completed') {
+          markAvailabilityAfterScan(repo, sourceId, driver.seen, { fullScan: true });
+        }
+      })
       .catch((e) => {
         console.error(`[SCAN] 来源 ${sourceId} 扫描异常:`, e instanceof Error ? e.message : e);
       })
