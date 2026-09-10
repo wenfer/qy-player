@@ -223,6 +223,21 @@ Evidence:
 - [ ] **验证：** 两个 metadata 测试文件、恶意 XML fixture、`npm run typecheck`。
 - [ ] **Evidence：** 待填写
 
+### QYP2-010 实现安全 NFO 解析与字段合并
+
+- [x] **依赖：** QYP2-003、QYP2-009
+- [x] **Read first：** 计划第 9 节、项目依赖清单（确认无 XML 依赖，遵守不新增依赖约束 → 手写有界 XML 子集解析器）
+- [x] **允许修改：** `src/main/modules/metadata/{nfo-parser,metadata-merger,types}.ts`、`tests/main/metadata/*.test.ts`
+- [x] **目标：** 读取 movie/tvshow/season/episode NFO、UTF-8/UTF-16、sidecar 图片，并应用来源优先级。
+- [x] **验收：** 禁 DTD/外部实体；2 MiB/深度/节点有界；解析失败保留旧值；manual > NFO > scraper > filename 且记录 provenance。
+- [x] **验证：** 两个 metadata 测试文件（31 用例）、恶意 XML fixture、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（15 文件 169 测试通过，本任务 31 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Security fixtures: DOCTYPE 内联 DTD 拒绝；未知命名实体 &evil; 拒绝（构造性无实体展开路径）；数字实体超码点 &#x110000; / 代理对 &#xD800; 拒绝；深度 33 拒绝、32 通过；节点 55k+ 拒绝；>2MiB 文本与 buffer 拒绝；非法标签名/属性名/未闭合/错配拒绝；合法实体/CDATA/深度边界不误拒
+  - Merge semantics: 稀疏载荷不清空旧值（部分 NFO/解析失败零写入）；manual 锁定字段重扫跳过且 NFO 槽位冻结（解锁即恢复用户所见状态）；expectedRevision 乐观锁冲突抛 MetadataConflictError 携带两侧（无静默 LWW）；键序稳定比较不误 bump；clearManualField 逐字段恢复来源值
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：<set> 无 <name> 回退文本、根元素后尾部注释/PI 容忍（assertTrailingNoise）、expectedRevision 0 新字段语义、deepEqual 键序、8 个测试覆盖缺口全部补齐；二轮验收 Approve；② mpaa 与 contentrating 并存时 contentrating 胜出（Kodi 主流是 mpaa，但显式 contentrating 更精确，测试已固化）；③ banner/logo sidecar 超出 plan §9.1 列举范围（同机制零成本，QYP2-011 UI 消费，已注释说明）；④ 越界文件（待追认）：无——但 electron-builder.yml（Deepin 托盘 libappindicator3-1 由 recommends 转硬依赖）再次为工作区并行改动被误扫，已拆分为独立提交 e817fca 待追认（改动合理但未经本任务批准）；⑤ ProviderStore 为 JSON 可序列化（field→provider→{value,revision,updatedAt}），与 catalog_metadata_sources (item_id, field, provider, value, revision) 映射直接；注意 updatedAt 为 ms 而表内 updated_at 为 unixepoch 秒（落库时换算）
+
 ### QYP2-011 交付本地目录浏览、搜索和旧进度显示
 
 - [ ] **依赖：** QYP2-008、QYP2-009、QYP2-010
