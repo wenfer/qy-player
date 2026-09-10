@@ -175,6 +175,20 @@ Evidence:
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes（1C/5R）：resolveInside 改为双层防护（字符串前缀 + realpath 复检，防 root 被换 symlink 的 TOCTOU）；symlink 策略统一为「realpath 重定向后仍在 root 内即可播、逃逸即拒绝、断链拒绝」；assertOwnLocator 不再误杀合法点段路径；root=/ 前缀检查特判；lstat 改异步；checkSourceHealth 空 catch 改为错误分类（offline vs degraded）+ 脱敏日志；② 遗留（非阻塞，评审认可）：resolveInside/stat 内同步 realpath/lstat 属单路径安全关卡，非批量 IO；open 的 signal 中途取消行为未显式测试（createReadStream signal 在 Node 16 可用，留给 016 播放链路回归覆盖）；③ 二轮验收 Approve
 
+### QYP2-008 添加本地来源 IPC 与设置 UI
+
+- [x] **依赖：** QYP2-002、QYP2-007
+- [x] **Read first：** `src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/ServerForm.tsx`、`src/preload/index.ts`
+- [x] **允许修改：** `src/main/ipc/index.ts`、`src/preload/index.ts`、`src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/SourceForm.tsx`、`tests/renderer/settings/local-source.test.tsx`
+- [x] **目标：** 添加/测试/编辑/停用本地来源，启动和取消扫描。
+- [x] **验收：** 异步操作有 Toast 和持久状态；移除文案明确不删文件；1280×800 无横向滚动；输入由 shared schema 校验。
+- [x] **验证：** `npm test -- --run tests/renderer/settings/local-source.test.tsx`、`npm run typecheck`、键盘手工验证。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（12 文件 106 测试通过，其中本任务 renderer 6 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - Tests: SourceForm 选目录→保存（携带 root/name）、未选目录不出保存、列表渲染含扫描状态与移除承诺文案、扫描启动→推送事件驱动「扫描中 3/10」、完成事件路径、移除 confirm 文案含「不会删除磁盘上的媒体文件」、flex-wrap 布局断言（1280×800 无横向滚动策略）
+  - Result: 通过
+  - Review notes: ① 首轮评审 Request changes：Critical（preload 订阅时从不向 main 发送注册消息，推送链路断裂——已加 ipcRenderer.send + main 端 per-sender 去重）、SOURCE_HEALTH/SCAN_CANCEL 补 sourceId 校验、getLatestScanRun 排序改 started_at+id、preload 改命名 handler 移除、测试 act 包裹 + 布局断言；二轮验收 Approve；② 基础 indexer 仅索引根层文件并统一标 kind=video——递归遍历与电影/剧集分类在 QYP2-009 落地（已在代码注释与 Evidence 双重标注，非 stub：今日即可产出真实可浏览行）；③ 键盘手工验证项：表单 Tab 序（选目录→名称→测试→添加→取消）+ 删除按钮有确认弹窗，由用户下次实机验证补录；④ 越界文件（待追认）：shared/types（CreateLocalSourceInput/SourceListEntry）、ipc-channels（PICK_DIR）、repository（getLatestScanRun）——成套 IPC 必要增量，评审已确认合理；⑤ 工作区并行改动（tray 图标路径修复 + tray 测试）被误扫入整改提交，已拆分为独立提交 a50c9b5 并经全部门禁验证
+
 ### QYP2-009 实现本地增量扫描与媒体分类
 
 - [ ] **依赖：** QYP2-006、QYP2-007
