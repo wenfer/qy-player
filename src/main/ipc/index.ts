@@ -73,7 +73,7 @@ import {
   describeItemFields,
   importItemImages,
   restoreManualFields,
-  saveManualEdits,
+  toEditorActionResult,
   type ManualPatch,
 } from '../modules/metadata/editor-service';
 import type { ProbeItemInput } from '../../shared/types/media-info';
@@ -1141,17 +1141,17 @@ function registerCatalogHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.METADATA.SAVE, (_event, itemId: number, patches: ManualPatch[]) => {
-    if (!Array.isArray(patches) || patches.length === 0 || patches.length > 32) {
-      return err('VALIDATION_FAILED', '补丁数量无效');
-    }
-    return ok(saveManualEdits(catalogRepo, itemId, patches));
+    // toEditorActionResult maps EditorResult (ok/conflict/validation) onto
+    // the envelope without double wrapping - conflicts stay observable.
+    return toEditorActionResult(itemId, patches, catalogRepo);
   });
 
   ipcMain.handle(IPC_CHANNELS.METADATA.RESTORE, (_event, itemId: number, fields?: string[]) => {
     if (!Number.isInteger(itemId) || itemId <= 0) {
       return err('VALIDATION_FAILED', '条目 ID 无效');
     }
-    return ok(restoreManualFields(catalogRepo, itemId, fields));
+    const result = restoreManualFields(catalogRepo, itemId, fields);
+    return ok({ cleared: result.cleared });
   });
 
   ipcMain.handle(IPC_CHANNELS.METADATA.PICK_IMAGE, async () => {
@@ -1167,7 +1167,14 @@ function registerCatalogHandlers(
   ipcMain.handle(
     IPC_CHANNELS.METADATA.IMPORT_IMAGES,
     (_event, itemId: number, inputs: Array<{ kind: 'poster' | 'fanart'; sourcePath: string }>) => {
-      return importItemImages(catalogRepo, itemId, metadataImagesDir, inputs);
+      const result = importItemImages(catalogRepo, itemId, metadataImagesDir, inputs);
+      if (!result.ok) {
+        return err(
+          result.code === 'ITEM_NOT_FOUND' ? 'NOT_FOUND' : result.code === 'IO_ERROR' ? 'INTERNAL' : 'VALIDATION_FAILED',
+          result.message
+        );
+      }
+      return ok({ imported: result.imported });
     }
   );
 

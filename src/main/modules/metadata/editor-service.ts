@@ -4,6 +4,7 @@ import {
   winnerFor,
   type ProviderStore,
 } from './metadata-merger';
+import { METADATA_FIELD_LABELS } from '../../../shared/types/metadata-editor';
 import type { MetadataProvider, MetadataValue } from './types';
 
 /**
@@ -64,6 +65,11 @@ export const EDITABLE_FIELDS: Record<string, EditableFieldType> = {
   episode: 'number',
   uniqueIds: 'idList',
 };
+
+/** Chinese label for user-visible messages (AGENTS: no internal keys in UI). */
+export function fieldLabel(field: string): string {
+  return METADATA_FIELD_LABELS[field] ?? field;
+}
 
 export const LIMITS = {
   shortText: 300,
@@ -134,73 +140,73 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export function validateEditableValue(field: string, value: MetadataValue): string | null {
   const shape = EDITABLE_FIELDS[field];
-  if (!shape) return `字段 ${field} 不可编辑`;
+  if (!shape) return `字段 ${fieldLabel(field)} 不可编辑`;
   switch (shape) {
     case 'shortText':
     case 'longText': {
-      if (typeof value !== 'string' || value.trim().length === 0) return `字段 ${field} 需要非空文本`;
+      if (typeof value !== 'string' || value.trim().length === 0) return `字段 ${fieldLabel(field)} 需要非空文本`;
       const cap = shape === 'longText' ? LIMITS.longText : LIMITS.shortText;
-      if (value.length > cap) return `字段 ${field} 超过 ${cap} 字上限`;
+      if (value.length > cap) return `字段 ${fieldLabel(field)} 超过 ${cap} 字上限`;
       return null;
     }
     case 'year':
       if (typeof value !== 'number' || !Number.isInteger(value) || value < 1888 || value > 2100) {
-        return `字段 ${field} 需要介于 1888 与 2100 之间的整数`;
+        return `字段 ${fieldLabel(field)} 需要介于 1888 与 2100 之间的整数`;
       }
       return null;
     case 'number':
       if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 5000) {
-        return `字段 ${field} 需要介于 0 与 5000 之间的整数`;
+        return `字段 ${fieldLabel(field)} 需要介于 0 与 5000 之间的整数`;
       }
       return null;
     case 'rating':
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10) {
-        return `字段 ${field} 需要介于 0 与 10 之间的数值`;
+        return `字段 ${fieldLabel(field)} 需要介于 0 与 10 之间的数值`;
       }
       return null;
     case 'date': {
       if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        return `字段 ${field} 需要 YYYY-MM-DD 日期`;
+        return `字段 ${fieldLabel(field)} 需要 YYYY-MM-DD 日期`;
       }
       // Real calendar check: 2021-13-99 must fail, not just the shape.
       const parsed = new Date(`${value}T00:00:00Z`);
       if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
-        return `字段 ${field} 不是有效的日历日期`;
+        return `字段 ${fieldLabel(field)} 不是有效的日历日期`;
       }
       return null;
     }
     case 'stringList':
       if (!Array.isArray(value) || value.length > LIMITS.listItems) {
-        return `字段 ${field} 最多 ${LIMITS.listItems} 项`;
+        return `字段 ${fieldLabel(field)} 最多 ${LIMITS.listItems} 项`;
       }
       if (value.some((v) => typeof v !== 'string' || v.length === 0 || v.length > LIMITS.itemLength)) {
-        return `字段 ${field} 的每项需为 1–${LIMITS.itemLength} 字文本`;
+        return `字段 ${fieldLabel(field)} 的每项需为 1–${LIMITS.itemLength} 字文本`;
       }
       return null;
     case 'castList':
       if (!Array.isArray(value) || value.length > LIMITS.listItems) {
-        return `字段 ${field} 最多 ${LIMITS.listItems} 项`;
+        return `字段 ${fieldLabel(field)} 最多 ${LIMITS.listItems} 项`;
       }
       for (const entry of value) {
         if (!isRecord(entry) || typeof entry.name !== 'string' || entry.name.length === 0 || entry.name.length > LIMITS.castName) {
-          return `字段 ${field} 的每项需要 name（≤${LIMITS.castName} 字）`;
+          return `字段 ${fieldLabel(field)} 的每项需要 name（≤${LIMITS.castName} 字）`;
         }
         if (entry.role !== undefined && typeof entry.role !== 'string') {
-          return `字段 ${field} 的 role 需为文本`;
+          return `字段 ${fieldLabel(field)} 的 role 需为文本`;
         }
         if (entry.role !== undefined && entry.role.length > LIMITS.castRole) {
-          return `字段 ${field} 的 role 超过 ${LIMITS.castRole} 字`;
+          return `字段 ${fieldLabel(field)} 的 role 超过 ${LIMITS.castRole} 字`;
         }
       }
       return null;
     case 'idList':
-      if (!Array.isArray(value) || value.length > 10) return `字段 ${field} 最多 10 项`;
+      if (!Array.isArray(value) || value.length > 10) return `字段 ${fieldLabel(field)} 最多 10 项`;
       for (const entry of value) {
         if (!isRecord(entry) || typeof entry.provider !== 'string' || entry.provider.length === 0 || entry.provider.length > LIMITS.itemLength) {
-          return `字段 ${field} 的每项需要 provider`;
+          return `字段 ${fieldLabel(field)} 的每项需要 provider`;
         }
         if (typeof entry.id !== 'string' || entry.id.length === 0 || entry.id.length > LIMITS.idLength) {
-          return `字段 ${field} 的每项需要 id（≤${LIMITS.idLength} 字）`;
+          return `字段 ${fieldLabel(field)} 的每项需要 id（≤${LIMITS.idLength} 字）`;
         }
       }
       return null;
@@ -481,4 +487,32 @@ export function restoreManualFields(
     repo.deleteMetadataSource(itemId, field, 'manual');
   }
   return { ok: true, cleared: targets };
+}
+
+// ---------------------------------------------------------------------------
+// IPC wire mapping (QYP2-023 contract): EditorResult → ActionResult shape
+// ---------------------------------------------------------------------------
+
+import { err as actionErr, ok as actionOk } from '../../../shared/types/actions';
+import type { ActionResult } from '../../../shared/types/actions';
+
+/** Map an EditorResult onto the IPC envelope without double wrapping. */
+export function toEditorActionResult(
+  itemId: number,
+  patches: ManualPatch[],
+  repo: EditorRepoSurface
+): ActionResult<{ changed?: string[]; cleared?: string[] }> {
+  if (!Array.isArray(patches) || patches.length === 0 || patches.length > 32) {
+    return actionErr('VALIDATION_FAILED', '补丁数量无效');
+  }
+  const result = saveManualEdits(repo, itemId, patches);
+  if (result.ok) {
+    return actionOk({ changed: result.changed, cleared: result.cleared });
+  }
+  if (result.code === 'CONFLICT') {
+    return actionErr('CONFLICT', result.message, {
+      details: { conflicts: result.conflicts ?? [] },
+    });
+  }
+  return actionErr(result.code === 'ITEM_NOT_FOUND' ? 'NOT_FOUND' : 'VALIDATION_FAILED', result.message);
 }

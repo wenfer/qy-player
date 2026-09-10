@@ -55,7 +55,9 @@ export default function MetadataEditor({ itemId, open, onClose }: MetadataEditor
       load();
       // Dialog focus management: move focus inside, restore on close.
       setTimeout(() => {
-        dialogRef.current?.querySelector<HTMLElement>('input, textarea, button')?.focus();
+        // Initial focus on the first FIELD control, not the destructive
+        // "恢复全部" button sitting in the header.
+        dialogRef.current?.querySelector<HTMLElement>('input, textarea')?.focus();
       }, 50);
     }
   }, [open, load]);
@@ -120,22 +122,26 @@ export default function MetadataEditor({ itemId, open, onClose }: MetadataEditor
     try {
       const result = (await window.electronAPI.saveMetadataEdits(itemId, patches)) as {
         ok: boolean;
-        data?: { changed?: string[]; cleared?: string[]; conflicts?: MetadataConflict[]; message?: string };
-        error?: { message: string };
+        data?: { changed?: string[]; cleared?: string[] };
+        error?: { message: string; details?: { conflicts?: MetadataConflict[] } };
       };
       if (result.ok) {
         setDrafts({});
         setConflicts({});
         addToast('元数据已保存', 'success');
         await load();
-      } else if (result.data?.conflicts && result.data.conflicts.length > 0) {
-        // Conflicts keep the drafts: the user decides per field.
-        const map: Record<string, MetadataConflict> = {};
-        for (const conflict of result.data.conflicts) map[conflict.field] = conflict;
-        setConflicts(map);
-        addToast('部分字段存在版本冲突，请逐个处理', 'warning');
       } else {
-        addToast(result.data?.message ?? result.error?.message ?? '保存失败', 'error');
+        // Conflicts keep the drafts: the user decides per field.
+        const conflicts = result.error?.details?.conflicts;
+        if (conflicts && conflicts.length > 0) {
+          const map: Record<string, MetadataConflict> = {};
+          for (const conflict of conflicts) map[conflict.field] = conflict;
+          setConflicts(map);
+          addToast('部分字段存在版本冲突，请逐个处理', 'warning');
+        } else {
+          // Validation/other failures also keep the drafts.
+          addToast(result.error?.message ?? '保存失败', 'error');
+        }
       }
     } catch {
       addToast('保存失败', 'error');

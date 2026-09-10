@@ -34,3 +34,26 @@ export interface MetadataConflict {
   expectedRevision: number;
   current: { provider: MetadataProvider; revision: number; value: MetadataValue } | null;
 }
+
+/** Chinese labels for user-visible messages and the editor UI (AGENTS.md:
+ * internal field keys must not appear as-is in the UI). */
+export const METADATA_FIELD_LABELS: Record<string, string> = {
+  title: '标题',
+  originalTitle: '原标题',
+  sortTitle: '排序标题',
+  tagline: '标语',
+  contentRating: '分级',
+  year: '年份',
+  premiered: '首映日期',
+  rating: '评分',
+  genres: '类型',
+  countries: '国家/地区',
+  directors: '导演',
+  actors: '演员',
+  uniqueIds: '外部 ID',
+  plot: '剧情简介',
+  season: '季号',
+  episode: '集号',
+  poster: '海报',
+  fanart: '背景图',
+};

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +21,7 @@ let db: ReturnType<typeof openDatabaseAtPath>;
 let repo: CatalogRepository;
 let sourceId: number;
 let itemId: number;
+let sourceDir: string;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'qy-meta-editor-'));
@@ -29,6 +30,8 @@ beforeEach(() => {
   repo = createCatalogRepository(db);
   sourceId = repo.createSource({ kind: 'local', name: '库', root: '/media' });
   itemId = repo.upsertItem({ sourceId, sourceKey: 'movie-1', kind: 'movie', title: '原始标题' });
+  sourceDir = join(root, 'source');
+  mkdirSync(sourceDir, { recursive: true });
   // A scraped/NFO baseline the editor overrides and restores against.
   repo.upsertMetadataSource(itemId, 'title', 'nfo', 'NFO 标题');
   repo.upsertMetadataSource(itemId, 'year', 'nfo', 2019);
@@ -245,5 +248,108 @@ describe('store round-trip (loadItemStore)', () => {
     const patches: ManualPatch[] = [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }];
     const again = saveManualEdits(repo, itemId, patches);
     expect(again.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QYP2-023 wire contract + image import (review-required coverage)
+// ---------------------------------------------------------------------------
+
+import {
+  describeItemFields,
+  importItemImages,
+  toEditorActionResult,
+} from '../../../src/main/modules/metadata/editor-service';
+
+describe('toEditorActionResult (wire contract)', () => {
+  it('maps success to ok with changed/cleared', () => {
+    const wire = toEditorActionResult(itemId, [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }], repo);
+    expect(wire.ok).toBe(true);
+    if (wire.ok) expect(wire.data?.changed).toEqual(['title']);
+  });
+
+  it('maps conflicts into error.details (never a false success)', () => {
+    const store = loadItemStore(repo, itemId);
+    const stale = (winnerFor(store, 'title')?.revision ?? 0) - 1;
+    const wire = toEditorActionResult(itemId, [{ field: 'title', value: 'x', expectedRevision: stale }], repo);
+    expect(wire.ok).toBe(false);
+    if (wire.ok) return;
+    expect(wire.error?.code).toBe('CONFLICT');
+    const conflicts = (wire.error?.details as { conflicts?: Array<{ field: string }> }).conflicts;
+    expect(conflicts?.[0].field).toBe('title');
+  });
+
+  it('maps validation and not-found failures to typed errors', () => {
+    const bad = toEditorActionResult(itemId, [{ field: 'nope', value: 'x', expectedRevision: 0 }], repo);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error?.code).toBe('VALIDATION_FAILED');
+    const missing = toEditorActionResult(999999, [{ field: 'title', value: 'x', expectedRevision: 0 }], repo);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error?.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('describeItemFields (GET payload)', () => {
+  it('lists editable fields with winner provenance', () => {
+    saveManualEdits(repo, itemId, [{ field: 'title', value: '手工标题', expectedRevision: currentRevision('title') }]);
+    const fields = describeItemFields(repo, itemId);
+    const title = fields.find((f) => f.field === 'title');
+    expect(title?.winner).toMatchObject({ provider: 'manual', value: '手工标题' });
+    // Provenance keeps the NFO slot visible alongside the manual winner.
+    expect(title?.providers.some((p) => p.provider === 'nfo')).toBe(true);
+    // Whitelist fields appear even without values.
+    expect(fields.find((f) => f.field === 'premiered')).toBeDefined();
+  });
+});
+
+describe('importItemImages (§14.1 managed image cache)', () => {
+  let imagesRoot: string;
+  beforeEach(() => {
+    imagesRoot = join(root, 'images');
+    mkdirSync(imagesRoot, { recursive: true });
+  });
+
+  it('copies poster/fanart into the managed dir and records manual slots', () => {
+    const poster = join(sourceDir, 'poster.jpg');
+    writeFileSync(poster, 'fake-jpeg');
+    const result = importItemImages(repo, itemId, imagesRoot, [{ kind: 'poster', sourcePath: poster }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.imported[0].managedPath).toContain(join('images', String(itemId)));
+    expect(winnerFor(loadItemStore(repo, itemId), 'poster')?.provider).toBe('manual');
+    // The temp file was renamed away (no .tmp- leftovers).
+    const dirFiles = readdirSync(join(imagesRoot, String(itemId)));
+    expect(dirFiles.every((f) => !f.startsWith('.tmp-'))).toBe(true);
+  });
+
+  it('rejects non-image extensions, oversize files and unknown items', () => {
+    const text = join(sourceDir, 'not-image.txt');
+    writeFileSync(text, 'x');
+    const badExt = importItemImages(repo, itemId, imagesRoot, [{ kind: 'poster', sourcePath: text }]);
+    expect(badExt.ok).toBe(false);
+
+    const huge = join(sourceDir, 'big.png');
+    writeFileSync(huge, Buffer.alloc(21 * 1024 * 1024, 0x61));
+    const oversize = importItemImages(repo, itemId, imagesRoot, [{ kind: 'poster', sourcePath: huge }]);
+    expect(oversize.ok).toBe(false);
+
+    const missing = importItemImages(repo, 999999, imagesRoot, [{ kind: 'poster', sourcePath: text }]);
+    expect(missing.ok).toBe(false);
+  });
+
+  it('deletes the managed file when the DB write fails (no orphans)', () => {
+    const poster = join(sourceDir, 'poster.jpg');
+    writeFileSync(poster, 'fake-jpeg');
+    // A repo whose upsert throws simulates a DB failure after the copy.
+    const failingRepo = {
+      ...repo,
+      upsertMetadataSource: () => {
+        throw new Error('db down');
+      },
+    };
+    const result = importItemImages(failingRepo, itemId, imagesRoot, [{ kind: 'poster', sourcePath: poster }]);
+    expect(result.ok).toBe(false);
+    const dirFiles = readdirSync(imagesRoot, { recursive: true });
+    expect(dirFiles.every((f) => !f.includes('poster-'))).toBe(true);
   });
 });

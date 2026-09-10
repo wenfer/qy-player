@@ -63,7 +63,7 @@ describe('MetadataEditor (QYP2-023)', () => {
   it('sends only changed fields as patches with the seen revision', async () => {
     renderEditor();
     await screen.findByText('编辑元数据');
-    const titleInput = screen.getByLabelText('title') as HTMLInputElement;
+    const titleInput = screen.getByLabelText('标题') as HTMLInputElement;
     fireEvent.change(titleInput, { target: { value: '手工标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() =>
@@ -72,23 +72,30 @@ describe('MetadataEditor (QYP2-023)', () => {
         [{ field: 'title', value: '手工标题', expectedRevision: 1 }]
       )
     );
+    // Success toast is the only user-visible confirmation (drafts cleared).
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('元数据已保存', 'success'));
   });
 
   it('keeps drafts and renders per-field diffs on conflict', async () => {
+    // Wire shape: conflicts travel in error.details (mapped by the handler).
     saveMetadataEdits.mockResolvedValue({
       ok: false,
-      data: {
-        conflicts: [
-          { field: 'title', expectedRevision: 1, current: { provider: 'nfo', revision: 3, value: '别人改的' } },
-        ],
+      error: {
+        code: 'CONFLICT',
+        message: '字段已被其他修改更新，请刷新后重试',
+        details: {
+          conflicts: [
+            { field: 'title', expectedRevision: 1, current: { provider: 'nfo', revision: 3, value: '别人改的' } },
+          ],
+        },
       },
     });
     renderEditor();
     await screen.findByText('编辑元数据');
-    fireEvent.change(screen.getByLabelText('title'), { target: { value: '我的标题' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '我的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     // Draft text survives (失败保留草稿).
-    expect((screen.getByLabelText('title') as HTMLInputElement).value).toBe('我的标题');
+    expect((screen.getByLabelText('标题') as HTMLInputElement).value).toBe('我的标题');
     // Diff is understandable: current vs submitted.
     expect(await screen.findByText(/当前值/)).toBeTruthy();
     expect(screen.getByText('别人改的')).toBeTruthy();
@@ -101,12 +108,16 @@ describe('MetadataEditor (QYP2-023)', () => {
     saveMetadataEdits
       .mockResolvedValueOnce({
         ok: false,
-        data: { conflicts: [{ field: 'title', expectedRevision: 1, current: { provider: 'nfo', revision: 3, value: '别人改的' } }] },
+        error: {
+          code: 'CONFLICT',
+          message: 'conflict',
+          details: { conflicts: [{ field: 'title', expectedRevision: 1, current: { provider: 'nfo', revision: 3, value: '别人改的' } }] },
+        },
       })
       .mockResolvedValueOnce({ ok: true, data: { changed: ['title'], cleared: [] } });
     renderEditor();
     await screen.findByText('编辑元数据');
-    fireEvent.change(screen.getByLabelText('title'), { target: { value: '我的标题' } });
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '我的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await screen.findByRole('button', { name: '用我的值覆盖' });
     fireEvent.click(screen.getByRole('button', { name: '用我的值覆盖' }));
@@ -122,7 +133,7 @@ describe('MetadataEditor (QYP2-023)', () => {
     restoreMetadataFields.mockResolvedValue({ ok: true, data: { cleared: ['title'] } });
     renderEditor();
     await screen.findByText('编辑元数据');
-    fireEvent.click(screen.getByRole('button', { name: '恢复 title 的来源值' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复标题的来源值' }));
     await waitFor(() => expect(restoreMetadataFields).toHaveBeenCalledWith(5, ['title']));
     await waitFor(() => expect(getMetadataFields).toHaveBeenCalledTimes(2));
   });

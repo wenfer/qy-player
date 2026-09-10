@@ -1,5 +1,5 @@
 import { Star, Undo2 } from 'lucide-react';
-import type { MetadataConflict, MetadataFieldInfo, MetadataValue } from '../../../shared/types/metadata-editor';
+import { METADATA_FIELD_LABELS, type MetadataConflict, type MetadataFieldInfo, type MetadataValue } from '../../../shared/types/metadata-editor';
 
 /**
  * One editable metadata field row (QYP2-023): provider provenance badge,
@@ -56,10 +56,12 @@ export function valueToText(value: MetadataValue | null | undefined, shape: Fiel
 }
 
 /** Parse the control's text back into the field's wire value (or null). */
-export function textToValue(_field: string, shape: FieldShape, text: string): MetadataValue {
+export function textToValue(_field: string, shape: FieldShape, text: string): MetadataValue | null {
   switch (shape) {
     case 'number':
     case 'rating':
+      // An emptied control means "restore the source value", not 0.
+      if (text.trim() === '') return null;
       return Number(text);
     case 'tags':
       return text
@@ -106,11 +108,14 @@ export interface MetadataFieldProps {
 export default function MetadataField({
   info, draftText, hasDraft, conflict, disabled, onChange, onRestore, onOverrideConflict, onDropConflict, onImportImage,
 }: MetadataFieldProps) {
-  const shape = FIELD_SHAPES[info.field] ?? 'text';
+  const knownShape = FIELD_SHAPES[info.field];
+  const unknownField = knownShape === undefined;
+  const shape = knownShape ?? 'text';
   const displayText = hasDraft ? draftText : valueToText(info.winner?.value, shape);
   const winnerProvider = info.winner?.provider;
   const isDefault = info.winner?.provider === 'manual';
   const inputId = `meta-${info.field}`;
+  const label = METADATA_FIELD_LABELS[info.field] ?? info.field;
 
   const commonInput = 'w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:border-primary/50';
 
@@ -118,7 +123,7 @@ export default function MetadataField({
     <div className="mb-4">
       <div className="flex items-center justify-between mb-1.5">
         <label htmlFor={shape === 'image' ? undefined : inputId} className="text-xs font-medium text-muted-foreground">
-          {info.field}
+          {label}
         </label>
         <div className="flex items-center gap-2">
           {winnerProvider && (
@@ -138,7 +143,7 @@ export default function MetadataField({
               disabled={!winnerProvider || winnerProvider === 'manual'}
               title={winnerProvider === 'manual' ? '已是手工值' : '恢复来源值'}
               className="p-0.5 text-muted-foreground hover:text-foreground rounded focus-ring disabled:opacity-40"
-              aria-label={`恢复 ${info.field} 的来源值`}
+              aria-label={`恢复${label}的来源值`}
             >
               <Undo2 size={12} />
             </button>
@@ -146,7 +151,9 @@ export default function MetadataField({
         </div>
       </div>
 
-      {shape === 'longText' ? (
+      {unknownField ? (
+        <p className="text-xs text-muted-foreground break-all">{displayText || '（无值）'}</p>
+      ) : shape === 'longText' ? (
         <textarea
           id={inputId}
           value={displayText}
@@ -220,12 +227,12 @@ export default function MetadataField({
           </p>
           <p className="text-muted-foreground">
             当前值：
-            <span className="text-foreground">
+            <span className="text-foreground break-all">
               {conflict.current ? valueToText(conflict.current.value, shape) : '（空）'}
             </span>
           </p>
           <p className="text-muted-foreground">
-            你提交的值：<span className="text-foreground">{draftText || '（空）'}</span>
+            你提交的值：<span className="text-foreground break-all">{draftText || '（空）'}</span>
           </p>
           <div className="flex gap-2 mt-1.5">
             <button

@@ -29,7 +29,7 @@ export interface StructuredError {
   message: string;
   retryable: boolean;
   /** Optional non-sensitive structured context for diagnostics. */
-  details?: Record<string, string | number | boolean>;
+  details?: Record<string, unknown>;
 }
 
 export type ActionResult<T> =
