@@ -111,7 +111,7 @@ export interface MetadataPayload {
 export interface PluginHttpResponse {
   status: number;
   headers: Record<string, string>;
-  /** Response body, truncated at maxBytes; JSON/text decoded by the plugin. */
+  /** Response body (over-cap responses fail whole, never half-trusted). */
   body: Buffer;
 }
 

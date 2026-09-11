@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearRegistry,
   getPlugin,
@@ -152,10 +152,126 @@ describe('PluginContext: narrow capability contract (plan §11.1)', () => {
     expect(context.cache.get('key-299')).toBeDefined();
   });
 
-  it('namespaces secret reads as plugin:<id>:<key>', () => {
+  it('namespaces secret reads as plugin + encoded key (SecretStore-legal)', () => {
     registerPlugin(makePlugin(), CONTEXT_OPTIONS);
     const context = getPluginContext('test-provider');
     context?.secrets.get('api-token');
-    expect(SECRET_READER).toHaveBeenCalledWith('plugin:test-provider', 'api-token');
+    context?.secrets.has('api-token');
+    const calls = SECRET_READER.mock.calls as unknown as Array<[string, string]>;
+    for (const [ns, key] of calls) {
+      expect(ns).toBe('plugin');
+      // The encoded key must satisfy the SecretStore key charset (no ':').
+      expect(key).not.toContain(':');
+      expect(key).not.toMatch(/[^A-Za-z0-9_-]/);
+    }
+    // Reversible: decode round-trips to the composite id:key.
+    const encoded = calls[0][1];
+    expect(Buffer.from(encoded, 'base64url').toString('utf8')).toBe('test-provider:api-token');
+    expect(context?.secrets.has('api-token')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTTP danger branches (§16.2): over-cap, timeout, abort, rate gate, query
+// ---------------------------------------------------------------------------
+
+import { createServer, type Server } from 'http';
+import { performance } from 'perf_hooks';
+
+describe('plugin http danger branches', () => {
+  let server: Server;
+  let port: number;
+  // Different plugin id per test avoids the per-host rate gate cross-talk.
+  let counter = 0;
+
+  beforeEach(async () => {
+    counter += 1;
+    server = createServer((req, res) => {
+      if (req.url?.startsWith('/big')) {
+        res.setHeader('Content-Type', 'text/plain');
+        res.end('x'.repeat(3 * 1024 * 1024));
+        return;
+      }
+      if (req.url?.startsWith('/slow')) {
+        setTimeout(() => res.end('late'), 3000);
+        return;
+      }
+      if (req.url?.startsWith('/echo')) {
+        res.end(`q=${new URL(req.url, 'http://x').searchParams.get('q') ?? ''}`);
+        return;
+      }
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    port = (server.address() as { port: number }).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  function httpContext(): NonNullable<ReturnType<typeof getPluginContext>> {
+    const id = `http-plugin-${counter}`;
+    registerPlugin(makePlugin({ manifest: { ...makePlugin().manifest, id, name: id } }), {
+      ...CONTEXT_OPTIONS,
+      minRequestIntervalMs: 10,
+      defaultTimeoutMs: 400,
+    });
+    const context = getPluginContext(id);
+    if (!context) throw new Error('no context');
+    context.http.allowHosts(['127.0.0.1']);
+    return context;
+  }
+
+  it('rejects over-cap responses whole (no half-trusted body)', async () => {
+    const context = httpContext();
+    await expect(context.http.request({ url: `http://127.0.0.1:${port}/big`, maxBytes: 1024 })).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  });
+
+  it('enforces the absolute deadline against a slow-drip server', async () => {
+    const context = httpContext();
+    await expect(context.http.request({ url: `http://127.0.0.1:${port}/slow`, timeoutMs: 200 })).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
+  });
+
+  it('maps abort to CANCELLED', async () => {
+    const context = httpContext();
+    const controller = new AbortController();
+    const pending = context.http.request({
+      url: `http://127.0.0.1:${port}/slow`,
+      timeoutMs: 5000,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('serializes per-host requests by at least the rate interval', async () => {
+    const context = httpContext();
+    const start = performance.now();
+    await Promise.all([
+      context.http.request({ url: `http://127.0.0.1:${port}/` }),
+      context.http.request({ url: `http://127.0.0.1:${port}/` }),
+    ]);
+    const elapsed = performance.now() - start;
+    // minRequestIntervalMs 10 → 2 requests take >= 10ms wall clock.
+    expect(elapsed).toBeGreaterThanOrEqual(9);
+  });
+
+  it('encodes query scalars into the URL', async () => {
+    const context = httpContext();
+    const res = await context.http.request({
+      url: `http://127.0.0.1:${port}/echo`,
+      query: { q: '流浪地球', skip: undefined },
+    });
+    expect(res.body.toString('utf8')).toBe('q=流浪地球');
+  });
+
+  it('rejects invalid URLs before any network activity', async () => {
+    const context = httpContext();
+    await expect(context.http.request({ url: 'not-a-url' })).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 });

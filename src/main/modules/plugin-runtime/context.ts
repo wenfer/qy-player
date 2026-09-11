@@ -42,15 +42,39 @@ const DEFAULTS = {
   cacheTtlMs: 6 * 60 * 60 * 1000,
 };
 
-/** Single HTTP request honoring timeout/abort/maxBytes (node http/https). */
+/** Single HTTP request honoring absolute deadline, abort, maxBytes. */
 function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, maxBytes: number): Promise<PluginHttpResponse> {
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    return Promise.reject(new PluginError('NETWORK_ERROR', '不支持的协议'));
+  }
   return new Promise((resolve, reject) => {
     const transport = url.protocol === 'https:' ? httpsRequest : httpRequest;
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      reject(new PluginError('NETWORK_ERROR', '不支持的协议'));
-      return;
-    }
     let settled = false;
+    let deadlineTimer: ReturnType<typeof setTimeout>;
+    let idleTimer: ReturnType<typeof setTimeout>;
+    const abortSignal = req.signal;
+
+    const onAbort = (): void => {
+      request.destroy();
+      settle(() => new PluginError('CANCELLED', '请求已取消'));
+    };
+    // Absolute deadline: socket-idle timeouts reset on trickle data, so a
+    // slow-drip body could otherwise hang forever (§16.4 bounded requests).
+    deadlineTimer = setTimeout(() => {
+      request.destroy();
+      settle(() => new PluginError('NETWORK_ERROR', `请求超时（${timeoutMs}ms 总时限）`));
+    }, timeoutMs);
+    const cleanup = (): void => {
+      clearTimeout(deadlineTimer);
+      clearTimeout(idleTimer);
+      abortSignal?.removeEventListener('abort', onAbort);
+    };
+    function settle(fail: () => Error): void {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(fail());
+    }
     const request = transport(
       {
         hostname: url.hostname,
@@ -62,18 +86,13 @@ function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, max
       (res) => {
         const chunks: Buffer[] = [];
         let total = 0;
-        let truncated = false;
         res.on('data', (chunk: Buffer) => {
+          if (settled) return;
           total += chunk.length;
           if (total > maxBytes) {
-            if (!truncated) {
-              truncated = true;
-              res.destroy();
-              if (!settled) {
-                settled = true;
-                reject(new PluginError('INVALID_RESPONSE', `响应超过 ${Math.round(maxBytes / 1024)} KiB 上限`));
-              }
-            }
+            res.destroy();
+            // Over-cap fails the whole request - no half-trusted bodies.
+            settle(() => new PluginError('INVALID_RESPONSE', `响应超过 ${Math.round(maxBytes / 1024)} KiB 上限`));
             return;
           }
           chunks.push(chunk);
@@ -81,6 +100,7 @@ function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, max
         res.on('end', () => {
           if (settled) return;
           settled = true;
+          cleanup();
           const headers: Record<string, string> = {};
           for (const [key, value] of Object.entries(res.headers)) {
             if (typeof value === 'string') headers[key] = value;
@@ -89,36 +109,27 @@ function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, max
           resolve({ status: res.statusCode ?? 0, headers, body: Buffer.concat(chunks) });
         });
         res.on('error', (err) => {
-          if (!settled) {
-            settled = true;
-            reject(new PluginError('NETWORK_ERROR', `响应读取失败: ${err.message}`));
-          }
+          settle(() => new PluginError('NETWORK_ERROR', `响应读取失败: ${err.message}`));
         });
       }
     );
-    request.setTimeout(timeoutMs, () => {
+    // Socket-idle guard (secondary): resets on activity, so the absolute
+    // deadline above is what actually bounds the request.
+    idleTimer = setTimeout(() => {
       request.destroy();
-      if (!settled) {
-        settled = true;
-        reject(new PluginError('NETWORK_ERROR', `请求超时（${timeoutMs}ms）`));
-      }
-    });
-    req.signal?.addEventListener('abort', () => {
-      request.destroy();
-      if (!settled) {
-        settled = true;
-        reject(new PluginError('CANCELLED', '请求已取消'));
-      }
-    });
+      settle(() => new PluginError('NETWORK_ERROR', '连接空闲超时'));
+    }, timeoutMs);
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
     request.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        // Sanitized: no URL, no headers, no upstream internals.
-        reject(new PluginError('NETWORK_ERROR', `网络请求失败: ${err.message}`));
-      }
+      settle(() => new PluginError('NETWORK_ERROR', `网络请求失败: ${err.message}`));
     });
     request.end();
   });
+}
+
+/** SecretStore excludes ':' from namespaces/keys; encode the composite. */
+export function encodePluginSecretKey(pluginId: string, key: string): string {
+  return Buffer.from(`${pluginId}:${key}`, 'utf8').toString('base64url');
 }
 
 /** Build the narrow context for one plugin id. */
@@ -158,14 +169,17 @@ export function createPluginContext(pluginId: string, options: PluginContextOpti
       if (url.protocol !== 'https:' && url.protocol !== 'http:') {
         throw new PluginError('NETWORK_ERROR', '不支持的协议');
       }
-      // Per-host rate limiting: simple interval gate (plan §16.4 plugin
-      // budget; scraper concurrency 2 is a scraper-layer concern).
+      // Per-host rate limiting (plan §16.4 plugin budget): the slot is
+      // booked BEFORE awaiting, so concurrent callers serialize instead of
+      // all reading the same stale timestamp and bursting together.
+      const nowMs = Date.now();
       const last = lastRequestAt.get(url.hostname) ?? 0;
-      const wait = last + minInterval - Date.now();
+      const scheduledAt = Math.max(nowMs, last);
+      lastRequestAt.set(url.hostname, scheduledAt + minInterval);
+      const wait = scheduledAt - nowMs;
       if (wait > 0) {
         await new Promise((resolve) => setTimeout(resolve, wait));
       }
-      lastRequestAt.set(url.hostname, Date.now());
 
       // Query params: only scalars; values are encoded by URL.
       const effectiveUrl = new URL(url.toString());
@@ -218,11 +232,14 @@ export function createPluginContext(pluginId: string, options: PluginContextOpti
       },
     },
     secrets: {
+      // SecretStore namespaces/keys exclude ':', so the composite
+      // plugin:<id>:<key> is encoded into one legal key (base64url of
+      // '<id>:<key>' - reversible, collision-free, no ':' emitted).
       get(key: string): string | null {
-        return options.getSecret(`plugin:${pluginId}`, key);
+        return options.getSecret('plugin', encodePluginSecretKey(pluginId, key));
       },
       has(key: string): boolean {
-        return options.hasSecret?.(`plugin:${pluginId}`, key) ?? options.getSecret(`plugin:${pluginId}`, key) !== null;
+        return options.hasSecret?.('plugin', encodePluginSecretKey(pluginId, key)) ?? options.getSecret('plugin', encodePluginSecretKey(pluginId, key)) !== null;
       },
     },
   };
