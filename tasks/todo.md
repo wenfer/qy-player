@@ -631,7 +631,13 @@ Evidence:
 - [ ] **目标：** 搜索/详情/季集/演职员/external id/图片映射，zh-CN→en-US 回退。
 - [ ] **验收：** 未配置返回 AUTH_REQUIRED；401/429/空结果/分页/语言回退稳定；响应 schema 校验；图片 host allowlist；key 不入日志/URL/cache key。
 - [ ] **验证：** 官方响应 fixture、mock HTTP、电影和剧集完整闭环。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：无，4 个文件均在允许清单内）：**
+  - 提交：475a033（实现）+ 3cac9e5（评审修复）。
+  - 实现：`client.ts`（TMDB API v3，v4 Read Token 仅 Bearer 头；未配置→AUTH_REQUIRED；401→AUTH_REQUIRED/429→RATE_LIMITED/404→NOT_FOUND/其他→UPSTREAM_CHANGED；响应必须解析为对象）+ `mapper.ts`（movie/tv/season/episode→MetadataPayload，zh-CN 优先 + en 字段级 gap fill；tvdb_id 数字；tmdb/imdb/tvdb uniqueIds；posters+backdrops→image.tmdb.org URL，路径需 startsWith('/')）+ `index.ts`（search zh 空结果才回退 en；getDetails 按 LookupInput 路由，season/episode 先于 series 且仅 series 走季/集端点；每个 payload 过 validateMetadataPayload；allowlist 仅 api.themoviedb.org + image.tmdb.org）。
+  - 测试：`tests/main/plugins/tmdb.test.ts` 14 例：AUTH_REQUIRED 零请求、Bearer 头不出现在 URL/query、401/429 映射、zh→en 回退（search+details+season/episode）、电影/剧集/季/集完整闭合+schema 断言、host allowlist、数字 tvdb_id、movie+stray season 留在 movie 端点、year 派生、坏 JSON→INVALID_RESPONSE。
+  - 门禁：`npm test -- --run` 497 tests/39 files 全绿；`npm run typecheck` 0 错误；`git diff --check` 干净。
+  - 独立评审：首轮 5×REQUIRED（季/集无 en 回退、tvdb_id 类型、死代码、kind 守卫、季/集缺 tmdb 锚点）+ 若干 OPTIONAL，已全部修复于 3cac9e5；复审 **Approve / No new findings**（仅 2 条风格 NIT）。
+  - 挂账（后续任务）：① job-service `runDetails(pluginId, id)` 不带 MetadataLookupInput，季/集路由需在 QYP2-032 接线时扩签名；② registry 尚未注册 tmdb 插件实例，归属 QYP2-030/032；③ search 分页（page 透传）未实现——刮削 job 当前单页（20 条）够用，扩页时补 page 参数+fixture；④ contentRating 未取（需 append release_dates），挂 QYP2-030/032 一并评估；⑤ 真实 TMDB API 冒烟（用户 key）列入人工验证清单。
 
 ### QYP2-030 完成豆瓣数据入口与发布门禁
 
