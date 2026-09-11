@@ -1,7 +1,7 @@
 # ADR-0006: 豆瓣数据入口评估与发布门禁
 
 - 状态：Proposed（QYP2-030 门禁产出；**人工产品/法律/技术评审通过前，豆瓣插件保持「已内置但不可启用」**）
-- 日期：2026-09-12
+- 日期：2026-09-11
 - 相关：计划 §2（红线）、§11.4（豆瓣内置插件）、§16.4（速率预算）、QYP2-030、QYP2-031；ADR-0001（`catalog_external_ids` 表含豆瓣 provider）
 
 ## 背景
@@ -58,11 +58,13 @@
 
 `src/main/plugins/douban/types.ts` 固化：
 
-- 端点常量与 host allowlist（仅 `movie.douban.com`）；
+- 端点常量与 host allowlist：API host 仅 `movie.douban.com`；图片 host
+  预留 `*.doubanio.com`（suggest/JSON-LD 的 `img` 字段指向该域，仅限海报
+  URL 读取，QYP2-031 接线时注册进 allowlist）；
 - `DoubanSuggestItem` / `DoubanDetailLd` 响应形状类型 + 必需字段锚点常量；
 - 纯函数校验器（`validateDoubanSuggestPayload` / `validateDoubanDetailLd`），偏差即返回 `UPSTREAM_CHANGED` 语义的结构问题列表。
 
-`tests/fixtures/douban/` 提供合成 fixture（**非真实抓取内容**，结构按上述文档化锚点手写，文件内有 `$note`/HTML 注释声明），contract test 用校验器离线检测结构变化：豆瓣改版时只需更新 fixture，且锚点不匹配会大声失败，而非静默返回空数据。
+`tests/fixtures/douban/` 提供合成 fixture（**非真实抓取内容**，结构按上述文档化锚点手写，JSON 以同目录 README.md 声明合成来源，HTML 有内嵌注释声明），contract test 用校验器离线检测结构变化：豆瓣改版时只需更新 fixture，且锚点不匹配会大声失败，而非静默返回空数据。
 
 ## 后果
 

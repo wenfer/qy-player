@@ -111,6 +111,15 @@ export function validateDoubanSuggestPayload(body: unknown): StructureProblem[] 
     if (typeof entry.url === 'string' && !entry.url.startsWith(DOUBAN_SUBJECT_URL_PREFIX)) {
       problems.push({ where, problem: `url 必须以 ${DOUBAN_SUBJECT_URL_PREFIX} 开头` });
     }
+    // url 必须内含本条目 id（url/id 一致性锚点，防错位关联）。
+    if (
+      typeof entry.id === 'string' &&
+      typeof entry.url === 'string' &&
+      entry.url.startsWith(DOUBAN_SUBJECT_URL_PREFIX) &&
+      !entry.url.startsWith(`${DOUBAN_SUBJECT_URL_PREFIX}${entry.id}/`)
+    ) {
+      problems.push({ where, problem: 'url 与 id 不一致' });
+    }
   });
   return problems;
 }
@@ -152,9 +161,13 @@ export function extractLdJsonBlocks(html: string): string[] {
 /**
  * 结构偏差 → 插件错误的统一转换（§11.4：页面结构变化返回
  * UPSTREAM_CHANGED 并暂停批量任务）。QYP2-031 与 contract test 共用，
- * 保证语义只有一处定义。
+ * 保证语义只有一处定义。空列表属于调用方契约违反（结构没问题就不该
+ * 调本函数），显式 fail-fast，不静默成合法。
  */
 export function structureProblemsToError(problems: StructureProblem[]): PluginError {
+  if (problems.length === 0) {
+    throw new Error('structureProblemsToError：问题列表为空——结构合法时不应调用本函数');
+  }
   const first = problems[0];
   return new PluginError('UPSTREAM_CHANGED', `豆瓣页面结构变化：${first.where} ${first.problem}`);
 }

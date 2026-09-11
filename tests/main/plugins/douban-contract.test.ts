@@ -83,6 +83,7 @@ describe('douban contract (QYP2-030 / ADR-0006)', () => {
     badId[1].id = 'subject-35465232'; // 豆瓣若改成非纯数字 id → 检出
     expect(validateDoubanSuggestPayload(badId)).toEqual([
       { where: 'suggest[1]', problem: 'id 必须是纯数字 subject id' },
+      { where: 'suggest[1]', problem: 'url 与 id 不一致' }, // id 形状变 → 一致性锚点连坐检出
     ]);
 
     const badUrl = JSON.parse(JSON.stringify(suggestFixture)) as Array<Record<string, unknown>>;
