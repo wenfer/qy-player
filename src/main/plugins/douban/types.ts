@@ -64,6 +64,8 @@ export interface DoubanDetailLd {
   '@type': string;
   name: string;
   image?: string;
+  /** 条目简介（部分条目缺省）。 */
+  description?: string;
   /** ISO 8601 日期或年份字符串。 */
   datePublished?: string;
   /** schema.org 作者/导演节点（name 必取）。 */

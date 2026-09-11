@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -33,7 +33,6 @@ import {
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 const FIXTURE_DIR = join(REPO_ROOT, 'tests/fixtures/douban');
-const PLUGIN_DIR = join(REPO_ROOT, 'src/main/plugins/douban');
 
 const suggestFixture: unknown = JSON.parse(
   readFileSync(join(FIXTURE_DIR, 'subject-suggest.json'), 'utf8')
@@ -116,11 +115,20 @@ describe('douban contract (QYP2-030 / ADR-0006)', () => {
     expect(listPlugins().map((p) => p.manifest.id)).not.toContain('douban');
   });
 
-  it('GATE: plugins/douban contains no plugin factory — contract types only', () => {
-    const files = readdirSync(PLUGIN_DIR).filter((name) => statSync(join(PLUGIN_DIR, name)).isFile());
-    // 只有 types.ts（契约）；index.ts/client.ts 等实现文件在 QYP2-031 且
-    // 评审签认前不得出现。
-    expect(files).toEqual(['types.ts']);
+  it('GATE: buildDoubanPlugin is never wired into the app (无注册/启用开关)', () => {
+    // 源码级静态检查：除 plugins/douban 自身外，任何启动/接线代码
+    // 不得引用豆瓣插件工厂（ADR-0006：人工评审签认前不可启用）。
+    const scan = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        return entry.isDirectory() ? scan(full) : full.endsWith('.ts') ? [full] : [];
+      });
+    const mainDir = join(REPO_ROOT, 'src/main');
+    const doubanDir = join(mainDir, 'plugins/douban');
+    const offenders = scan(mainDir)
+      .filter((file) => !file.startsWith(doubanDir))
+      .filter((file) => readFileSync(file, 'utf8').includes('buildDoubanPlugin'));
+    expect(offenders).toEqual([]);
   });
 
   it('a future douban manifest passes registry validation (id 形状兼容)', () => {

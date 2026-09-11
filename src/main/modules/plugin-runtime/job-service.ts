@@ -23,6 +23,8 @@ export interface ScrapeItemResult {
   itemId: number;
   status: ScrapeItemStatus;
   message?: string;
+  /** PluginError code when the failure came from the plugin (e.g. UPSTREAM_CHANGED pauses the whole batch, §11.4). */
+  errorCode?: string;
   /** Confirm-queue candidates when status === 'confirm'. */
   candidates?: Array<{ id: string; title: string; score: number }>;
 }
@@ -166,12 +168,16 @@ export class ScrapeJobService {
   private async runQueue(jobId: string, pluginId: string, pending: number[]): Promise<void> {
     const concurrency = this.deps.concurrency ?? CONCURRENCY;
     let index = 0;
+    let pausedByUpstream = false;
     const workers: Array<Promise<void>> = [];
     for (let w = 0; w < Math.min(concurrency, pending.length); w += 1) {
       workers.push(
         (async () => {
           for (;;) {
             if (this.cancelled.has(jobId)) return;
+            // §11.4: 上游结构变化（UPSTREAM_CHANGED）→ 暂停整批，不再
+            // 调度新条目；未处理条目保留在 pending 里供恢复。
+            if (pausedByUpstream) return;
             const current = index;
             index += 1;
             if (current >= pending.length) return;
@@ -194,6 +200,7 @@ export class ScrapeJobService {
             record.pending = record.pending.filter((id) => id !== itemId);
             record.updatedAt = this.deps.now?.() ?? Date.now();
             this.saveJob(jobId, record);
+            if (result.errorCode === 'UPSTREAM_CHANGED') pausedByUpstream = true;
           }
         })()
       );
@@ -204,6 +211,9 @@ export class ScrapeJobService {
     if (this.cancelled.has(jobId)) {
       this.cancelled.delete(jobId);
       this.saveJob(jobId, { ...record, status: 'cancelled' });
+    } else if (pausedByUpstream) {
+      // 暂停而非 completed：pending 保留，适配后可用 startJob(jobId) 恢复。
+      this.saveJob(jobId, { ...record, status: 'failed' });
     } else {
       this.saveJob(jobId, { ...record, status: 'completed' });
     }
@@ -234,6 +244,7 @@ export class ScrapeJobService {
           itemId,
           status: 'failed',
           message: code === 'RATE_LIMITED' ? '上游限流（429），可稍后重试' : `搜索失败：${(err as Error).message}`,
+          ...(code ? { errorCode: code } : {}),
         };
       }
     }
@@ -273,6 +284,7 @@ export class ScrapeJobService {
         itemId,
         status: 'failed',
         message: code === 'RATE_LIMITED' ? '上游限流（429），可稍后重试' : `详情获取失败：${(err as Error).message}`,
+        ...(code ? { errorCode: code } : {}),
       };
     }
     // Runtime schema validation (§11.1) — invalid payloads never touch the store.
