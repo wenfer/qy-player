@@ -60,9 +60,10 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
   useEffect(() => {
     if (!open) return;
     load();
-    setTimeout(() => {
-      dialogRef.current?.querySelector<HTMLElement>('button')?.focus();
-    }, 50);
+    // Focus once the dialog content settles (no setTimeout race).
+    requestAnimationFrame(() => {
+      dialogRef.current?.querySelector<HTMLElement>('input, button')?.focus();
+    });
   }, [open, load]);
 
   const requestClose = useCallback(() => {
@@ -82,7 +83,12 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
           'input:not(:disabled), button:not(:disabled)'
         );
-        if (focusables.length === 0) return;
+        if (focusables.length === 0) {
+          // Everything disabled mid-execution: keep focus on the dialog.
+          e.preventDefault();
+          dialogRef.current.focus();
+          return;
+        }
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
         if (e.shiftKey && document.activeElement === first) {
@@ -118,7 +124,14 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         addToast(result.error?.message ?? '删除失败', 'error');
         return;
       }
-      const status = result.data?.status as 'trashed' | 'deleted' | 'unknown';
+      const rawStatus = result.data?.status;
+      // Whitelist: an unrecognized status is treated as unknown, never
+      // silently celebrated.
+      const status: 'trashed' | 'deleted' | 'unknown' =
+        rawStatus === 'trashed' || rawStatus === 'deleted' || rawStatus === 'unknown'
+          ? rawStatus
+          : 'unknown';
+      returnFocusRef?.current?.focus();
       if (status === 'unknown') {
         addToast('删除结果未知（服务器未确认），已标记待重查', 'warning');
         onDeleted?.({ status: 'unknown', itemId });
@@ -129,6 +142,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
       onDeleted?.({ status, itemId });
       onClose();
     } catch {
+      setPreview(null);
       setError('删除请求失败');
       addToast('删除请求失败', 'error');
     } finally {
@@ -148,7 +162,8 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         role="dialog"
         aria-modal="true"
         aria-label="删除媒体"
-        className="w-full max-w-lg bg-card border border-border rounded-xl p-5"
+        tabIndex={-1}
+        className="w-full max-w-lg bg-card border border-border rounded-xl p-5 focus:outline-none"
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold flex items-center gap-1.5">

@@ -133,6 +133,14 @@ describe('DeleteMediaDialog (QYP2-025)', () => {
     resolveExecute({ ok: true, data: { status: 'trashed', itemId: 7 } });
     await waitFor(() => expect(screen.getByRole('button', { name: '移入回收站' })).toBeTruthy());
   });
+
+  it('Escape closes the dialog (keyboard path)', async () => {
+    const { onClose } = renderDialog();
+    await waitFor(() => expect(screen.getByRole('button', { name: '移入回收站' })).toBeTruthy());
+    const dialog = screen.getByRole('dialog');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
 });
 
 describe('MediaActions (entry container)', () => {
