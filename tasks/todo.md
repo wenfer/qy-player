@@ -745,7 +745,13 @@ Evidence:
 - [ ] **目标：** 自然 EOF 后 5 秒倒计时、取消、设置关闭、最终保存后切集。
 - [ ] **验收：** EOF 只触发一次；手动停止/崩溃/退出/离线不触发；最后一集不倒计时；无进度串集。
 - [ ] **验证：** main/renderer 测试；mpv 0.29/0.32 短视频 EOF 手工回归。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① 接线必需越界文件——`ipc-channels.ts`（AUTO_NEXT.EVENT/CANCEL/GET/SET + RESUME.NEXT）、`main/ipc/index.ts`（controller 创建/wireAutoNext/markLoaded/handlers）、`playback-state/index.ts`（无新增——评审后删除了未用的 snapshot getter）、`main/index.ts`（getMainWindow 传参）、`preload`、`Settings/index.tsx`（挂 PlaybackSettings）、`Detail/index.tsx`（provider 注册）、`auto-next-store`、`App.tsx`（AutoNextHost）、`tests/renderer/detail/auto-next.test.tsx`（renderer 侧测试文件不在允许清单）：**
+  - 提交：91cbd22（实现）+ 614e28b（首轮修复）+ 二轮修复提交。
+  - 实现：AutoNextController（EOF 去重锚点、loadfile 重置、倒计时 5s、取消；markLoaded 换集广播 cancelled）+ pickNextEpisode 纯函数（季集升序/跨季/特别篇）+ wireAutoNext（eof/disconnect/crashed 事件面——手动停止/崩溃/退出不触发）+ NextEpisodeCountdown overlay（事件代数防迟到结果、busy 复位、provider 失效即取消）+ Settings 播放开关（playback.autoNext 默认开，EOF 实时读取）。
+  - 顺序保证：controller 注册在 playback-state eof 保存之后（EventEmitter 顺序 = 最终保存先于倒计时）；markLoaded 在 loadFile 成功之后（失败不重指锚点）。
+  - 测试：main 21 例（含 §12.3 强制回归：保存先于倒计时顺序、disconnect/crashed 竞态、time-pos null 不污染快照、EOF 去重、非剧集忽略、换集 cancelled）+ renderer 5 例（最后一集立即取消、fire 显式 0、无 provider 静默）。共 593 tests/46 files 全绿。
+  - 评审：首轮 4×REQUIRED + 5×补充 + 二轮 2×REQUIRED/1×OPTIONAL 全部修复（跨剧误播归属校验、断开取消、裸通道名、busy、迟到结果、监听器泄漏、死代码校验）；复审通过。
+  - 人工验证清单追加：mpv 0.29/0.32 短视频 EOF 手工回归（倒计时出现、取消、设置关闭、最后一集不显示）。
 
 ### QYP2-036 统一首页、搜索和来源健康
 
