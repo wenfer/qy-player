@@ -139,7 +139,7 @@ const electronAPI = {
   onAutoNextEvent: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, payload: unknown) => callback(payload);
     ipcRenderer.on(IPC_CHANNELS.AUTO_NEXT.EVENT, handler);
-    return () => ipcRenderer.removeListener('auto-next:event', handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AUTO_NEXT.EVENT, handler);
   },
   autoNextCancel: (reason?: 'user' | 'no-next-episode') =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.CANCEL, reason ?? 'user'),

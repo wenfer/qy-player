@@ -326,8 +326,6 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
 
-  wireAutoNext(player, autoNext);
-
       await player.loadFile(path, finalPosition, effectiveHeaders);
       // Auto-next dedupe anchor only after the load actually succeeded
       // (a failed loadfile must not re-point the eof gate).
@@ -1416,11 +1414,11 @@ function registerCatalogHandlers(
       if (typeof entry !== 'object' || entry === null) continue;
       const item = entry as Record<string, unknown>;
       if (typeof item.itemId !== 'string' && typeof item.itemId !== 'number') continue;
-      for (const field of ['seasonNumber', 'episodeNumber'] as const) {
-        const value = item[field];
-        if (value !== null && value !== undefined && typeof value !== 'number') continue;
+      const seasonOk = [null, undefined].includes(item.seasonNumber as never) || typeof item.seasonNumber === 'number';
+      const episodeOk = [null, undefined].includes(item.episodeNumber as never) || typeof item.episodeNumber === 'number';
+      if (seasonOk && episodeOk) {
+        clean.push(item as unknown as AutoNextEpisodeLike);
       }
-      clean.push(item as unknown as AutoNextEpisodeLike);
     }
     const next = pickNextEpisode(
       clean,
