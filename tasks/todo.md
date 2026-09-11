@@ -607,13 +607,21 @@ Evidence:
 
 ### QYP2-028 实现刮削任务、置信度与缓存
 
-- [ ] **依赖：** QYP2-010、QYP2-022、QYP2-026
-- [ ] **Read first：** 本文第 11.2 节、`src/main/modules/catalog/repository.ts`
-- [ ] **允许修改：** `src/main/modules/plugin-runtime/job-service.ts`、`src/main/modules/plugin-runtime/matcher.ts`、`src/main/modules/plugin-runtime/cache.ts`、`src/main/modules/metadata/metadata-merger.ts`、`tests/main/plugins/scrape-jobs.test.ts`
-- [ ] **目标：** 单项/批量 job、候选差异、取消/恢复、有限并发和缓存。
-- [ ] **验收：** ≥0.92 唯一候选自动应用；0.75～0.92 必须确认；低于 0.75 不应用；失败/取消/429 不覆盖现有值。
-- [ ] **验证：** 表驱动匹配、重试、限流、恢复、人工锁定测试。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-010、QYP2-022、QYP2-026
+- [x] **Read first：** 本文第 11.2 节、`src/main/modules/catalog/repository.ts`
+- [x] **允许修改：** `src/main/modules/plugin-runtime/job-service.ts`、`src/main/modules/plugin-runtime/matcher.ts`、`src/main/modules/plugin-runtime/cache.ts`、`src/main/modules/metadata/metadata-merger.ts`、`tests/main/plugins/scrape-jobs.test.ts`
+- [x] **目标：** 单项/批量 job、候选差异、取消/恢复、有限并发和缓存。
+- [x] **验收：** ≥0.92 唯一候选自动应用；0.75～0.92 必须确认；低于 0.75 不应用；失败/取消/429 不覆盖现有值。
+- [x] **验证：** 表驱动匹配、重试、限流、恢复、人工锁定测试。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（38 文件 483 测试通过，本任务 29 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - matcher：normalize（NFKC+小写+去标点）+ Levenshtein 归一 + 年份接近度（双侧已知 70/30，单侧年份封顶 0.9 → 不可核实匹配最多 confirm）；verdict：唯一 ≥0.92 auto、多个强候选/0.75-0.92 confirm、<0.75 rejected（8 用例表驱动）
+  - job-service：并发 2 worker 池、逐项隔离（repo/cache 异常落 failed 记录，runQueue 永不 reject、任务永不卡 running）、取消/恢复（进度持久 app_config、构造时 interrupted 标记、resume 跳过已完成且恰一次）、RATE_LIMITED→可重试失败、validateMetadataPayload 拦截非法 payload、scraper 经 applyProviderFields 手工锁定必跳过；startJob 重入守卫；终态任务修剪保留最近 20
+  - cache：内容寻址 sha1 文件名（密钥不入名）、TTL、真 LRU（mtime 读取刷新、过期先逐、配额 512）
+  - metadata-merger：validateMetadataPayload（Number.isFinite 堵 NaN/±Infinity，rating 0-10，actors/uniqueIds 形状）——QYP2-026 延后项落地
+  - Review notes: 评审 Request changes → #1/#3 全修（worker 逐项 try/catch + runQueue catch 兜底 + applyCandidate 读写包 try/catch + 重入守卫）；#2 全修（Number.isFinite）；#4 修（终态修剪）；#5 全修（真 LRU by mtime + 过期先逐 + FIFO 文档改正）；NIT 修（调试日志清理、LRU 测试确定性）
+  - 越界（待追认）：无（全部在允许清单内）
+  - Result: 通过
 
 ### QYP2-029 开发 TMDB 内置插件
 
