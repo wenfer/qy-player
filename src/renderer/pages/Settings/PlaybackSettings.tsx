@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useToastStore } from '../../stores/toast-store';
 
 /**
  * Playback preferences (QYP2-035, plan §12.3): 自动连播开关。
  * app_config `playback.autoNext`（默认开；main 侧每次 EOF 实时读取）。
  */
 export default function PlaybackSettings() {
+  const addToast = useToastStore((s) => s.addToast);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -25,7 +27,13 @@ export default function PlaybackSettings() {
     try {
       const next = !enabled;
       const res = (await window.electronAPI.setAutoNextEnabled(next)) as { ok: boolean };
-      if (res.ok) setEnabled(next);
+      if (res.ok) {
+        setEnabled(next);
+      } else {
+        addToast('设置保存失败，请重试', 'error');
+      }
+    } catch {
+      addToast('设置保存失败，请重试', 'error');
     } finally {
       setSaving(false);
     }

@@ -93,7 +93,7 @@ import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
-import { AutoNextController, pickNextEpisode } from '../modules/playback-state/auto-next';
+import { AutoNextController, pickNextEpisode, wireAutoNext } from '../modules/playback-state/auto-next';
 import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
 import type { ProbeItemInput } from '../../shared/types/media-info';
@@ -266,11 +266,11 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     broadcast: (event) => {
       const win = getMainWindow?.();
       if (win && !win.isDestroyed()) {
-        win.webContents.send('auto-next:event', event);
+        win.webContents.send(IPC_CHANNELS.AUTO_NEXT.EVENT, event);
       }
     },
   });
-  player.on('eof', () => autoNext.handleEof());
+  wireAutoNext(player, autoNext);
 
   // Auto-next cancel (user / renderer reports no next episode).
   ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.CANCEL, (_event, reason: unknown) => {
@@ -315,6 +315,9 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       const localMedia = storage.getLocalMediaByPath(path);
       const localMediaId = localMedia?.id;
 
+      // Set current media for progress tracking
+      playbackStateManager!.setCurrentMedia('local', path, title, undefined, localMediaId);
+
       // Query resume position
       const resumePosition = playbackStateManager!.getResumePosition('local', path);
       // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
@@ -323,12 +326,12 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
 
-      // Set current media for progress tracking
-      playbackStateManager!.setCurrentMedia('local', path, title, undefined, localMediaId);
-      // Auto-next dedupe anchor: a fresh load resets the eof gate.
-      autoNext.markLoaded({ mediaType: 'local', mediaId: path });
+  wireAutoNext(player, autoNext);
 
       await player.loadFile(path, finalPosition, effectiveHeaders);
+      // Auto-next dedupe anchor only after the load actually succeeded
+      // (a failed loadfile must not re-point the eof gate).
+      autoNext.markLoaded({ mediaType: 'local', mediaId: path });
       // QYP2-021: attach sidecar/imported subtitles (catalog items only).
       // sub-add before mpv's file-loaded event fails on 0.29, so wait for
       // it first; on timeout attempt once anyway (best-effort, per-track
@@ -351,15 +354,6 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         mediaContext?.episodeNumber,
         mediaContext?.mediaSourceId
       );
-      // Auto-next dedupe anchor: a freshly loaded media resets the eof
-      // gate (a stale pending countdown from the previous file must die).
-      autoNext.markLoaded({
-        mediaType,
-        mediaId,
-        seriesName: mediaContext?.seriesName ?? null,
-        seasonNumber: mediaContext?.seasonNumber ?? null,
-        episodeNumber: mediaContext?.episodeNumber ?? null,
-      });
       // Resume from last position (same rule as local: skip if nearly finished)
       const resumePosition = playbackStateManager!.getResumePosition(mediaType, mediaId);
       // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
@@ -368,6 +362,14 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
       await player.loadFile(path, finalPosition, effectiveHeaders);
+      // Auto-next anchor after successful load (same rule as local).
+      autoNext.markLoaded({
+        mediaType,
+        mediaId,
+        seriesName: mediaContext?.seriesName ?? null,
+        seasonNumber: mediaContext?.seasonNumber ?? null,
+        episodeNumber: mediaContext?.episodeNumber ?? null,
+      });
       // QYP2-021: WebDAV streams accept local subtitles too (plan §13);
       // same file-loaded gate as the local branch.
       if (!(await player.waitForFileLoaded(5000))) {
@@ -1414,6 +1416,10 @@ function registerCatalogHandlers(
       if (typeof entry !== 'object' || entry === null) continue;
       const item = entry as Record<string, unknown>;
       if (typeof item.itemId !== 'string' && typeof item.itemId !== 'number') continue;
+      for (const field of ['seasonNumber', 'episodeNumber'] as const) {
+        const value = item[field];
+        if (value !== null && value !== undefined && typeof value !== 'number') continue;
+      }
       clean.push(item as unknown as AutoNextEpisodeLike);
     }
     const next = pickNextEpisode(

@@ -11,7 +11,10 @@ import { useAutoNextStore } from '../stores/auto-next-store';
  * - 显示 5s 倒计时 + 取消按钮；
  * - 倒计时归零（main 推送 fire）→ 播放下一集（走既有 resolvePlayback +
  *   loadFile，顺序由 main 保证：保存 → 切 media → load）；
- * - 用户取消 / 页面卸载（provider 注销）→ main 取消，无事发生。
+ * - 用户取消 / provider 失效（离开剧集页）/ 收到新事件 → 复位。
+ *
+ * 竞态防护：provider 解析是异步的——resolve 期间到达的 fire/cancelled
+ * 会推进事件代数，迟到的 resolve 结果直接丢弃（overlay 不会复活）。
  */
 
 interface AutoNextEvent {
@@ -30,27 +33,39 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
   const provider = useAutoNextStore((s) => s.provider);
   const [visible, setVisible] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(5);
+  const [totalSeconds, setTotalSeconds] = useState(5);
   const [busy, setBusy] = useState(false);
   const nextRef = useRef<Parameters<typeof onPlayNext>[0] | null>(null);
+  /** 事件代数：每次新事件 +1；跨 await 的迟到结果按代数丢弃。 */
+  const epochRef = useRef(0);
+
+  const reset = useCallback((): void => {
+    setVisible(false);
+    nextRef.current = null;
+    setBusy(false);
+  }, []);
 
   const handleEvent = useCallback(
     async (event: AutoNextEvent): Promise<void> => {
+      const epoch = ++epochRef.current;
       if (event.type === 'countdown') {
         if (!provider || !event.media) return;
-        // 有没有下一集由「当前页面注册的 provider + main 纯函数」决定；
-        // 最后一集立即取消，不显示无效倒计时。
         const next = await provider({
           mediaType: event.media?.mediaType ?? '',
           mediaId: event.media?.mediaId ?? '',
           seasonNumber: event.media?.seasonNumber ?? null,
           episodeNumber: event.media?.episodeNumber ?? null,
         });
+        // 迟到结果：provider 等待期间来了新事件（fire/取消/换集）→ 丢弃。
+        if (epoch !== epochRef.current) return;
         if (!next) {
           void window.electronAPI.autoNextCancel('no-next-episode');
           return;
         }
         nextRef.current = { itemId: next.itemId, mediaSourceId: next.mediaSourceId ?? undefined, position: 0 };
         setSecondsLeft(event.seconds ?? 5);
+        setTotalSeconds(event.seconds ?? 5);
+        setBusy(false);
         setVisible(true);
         return;
       }
@@ -60,15 +75,18 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
         nextRef.current = null;
         if (!next) return;
         setBusy(true);
-        onPlayNext(next);
+        try {
+          onPlayNext(next);
+        } finally {
+          setBusy(false);
+        }
         return;
       }
       if (event.type === 'cancelled') {
-        setVisible(false);
-        nextRef.current = null;
+        reset();
       }
     },
-    [provider, onPlayNext]
+    [provider, onPlayNext, reset]
   );
 
   // Local 1s ticker for the visual countdown (main owns the real timer).
@@ -77,6 +95,15 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
     const timer = setInterval(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(timer);
   }, [visible]);
+
+  // provider 失效（离开剧集页）：倒计时还挂着就立即取消——main 侧
+  // 计时器与 overlay 一起消失（评审 REQUIRED：不能 fire 到已卸载的页面）。
+  useEffect(() => {
+    if (provider === null && visible) {
+      void window.electronAPI.autoNextCancel('user');
+      reset();
+    }
+  }, [provider, visible, reset]);
 
   useEffect(() => {
     const unsubscribe = window.electronAPI.onAutoNextEvent((payload) => {
@@ -91,8 +118,7 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
 
   const cancel = (): void => {
     void window.electronAPI.autoNextCancel('user');
-    setVisible(false);
-    nextRef.current = null;
+    reset();
   };
 
   return (
@@ -116,8 +142,11 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
           <X size={15} />
         </button>
       </div>
-      <div className="h-1 w-full bg-muted rounded-full overflow-hidden" role="progressbar" aria-valuenow={secondsLeft} aria-valuemax={5}>
-        <div className="h-full bg-primary transition-all duration-1000 ease-linear" style={{ width: `${(secondsLeft / 5) * 100}%` }} />
+      <div className="h-1 w-full bg-muted rounded-full overflow-hidden" role="progressbar" aria-valuenow={secondsLeft} aria-valuemax={totalSeconds}>
+        <div
+          className="h-full bg-primary transition-all duration-1000 ease-linear"
+          style={{ width: `${totalSeconds > 0 ? (secondsLeft / totalSeconds) * 100 : 0}%` }}
+        />
       </div>
       <button
         type="button"

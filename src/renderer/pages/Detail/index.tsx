@@ -275,12 +275,15 @@ export default function Detail() {
       setAutoNextProvider(null);
       return;
     }
-    setAutoNextProvider(async ({ seasonNumber, episodeNumber }) => {
+    setAutoNextProvider(async ({ mediaId, seasonNumber, episodeNumber }) => {
       try {
         const all = await window.electronAPI.getItems(details.Id, {
           includeItemTypes: 'Episode',
           recursive: true,
         }, serverId) as Episode[];
+        // EOF 的 media 必须属于本剧：A 剧详情页停留而 B 剧的集播完时，
+        // 这里返回 null → 取消倒计时（绝不跨剧误播）。
+        if (!all.some((ep) => ep.Id === mediaId)) return null;
         const inputs = all.map((ep) => ({
           itemId: ep.Id,
           seasonNumber: ep.ParentIndexNumber ?? null,

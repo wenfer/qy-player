@@ -59,6 +59,22 @@ export function pickNextEpisode(
   return candidates[0]?.entry ?? null;
 }
 
+/**
+ * 事件面（plan §12.3「手动停止/崩溃/退出不触发」的接线固化）：
+ * - 仅 eof 进入倒计时；
+ * - disconnect（mpv 关窗/被杀）与 crashed 立即取消 pending 倒计时——
+ *   mpv 都没了，5 秒后 fire 只会让 renderer 复活进程误播下一集；
+ * - 应用退出：will-quit 清理链销毁 player，disconnect 语义覆盖。
+ */
+export function wireAutoNext(
+  player: { on(event: string, listener: () => void): unknown },
+  controller: AutoNextController
+): void {
+  player.on('eof', () => controller.handleEof());
+  player.on('disconnect', () => controller.cancel('user'));
+  player.on('crashed', () => controller.cancel('user'));
+}
+
 export interface AutoNextOptions {
   countdownMs?: number;
   /** 设置开关（app_config playback.autoNext）；每秒可变，读取实时。 */
@@ -91,23 +107,28 @@ export class AutoNextController {
     };
   }
 
-  /** loadfile 后调用：新 media 重置去重锚点（也清掉残留的 pending）。 */
+  private currentMedia: AutoNextMediaSnapshot | null = null;
+
+  /**
+   * loadfile 成功后调用：新 media 重置去重锚点。倒计时中手动换集时
+   * 广播 cancelled——全局 overlay 必须跟着消失（不能停在 0 秒）。
+   */
   markLoaded(media: AutoNextMediaSnapshot): void {
+    const hadPending = this.timerHandle !== null;
     this.clearPending();
+    this.pendingMediaId = null;
     if (media && typeof media.mediaId === 'string') {
-      this.pendingMediaId = null;
-      this.currentMediaId = media.mediaId;
       this.currentMedia = media;
     }
+    if (hadPending) {
+      this.options.broadcast({ type: 'cancelled', reason: 'user' });
+    }
   }
-
-  private currentMediaId: string | null = null;
-  private currentMedia: AutoNextMediaSnapshot | null = null;
 
   /** 自然 EOF。只有「当前 media 是剧集单集」才可能进入倒计时。 */
   handleEof(): void {
     const media = this.currentMedia;
-    if (!media || media.mediaId !== this.currentMediaId) return;
+    if (!media) return;
     if (media.seasonNumber == null || media.episodeNumber == null || !media.seriesName) {
       this.options.broadcast({ type: 'ignored', reason: 'not-episode' });
       return;

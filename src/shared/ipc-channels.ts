@@ -92,6 +92,7 @@ export const IPC_CHANNELS = {
     NEXT: 'resume:next',
   },
   AUTO_NEXT: {
+    EVENT: 'auto-next:event',
     CANCEL: 'auto-next:cancel',
     GET_ENABLED: 'auto-next:get-enabled',
     SET_ENABLED: 'auto-next:set-enabled',

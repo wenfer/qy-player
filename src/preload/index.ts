@@ -138,7 +138,7 @@ const electronAPI = {
   // Auto-next (QYP2-035): push events + cancel.
   onAutoNextEvent: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, payload: unknown) => callback(payload);
-    ipcRenderer.on('auto-next:event', handler);
+    ipcRenderer.on(IPC_CHANNELS.AUTO_NEXT.EVENT, handler);
     return () => ipcRenderer.removeListener('auto-next:event', handler);
   },
   autoNextCancel: (reason?: 'user' | 'no-next-episode') =>

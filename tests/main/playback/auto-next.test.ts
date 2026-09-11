@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'events';
 import {
   AutoNextController,
   pickNextEpisode,
+  wireAutoNext,
   type AutoNextEpisodeLike,
   type AutoNextEvent,
 } from '../../../src/main/modules/playback-state/auto-next';
@@ -161,6 +163,99 @@ describe('AutoNextController (§12.3)', () => {
     const { controller, events } = makeController();
     controller.handleEof();
     expect(events).toEqual([]);
+  });
+
+  it('new loadfile during a pending countdown REPLACES it and broadcasts cancelled', () => {
+    const { controller, events, fireTimers } = makeController();
+    controller.markLoaded(EPISODE_MEDIA);
+    controller.handleEof();
+    const next = { ...EPISODE_MEDIA, mediaId: 'ep-3', episodeNumber: 3 };
+    controller.markLoaded(next);
+    fireTimers();
+    expect(events.filter((e) => e.type === 'fire')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'cancelled')).toHaveLength(1); // overlay must hide
+    // 新集的 EOF 再次正常工作
+    controller.handleEof();
+    expect(events.filter((e) => e.type === 'countdown')).toHaveLength(2);
+  });
+
+  it('markLoaded for a non-episode while pending also broadcasts cancelled', () => {
+    const { controller, events } = makeController();
+    controller.markLoaded(EPISODE_MEDIA);
+    controller.handleEof();
+    controller.markLoaded({ mediaType: 'local', mediaId: '/movies/x.mkv' });
+    expect(events.filter((e) => e.type === 'cancelled')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plan §12.3 强制回归：time-pos null 与退出/断开竞态
+// ---------------------------------------------------------------------------
+
+describe('auto-next wiring regressions (§12.3 强制项)', () => {
+  it('REGRESSION: the final progress save always precedes the countdown (EventEmitter order)', () => {
+    // 复刻 main 侧真实注册顺序：playback-state 的 eof 保存先注册，
+    // wireAutoNext 后注册 → 保存必然在倒计时广播之前执行。
+    const player = new EventEmitter();
+    const calls: string[] = [];
+    const timers: Array<() => void> = [];
+    player.on('eof', () => calls.push('save-progress'));
+    const controller = new AutoNextController({
+      isEnabled: () => true,
+      broadcast: (event) => {
+        void event;
+        calls.push('countdown');
+      },
+      setTimer: (fn) => {
+        timers.push(fn);
+        return timers.length;
+      },
+      clearTimer: () => undefined,
+    });
+    wireAutoNext(player, controller);
+    controller.markLoaded(EPISODE_MEDIA);
+    player.emit('eof');
+    expect(calls).toEqual(['save-progress', 'countdown']);
+  });
+
+  it('REGRESSION: disconnect (mpv 关窗/被杀) during countdown cancels — no fire, no resurrect', () => {
+    const player = new EventEmitter();
+    const { controller, events, fireTimers } = makeController();
+    wireAutoNext(player, controller);
+    controller.markLoaded(EPISODE_MEDIA);
+    player.emit('eof');
+    expect(events.filter((e) => e.type === 'countdown')).toHaveLength(1);
+    // 用户在倒计时中关掉 mpv 窗口 / mpv 被杀
+    player.emit('disconnect');
+    fireTimers();
+    expect(events.filter((e) => e.type === 'fire')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'cancelled' && e.reason === 'user')).toHaveLength(1);
+  });
+
+  it('REGRESSION: crashed (mpv 崩溃/退出) during countdown cancels — no fire', () => {
+    const player = new EventEmitter();
+    const { controller, events, fireTimers } = makeController();
+    wireAutoNext(player, controller);
+    controller.markLoaded(EPISODE_MEDIA);
+    player.emit('eof');
+    player.emit('crashed');
+    fireTimers();
+    expect(events.filter((e) => e.type === 'fire')).toHaveLength(0);
+    expect(events.filter((e) => e.type === 'cancelled')).toHaveLength(1);
+  });
+
+  it('REGRESSION: time-pos null at EOF — the countdown media snapshot comes from loadfile context, never from time-pos', () => {
+    // AGENTS 硬约束 4：mpv 卸载文件补发 time-pos null 必须保最后真实值。
+    // auto-next 的 media 快照来自 loadfile 时的 mediaContext（不消费
+    // time-pos），null 无法污染它；重复 markLoaded 同一 media 也不串。
+    const { controller, events } = makeController();
+    controller.markLoaded(EPISODE_MEDIA);
+    controller.markLoaded(EPISODE_MEDIA); // duplicate mark, same media
+    controller.handleEof();
+    const countdown = events.find((e) => e.type === 'countdown') as { media: typeof EPISODE_MEDIA };
+    expect(countdown.media.mediaId).toBe(EPISODE_MEDIA.mediaId);
+    expect(countdown.media.seasonNumber).toBe(1);
+    expect(countdown.media.episodeNumber).toBe(2);
   });
 
   it('new loadfile during a pending countdown replaces it (无进度串集)', () => {

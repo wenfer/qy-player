@@ -114,24 +114,6 @@ export class PlaybackStateManager {
     this.currentMediaSourceId = mediaSourceId ?? null;
   }
 
-  /** Snapshot for the auto-next controller (QYP2-035); null when idle. */
-  getMediaContextSnapshot(): {
-    mediaType: string;
-    mediaId: string;
-    seriesName?: string | null;
-    seasonNumber?: number | null;
-    episodeNumber?: number | null;
-  } | null {
-    if (!this.currentMediaType || !this.currentMediaId) return null;
-    return {
-      mediaType: this.currentMediaType,
-      mediaId: this.currentMediaId,
-      seriesName: this.currentSeriesName,
-      seasonNumber: this.currentSeasonNumber,
-      episodeNumber: this.currentEpisodeNumber,
-    };
-  }
-
   clearCurrentMedia(): void {
     this.currentMediaType = null;
     this.currentMediaId = null;
