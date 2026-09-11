@@ -729,7 +729,13 @@ Evidence:
 - [ ] **目标：** 主按钮使用主进程 ResumeResolver；单集卡显示进度并可从头播放。
 - [ ] **验收：** 文案准确显示继续/下一集/第一集/重新播放；目标集自身 id/title/season/episode/source id 全部传递；focus/eof 后静默刷新。
 - [ ] **验证：** renderer 测试；Jellyfin/Emby/local/WebDAV 各手工一组。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① 接线必需越界文件——`ipc-channels.ts`（RESUME.SERIES）、`main/ipc/index.ts`（handler：形状校验→纯函数，无状态）、`preload`、`shared/types/playback.ts`（itemId 放宽 number|string，在线条目 id 为字符串）；② Detail/index.tsx 为在线（Jellyfin/Emby）详情页，本地/WebDAV 目录详情在 LibraryBrowse（沿用惯例）：**
+  - 提交：7a069a7（实现）+ 评审修复提交。
+  - UI：SeriesResumeButton（四态文案「继续播放 S01E02 · 23:18 / 播放下一集 / 播放第一集 / 重新播放」+ 两段式重播确认；focus 静默刷新不闪烁）+ EpisodeGrid（服务器 UserData 进度条/已看完徽标/从头播放显式 0 起播不清历史）。
+  - 关键修复（评审 CRITICAL）：LOAD_FILE 处理器原先 `startPosition > 0` 才生效——显式 0 被判未提供而回退旧进度，从头播放/下一集/重播全部中招；现区分「显式 0」与「未指定」（local/online 两分支）。REQUIRED：看完阈值复用 RESUME_FINISHED_RATIO（renderer 零算法复制）。
+  - 测试：series-resume 11 例（四态文案、确认两段式、focus 重解析、进度比例、看完徽标、从头播放）。共 567 tests/44 files 全绿。
+  - 门禁：typecheck 0 错误、git diff --check 干净。
+  - 人工验证清单追加：Jellyfin/Emby/local/WebDAV 四类各一组手工（剧集续播文案、从头播放、进度上报后按钮变化）。
 
 ### QYP2-035 实现可取消自动下一集
 
