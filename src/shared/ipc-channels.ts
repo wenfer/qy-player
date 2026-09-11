@@ -15,6 +15,11 @@ export const IPC_CHANNELS = {
     CLEAR_HISTORY: 'library:clear-history',
     DELETE_HISTORY: 'library:delete-history',
   },
+  UNIFIED: {
+    CONTINUE_WATCHING: 'unified:continue-watching',
+    RECENT: 'unified:recent',
+    SEARCH: 'unified:search',
+  },
   ONLINE: {
     GET_LIBRARIES: 'online:get-libraries',
     GET_ITEMS: 'online:get-items',

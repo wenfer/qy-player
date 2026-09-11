@@ -135,6 +135,12 @@ const electronAPI = {
   deletePluginSecret: (pluginId: string, key: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
   testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
+  // Unified cross-source queries (QYP2-036)
+  unifiedContinueWatching: (limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.UNIFIED.CONTINUE_WATCHING, limit),
+  unifiedRecent: (limit?: number) => ipcRenderer.invoke(IPC_CHANNELS.UNIFIED.RECENT, limit),
+  unifiedSearch: (query: string, page?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.UNIFIED.SEARCH, query, page),
   // Auto-next (QYP2-035): push events + cancel.
   onAutoNextEvent: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, payload: unknown) => callback(payload);

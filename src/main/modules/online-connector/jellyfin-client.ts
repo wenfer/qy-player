@@ -39,6 +39,9 @@ export interface JellyfinItem {
     Type?: string;
   }>;
   RunTimeTicks?: number;
+  /** Server watch state (§12.1: server UserData preferred). */
+  UserData?: { PlaybackPositionTicks?: number; Played?: boolean; LastPlayedDate?: string };
+  DateCreated?: string;
 }
 
 export class JellyfinClient {

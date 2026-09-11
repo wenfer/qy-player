@@ -8,6 +8,47 @@ import { useToastStore } from '../../stores/toast-store';
 import { getServerMap, buildImageUrl } from '../../utils/server-images';
 import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
+import type { UnifiedCard } from '../../../main/modules/catalog/unified-query';
+import type { MediaRef } from '../../../shared/types/catalog';
+
+/**
+ * QYP2-036: 统一卡片 → MediaItem 适配。catalog 卡走 /browse 路由 +
+ * catalogRef 播放（use-play-item 已支持）；在线卡保持原 /detail 路由。
+ * 海报只按来源拼 URL；目录卡暂无 tag → 占位（不臆造 URL）。
+ */
+function unifiedToMediaItem(card: UnifiedCard, serverMap: ReturnType<typeof getServerMap> extends Promise<infer M> ? M : never): MediaItem {
+  const isCatalog = card.ref.provider === 'catalog';
+  const provider = card.ref.provider;
+  const serverId =
+    card.ref.provider === 'catalog' ? card.ref.sourceId : card.ref.serverId;
+  const imageUrl =
+    !isCatalog && card.poster?.tag
+      ? buildImageUrl(serverMap, serverId, provider, card.ref.itemId, 'Primary', card.poster.tag)
+      : undefined;
+  return {
+    id: String(card.ref.itemId),
+    name: card.title,
+    imageUrl,
+    year: card.year,
+    rating: card.rating,
+    type: isCatalog ? 'Movie' : card.kind === 'series' ? 'Series' : card.kind === 'episode' ? 'Episode' : 'Movie',
+    serverId,
+    serverType: isCatalog ? 'local' : provider,
+    catalogRef: card.ref,
+    ...(card.position != null && card.duration
+      ? { catalogProgress: { position: card.position, duration: card.duration, isFinished: card.isFinished ?? false } }
+      : {}),
+    dateCreated: card.updatedAt ? new Date(card.updatedAt).toISOString() : undefined,
+  };
+}
+
+function navigateForRef(navigate: (path: string) => void, ref: MediaRef): void {
+  if (ref.provider === 'catalog') {
+    navigate(`/browse/${ref.sourceId}/item/${ref.itemId}`);
+  } else {
+    navigate(`/detail/${ref.provider}/${ref.serverId}/${ref.itemId}`);
+  }
+}
 
 interface ServerInfo {
   id: number;
@@ -121,35 +162,27 @@ export default function Home() {
         return;
       }
 
-      // Continue watching
+      // 统一继续观看（QYP2-036）：目录 + 在线合并、MediaRef 去重、
+      // 来源局部失败不阻塞（隔离在 main 侧 isolateSource）。
       let cwItems: MediaItem[] = [];
+      let recentItems: MediaItem[] = [];
       try {
-        const cw = await window.electronAPI.getContinueWatching();
-        cwItems = (cw as Array<Record<string, unknown>>).map((item) => {
-          const userData = item.UserData as Record<string, number> | undefined;
-          const imageTags = item.ImageTags as Record<string, string> | undefined;
-          const serverType = (item.serverType as string) || 'jellyfin';
-          return {
-            id: item.Id as string,
-            name: (item.Name as string) || '未知',
-            imageUrl: buildImageUrl(
-              serverMap,
-              item.serverId as number,
-              serverType,
-              item.Id as string,
-              'Primary',
-              imageTags?.Primary
-            ),
-            type: item.Type as string,
-            progress: userData?.PlaybackPositionTicks
-              ? userData.PlaybackPositionTicks / ((item.RunTimeTicks as number) || 1)
-              : 0,
-            serverId: item.serverId as number,
-            serverType,
-          };
-        });
+        const cw = (await window.electronAPI.unifiedContinueWatching(40)) as {
+          ok: boolean;
+          data?: UnifiedCard[];
+        };
+        cwItems = cw.ok ? (cw.data ?? []).map((card) => unifiedToMediaItem(card, serverMap)) : [];
       } catch {
-        // Continue watching is optional
+        // 继续观看可选，失败不阻塞首页
+      }
+      try {
+        const recent = (await window.electronAPI.unifiedRecent(24)) as {
+          ok: boolean;
+          data?: UnifiedCard[];
+        };
+        recentItems = recent.ok ? (recent.data ?? []).map((card) => unifiedToMediaItem(card, serverMap)) : [];
+      } catch {
+        // 最近添加可选
       }
 
       // Libraries - one row per media library view (matches server categorization)
@@ -233,22 +266,10 @@ export default function Home() {
         setLibraryErrors(errors);
       }
 
-      // Cross-library "recently added": merge, dedupe by id, newest first
-      const seen = new Set<string>();
-      const added = rows
-        .flatMap((r) => r.items)
-        .filter((it) => {
-          if (seen.has(it.id) || !it.dateCreated) return false;
-          seen.add(it.id);
-          return true;
-        })
-        .sort((a, b) => (b.dateCreated || '').localeCompare(a.dateCreated || ''))
-        .slice(0, 12);
-
       // Replace state in one pass (never append - fixes duplicate keys)
       setContinueWatching(cwItems);
       setLibraryRows(rows);
-      setRecentlyAdded(added);
+      setRecentlyAdded(recentItems);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '未知错误';
       setError(msg);
@@ -285,9 +306,16 @@ export default function Home() {
     };
   }, [loadData]);
 
-  const handleItemClick = useCallback((item: MediaItem) => {
-    navigate(`/detail/${item.serverType}/${item.serverId}/${item.id}`);
-  }, [navigate]);
+  const handleItemClick = useCallback(
+    (item: MediaItem) => {
+      if (item.catalogRef) {
+        navigateForRef(navigate, item.catalogRef);
+      } else {
+        navigate(`/detail/${item.serverType}/${item.serverId}/${item.id}`);
+      }
+    },
+    [navigate]
+  );
 
   const handleItemPlay = usePlayItem();
 

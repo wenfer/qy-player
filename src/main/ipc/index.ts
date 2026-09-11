@@ -93,6 +93,10 @@ import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
+import {
+  createUnifiedQueryService,
+  type OnlineContinueInput,
+} from '../modules/catalog/unified-query';
 import { AutoNextController, pickNextEpisode, wireAutoNext } from '../modules/playback-state/auto-next';
 import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
@@ -276,6 +280,99 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.CANCEL, (_event, reason: unknown) => {
     autoNext.cancel(reason === 'no-next-episode' ? 'no-next-episode' : 'user');
     return ok({ cancelled: true });
+  });
+
+  // ---- Unified cross-source queries (QYP2-036, plan §11/§16.4) ----
+  const unified = createUnifiedQueryService({
+    db,
+    onlineContinueWatching: async () => {
+      const rows: OnlineContinueInput[] = [];
+      for (const { config, client } of getActiveServerClients(storage, secretStore)) {
+        const items = await client.getContinueWatching();
+        for (const item of items) {
+          rows.push({
+            provider: config.type as 'jellyfin' | 'emby',
+            serverId: config.id,
+            itemId: item.Id,
+            title: item.Name,
+            kind: item.Type,
+            year: item.ProductionYear,
+            rating: item.CommunityRating,
+            positionTicks: item.UserData?.PlaybackPositionTicks,
+            runtimeTicks: item.RunTimeTicks,
+            primaryTag: item.ImageTags?.Primary,
+            updatedAt: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) || 0 : 0,
+          });
+        }
+      }
+      return rows;
+    },
+    onlineSearch: async (query: string) => {
+      const rows: OnlineContinueInput[] = [];
+      for (const { config, client } of getActiveServerClients(storage, secretStore)) {
+        const items = await client.getItems(undefined, {
+          searchTerm: query,
+          includeItemTypes: 'Movie,Series,Episode',
+          recursive: true,
+          limit: 100,
+        });
+        for (const item of items) {
+          rows.push({
+            provider: config.type as 'jellyfin' | 'emby',
+            serverId: config.id,
+            itemId: item.Id,
+            title: item.Name,
+            kind: item.Type,
+            year: item.ProductionYear,
+            rating: item.CommunityRating,
+            primaryTag: item.ImageTags?.Primary,
+          });
+        }
+      }
+      return rows;
+    },
+    onlineRecent: async () => {
+      const rows: OnlineContinueInput[] = [];
+      for (const { config, client } of getActiveServerClients(storage, secretStore)) {
+        const items = await client.getItems(undefined, {
+          sortBy: 'DateCreated',
+          sortOrder: 'Descending',
+          includeItemTypes: 'Movie,Series',
+          recursive: true,
+          limit: 50,
+        });
+        for (const item of items) {
+          rows.push({
+            provider: config.type as 'jellyfin' | 'emby',
+            serverId: config.id,
+            itemId: item.Id,
+            title: item.Name,
+            kind: item.Type,
+            year: item.ProductionYear,
+            rating: item.CommunityRating,
+            primaryTag: item.ImageTags?.Primary,
+            updatedAt: item.DateCreated ? Date.parse(item.DateCreated) || 0 : 0,
+          });
+        }
+      }
+      return rows;
+    },
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNIFIED.CONTINUE_WATCHING, async (_event, limit: unknown) => {
+    const clean = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 40;
+    return ok(await unified.continueWatching(clean));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNIFIED.RECENT, async (_event, limit: unknown) => {
+    const clean = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 24;
+    return ok(await unified.recent(clean));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNIFIED.SEARCH, async (_event, query: unknown, page: unknown) => {
+    if (typeof query !== 'string') return err('VALIDATION_FAILED', '搜索词不合法');
+    const clean = typeof page === 'number' && page >= 1 ? Math.floor(page) : 1;
+    return ok(await unified.search(query, clean));
   });
   // §12.3: 可在设置中关闭（app_config playback.autoNext，默认开）。
   ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.GET_ENABLED, () => {
