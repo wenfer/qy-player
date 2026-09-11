@@ -35,6 +35,8 @@ export interface ResumeTarget {
   reason: ResumeReason;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
+  /** 目标单集标题（§12.2：按钮文案「继续播放 S01E05 · 23:18」直接可用）。 */
+  title?: string | null;
 }
 
 /** 剧集续播解析的输入：该系列下全部单集（季/集号与各自进度）。 */
@@ -43,4 +45,6 @@ export interface ResumeEpisodeInput {
   seasonNumber?: number | null;
   episodeNumber?: number | null;
   progress?: ResumeProgress | null;
+  /** 单集标题（透传到 ResumeTarget，§12.2 按钮文案用）。 */
+  title?: string | null;
 }

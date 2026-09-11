@@ -121,6 +121,9 @@ export function resolveSeriesResume(episodes: ResumeEpisodeInput[]): ResumeTarge
   }
 
   // 规则 2：已完成且存在下一集 → 下一集从 0。
+  // 取舍（固化）：next 取排序后继，即使后继已有看完历史（重看场景
+  // 从被看完集的下一集重播）——§12.2 字面行为，不做「跳过已看完」
+  // 的智能跳跃；重看意愿以 UI「从头播放」显式表达。
   const lastKey = episodeOrderKey(last);
   const next = sorted.find((entry) => {
     const key = episodeOrderKey(entry);
@@ -145,5 +148,6 @@ function toTarget(
     reason,
     seasonNumber: episode.seasonNumber ?? null,
     episodeNumber: episode.episodeNumber ?? null,
+    ...(episode.title != null ? { title: episode.title } : {}),
   };
 }
