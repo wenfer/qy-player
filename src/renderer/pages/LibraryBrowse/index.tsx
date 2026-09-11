@@ -24,6 +24,7 @@ interface RawItem {
 import type { PlaybackResolution } from '../../../shared/types/catalog';
 import SubtitleManager from '../Detail/SubtitleManager';
 import MetadataEditor from '../Detail/MetadataEditor';
+import MediaActions from '../Detail/MediaActions';
 
 interface ResolvedPlayback {
   ok: boolean;
@@ -115,6 +116,18 @@ function CatalogItemDetailView({
       setLoading(false);
     }
   }, [sourceId, itemId]);
+
+  const handleDeleted = useCallback(
+    (outcome: { status: string; itemId: number }) => {
+      if (outcome.status === 'unknown') {
+        load(); // item may still exist; re-probe
+        return;
+      }
+      // Definite deletion: leave the detail view (the item is gone).
+      onBack();
+    },
+    [load, onBack]
+  );
 
   useEffect(() => {
     load();
@@ -269,6 +282,14 @@ function CatalogItemDetailView({
           load();
         }}
       />
+
+      {(item.kind === 'movie' || item.kind === 'series' || item.kind === 'video') && (
+        <MediaActions
+          sourceId={sourceId}
+          itemId={Number(item.ref.itemId)}
+          onDeleted={handleDeleted}
+        />
+      )}
 
       {/* QYP2-021: sidecar + imported subtitles, one list; playback
           injection happens main-side after loadFile. Containers (series/
