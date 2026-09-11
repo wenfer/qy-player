@@ -151,14 +151,17 @@ describe('ScrapeCache', () => {
     expect(cache.get('tmdb', 'search', 'k')).toBeUndefined();
   });
 
-  it('evicts LRU beyond the quota', () => {
+  it('evicts LRU beyond the quota', async () => {
     const cache = new ScrapeCache({ dir, maxEntries: 3 });
     for (let i = 0; i < 5; i += 1) {
       cache.set('tmdb', 'search', `k${i}`, i);
+      // Real-time spacing gives each write a distinct mtime (LRU order).
+      await new Promise((resolve) => setTimeout(resolve, 5));
     }
     expect(cache.size).toBe(3);
     // Oldest keys evicted.
     expect(cache.get('tmdb', 'search', 'k0')).toBeUndefined();
+    expect(cache.get('tmdb', 'search', 'k1')).toBeUndefined();
     expect(cache.get('tmdb', 'search', 'k4')).toBeDefined();
   });
 
@@ -244,14 +247,12 @@ describe('ScrapeJobService (§11.2)', () => {
     const { jobId } = await service.startJob('tmdb', [1]);
     await vi.waitFor(() => expect(service.getJob(jobId)?.status === 'completed').toBe(true));
     const record = service.getJob(jobId);
-    if (record?.items[0].status !== 'applied') throw new Error(`detail: ${JSON.stringify(record?.items[0])}`);
+    expect(record?.items[0].status).toBe('applied');
     // Manual-locked title untouched; unlocked new fields applied.
     const titleRows = deps.repo.listMetadataSources(1).filter((r) => r.field === 'title');
-    console.log('ROWS:', JSON.stringify(deps.repo.listMetadataSources(1)), JSON.stringify(record?.items[0]));
     expect(titleRows.some((r) => r.provider === 'scraper')).toBe(false);
     expect(titleRows.find((r) => r.provider === 'manual')?.value).toContain('锁定标题');
     const plotRows = deps.repo.listMetadataSources(1).filter((r) => r.field === 'plot' && r.provider === 'scraper');
-    console.log('ROWS:', JSON.stringify(deps.repo.listMetadataSources(1), null, 0), JSON.stringify(record?.items[0]));
     expect(plotRows).toHaveLength(1);
   });
 

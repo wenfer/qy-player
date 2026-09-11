@@ -86,11 +86,21 @@ export class ScrapeJobService {
     this.deps = deps;
     this.cache = new ScrapeCache({ dir: deps.cacheDir });
     // Recovery: any job left 'running' by a crash/exit is marked interrupted
-    // (its applied items persist; resumeJob continues the rest).
-    for (const [key, raw] of Object.entries(this.allJobRecords())) {
+    // (its applied items persist; resumeJob continues the rest). Terminal
+    // jobs are pruned beyond the newest 20 so the KV cannot grow forever.
+    const all = this.allJobRecords();
+    for (const [key, raw] of Object.entries(all)) {
       if (raw.status === 'running') {
         this.saveJob(key, { ...raw, status: 'interrupted' });
       }
+    }
+    const terminal = Object.entries(all)
+      .filter(([, raw]) => raw.status !== 'running')
+      .sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+    for (const [key] of terminal.slice(20)) {
+      const current = this.allJobRecords();
+      delete current[key];
+      this.deps.kv.set(JOB_KEY, JSON.stringify(current));
     }
   }
 
@@ -125,6 +135,11 @@ export class ScrapeJobService {
   async startJob(pluginId: string, itemIds: number[], jobId?: string): Promise<{ jobId: string }> {
     const id = jobId ?? `scrape-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const existing = jobId ? this.allJobRecords()[jobId] : undefined;
+    if (existing?.status === 'running') {
+      // Re-entry guard: a second queue over the same job would double-fetch
+      // and overwrite state (review #3). The caller polls instead.
+      throw new Error('任务正在运行中，请等待完成或取消后再试');
+    }
     const done = existing ? existing.items : [];
     const doneIds = new Set(done.map((entry) => entry.itemId));
     const pending = itemIds.filter((id2) => !doneIds.has(id2));
@@ -138,7 +153,13 @@ export class ScrapeJobService {
       pending,
       pluginId,
     });
-    void this.runQueue(id, pluginId, pending);
+    // The queue never rejects (per-item isolation above); belt-and-braces.
+    this.runQueue(id, pluginId, pending).catch(() => {
+      const record = this.allJobRecords()[id];
+      if (record?.status === 'running') {
+        this.saveJob(id, { ...record, status: 'failed' });
+      }
+    });
     return { jobId: id };
   }
 
@@ -155,7 +176,18 @@ export class ScrapeJobService {
             index += 1;
             if (current >= pending.length) return;
             const itemId = pending[current];
-            const result = await this.scrapeItem(pluginId, itemId);
+            // Repo/cache层异常也要落到 failed 记录——绝不卡死 job 或产生
+            // unhandled rejection（plan §11.2: 失败不得覆盖已有值）。
+            let result: ScrapeItemResult;
+            try {
+              result = await this.scrapeItem(pluginId, itemId);
+            } catch (err) {
+              result = {
+                itemId,
+                status: 'failed',
+                message: err instanceof Error ? err.message.slice(0, 200) : '刮削失败',
+              };
+            }
             const record = this.allJobRecords()[jobId];
             if (!record) return;
             record.items.push(result);
@@ -248,7 +280,16 @@ export class ScrapeJobService {
     if (problems.length > 0) {
       return { itemId, status: 'failed', message: `插件输出不合法：${problems[0]}` };
     }
-    const store = storeFromRows(this.deps.repo.listMetadataSources(itemId));
+    let store: ProviderStore;
+    try {
+      store = storeFromRows(this.deps.repo.listMetadataSources(itemId));
+    } catch (err) {
+      return {
+        itemId,
+        status: 'failed',
+        message: `元数据读取失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}`,
+      };
+    }
     // Provider 'scraper': applyProviderFields skips manual-locked winners,
     // so a failed scrape or a locked field can never overwrite existing values.
     const fields: Record<string, MetadataValue | undefined> = {
@@ -283,12 +324,20 @@ export class ScrapeJobService {
         message: `元数据合并失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}`,
       };
     }
-    for (const field of outcome.changedFields) {
-      const slots = outcome.store[field];
-      const scraper = slots?.scraper;
-      if (scraper) {
-        this.deps.repo.upsertMetadataSource(itemId, field, 'scraper', scraper.value);
+    try {
+      for (const field of outcome.changedFields) {
+        const slots = outcome.store[field];
+        const scraper = slots?.scraper;
+        if (scraper) {
+          this.deps.repo.upsertMetadataSource(itemId, field, 'scraper', scraper.value);
+        }
       }
+    } catch (err) {
+      return {
+        itemId,
+        status: 'failed',
+        message: `元数据写入失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}（已应用字段可能不完整）`,
+      };
     }
     return { itemId, status: 'applied', message: `已应用 ${outcome.changedFields.length} 个字段` };
   }

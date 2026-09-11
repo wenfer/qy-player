@@ -220,11 +220,12 @@ export function validateMetadataPayload(payload: unknown): string[] {
   const numberFields = ['year', 'runtime', 'rating', 'season', 'episode'];
   for (const field of numberFields) {
     const value = p[field];
-    if (value !== undefined && typeof value !== 'number') {
-      problems.push(`${field} 必须是数字`);
+    // Number.isFinite rejects NaN/±Infinity which pass typeof 'number'.
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+      problems.push(`${field} 必须是有限数字`);
     }
   }
-  if (p.rating !== undefined && (typeof p.rating !== 'number' || p.rating < 0 || p.rating > 10)) {
+  if (p.rating !== undefined && (typeof p.rating !== 'number' || !Number.isFinite(p.rating) || p.rating < 0 || p.rating > 10)) {
     problems.push('rating 必须在 0–10 之间');
   }
   for (const field of ['genres', 'studios', 'countries', 'directors', 'thumbs']) {

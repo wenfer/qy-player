@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -7,8 +7,9 @@ import { join } from 'path';
  * 插件响应的有界磁盘缓存; §16.4: 缓存必须有配额和 LRU/过期策略).
  *
  * Entries are JSON files named by content-addressed keys
- * (<sha1(pluginId + kind + key)>.json) with embedded expiry. LRU tracking
- * uses file mtime; the quota evicts the oldest files beyond the cap.
+ * (<sha1(pluginId + kind + key)>.json) with embedded expiry. Eviction is
+ * LRU by file mtime: reads refresh the mtime, the quota evicts the least
+ * recently touched entries, and already-expired entries are dropped first.
  * Plugin secrets never enter cache keys (callers hash opaque keys).
  */
 
@@ -59,14 +60,6 @@ export class ScrapeCache {
         rmSync(path, { force: true });
         return undefined;
       }
-      // Touch for LRU (best-effort; failure is harmless).
-      const future = this.now() + 60_000;
-      try {
-        writeFileSync(path, JSON.stringify(envelope), { flag: 'w' });
-        void future;
-      } catch {
-        // mtime touch skipped
-      }
       return envelope.value as T;
     } catch {
       // Corrupt entry: drop it.
@@ -106,25 +99,36 @@ export class ScrapeCache {
     return readdirSync(this.dir).filter((f) => f.endsWith('.json')).length;
   }
 
-  /** LRU-ish eviction by insertion time (deterministic across same-ms writes). */
+  /** True LRU: mtime is the last-access time (reads refresh it). Expired
+   * entries are evicted first, then the least recently touched beyond the
+   * quota. */
   private evictBeyondQuota(): void {
     if (!existsSync(this.dir)) return;
-    const files = readdirSync(this.dir)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => {
-        const path = join(this.dir, f);
+    const now = this.now();
+    const files: Array<{ path: string; mtime: number; expired: boolean }> = [];
+    for (const f of readdirSync(this.dir)) {
+      if (!f.endsWith('.json')) continue;
+      const path = join(this.dir, f);
+      try {
+        const stat = statSync(path);
+        let expired = false;
         try {
-          const envelope = JSON.parse(readFileSync(path, 'utf8')) as { createdAt?: number };
-          return { path, createdAt: envelope.createdAt ?? 0 };
+          const envelope = JSON.parse(readFileSync(path, 'utf8')) as { expiresAt?: number };
+          expired = (envelope.expiresAt ?? Number.MAX_SAFE_INTEGER) <= now;
         } catch {
-          return { path, createdAt: 0 };
+          expired = true; // corrupt entry: first out
         }
-      })
-      .sort((a, b) => a.createdAt - b.createdAt);
-    while (files.length > this.maxEntries) {
-      const oldest = files.shift();
-      if (!oldest) break;
-      rmSync(oldest.path, { force: true });
+        files.push({ path, mtime: stat.mtimeMs, expired });
+      } catch {
+        // raced with a concurrent removal
+      }
+    }
+    files.sort((a, b) => Number(b.expired) - Number(a.expired) || a.mtime - b.mtime);
+    let over = files.length - this.maxEntries;
+    for (const entry of files) {
+      if (over <= 0) break;
+      rmSync(entry.path, { force: true });
+      over -= 1;
     }
   }
 }
