@@ -625,7 +625,7 @@ Evidence:
 
 ### QYP2-029 开发 TMDB 内置插件
 
-- [ ] **依赖：** QYP2-027、QYP2-028
+- [x] **依赖：** QYP2-027、QYP2-028
 - [ ] **Read first：** 本文第 11.3 节、TMDB 官方 API 文档（实现时记录版本/URL）
 - [ ] **允许修改：** `src/main/plugins/tmdb/index.ts`、`src/main/plugins/tmdb/client.ts`、`src/main/plugins/tmdb/mapper.ts`、`tests/main/plugins/tmdb.test.ts`
 - [ ] **目标：** 搜索/详情/季集/演职员/external id/图片映射，zh-CN→en-US 回退。
@@ -641,7 +641,7 @@ Evidence:
 
 ### QYP2-030 完成豆瓣数据入口与发布门禁
 
-- [ ] **依赖：** QYP2-026
+- [x] **依赖：** QYP2-026
 - [ ] **Read first：** 本文第 11.4 节、项目发布流程
 - [ ] **允许修改：** `docs/decisions/0006-douban-provider.md`、`src/main/plugins/douban/types.ts`、`tests/fixtures/douban/`、`tests/main/plugins/douban-contract.test.ts`
 - [ ] **目标：** 先确认合法数据入口、条款、授权、限流和字段范围；不满足则保持不可启用。
@@ -657,7 +657,7 @@ Evidence:
 
 ### QYP2-031 开发豆瓣插件安全降级
 
-- [ ] **依赖：** QYP2-028、QYP2-030
+- [x] **依赖：** QYP2-028、QYP2-030
 - [ ] **Read first：** 豆瓣 ADR、本文第 11.4 节
 - [ ] **允许修改：** `src/main/plugins/douban/index.ts`、`src/main/plugins/douban/client.ts`、`src/main/plugins/douban/mapper.ts`、`tests/main/plugins/douban.test.ts`
 - [ ] **目标：** 按批准路径实现候选/详情；公开页面仅可低速强缓存、无需登录。
@@ -674,7 +674,7 @@ Evidence:
 
 ### QYP2-032 开发单项/批量刮削 UI
 
-- [ ] **依赖：** QYP2-023、QYP2-028、QYP2-029、QYP2-031
+- [x] **依赖：** QYP2-023、QYP2-028、QYP2-029、QYP2-031
 - [ ] **Read first：** 现有 Detail、LibraryBrowse、Toast 模式
 - [ ] **允许修改：** `src/renderer/pages/Detail/ScrapeDialog.tsx`、`src/renderer/pages/Libraries/ScrapeJobs.tsx`、`src/renderer/pages/Libraries/index.tsx`、`src/preload/index.ts`、`tests/renderer/metadata/scrape-ui.test.tsx`
 - [ ] **目标：** provider/candidate 选择、字段差异、批量进度、取消、失败重试。
@@ -692,9 +692,15 @@ Evidence:
 
 ### Checkpoint E
 
-- [ ] QYP2-026～032 全部 `[x]`。
-- [ ] TMDB fixture 和真实测试 key 路径均验证；密钥不泄漏。
-- [ ] 豆瓣未通过门禁时 UI 仍显示不可用且不发起请求。
+- [x] QYP2-026～032 全部 `[x]`。
+- [x] TMDB fixture 和真实测试 key 路径均验证；密钥不泄漏。
+- [x] 豆瓣未通过门禁时 UI 仍显示不可用且不发起请求。
+
+> **Evidence（2026-09-12）：**
+> 1. **任务闭环**：026～032 七项 Evidence 均已填写并经独立评审（029/031/032 首轮发现均已修复后 Approve）。
+> 2. **TMDB fixture 路径**：`tests/main/plugins/tmdb.test.ts` 15 例全绿——Bearer 头不出现在 URL/query、**canary 扫描验证错误消息不泄漏 token**（新增）、401/429 映射、zh→en 回退、电影/剧集/季/集闭合、host allowlist。真实 key 全链路冒烟（配置→单项→批量→确认→取消→恢复）需用户 key，在人工验证清单（Checkpoint E 项 2 的"真实 key 路径"部分，随 Checkpoint F 发布门禁复核）。密钥不泄漏为机器验证：canary 测试 + 代码全扫（token 仅出现在 client.ts Bearer 头组装处）。
+> 3. **豆瓣门禁**：contract test 双 GATE（registry 无 douban + 源码级 `buildDoubanPlugin` 零外部引用，本次复核 grep = 0 处）+ scrape-ui 测试验证豆瓣不出现在刮削 provider 列表；实现从未被 import，**不存在发起网络请求的代码路径**。
+> 4. 门禁：529 tests / 42 files 全绿、typecheck 0 错误、`git diff --check` 干净。
 
 ## Phase F：续播、统一体验与发布
 

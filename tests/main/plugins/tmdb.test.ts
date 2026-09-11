@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTmdbPlugin } from '../../../src/main/plugins/tmdb';
-import type { MetadataCandidate, MetadataLookupInput, PluginContext } from '../../../src/shared/types/plugins';
+import { PluginError, type MetadataCandidate, type MetadataLookupInput, type PluginContext } from '../../../src/shared/types/plugins';
 import { validateMetadataPayload } from '../../../src/main/modules/metadata/metadata-merger';
 
 /**
@@ -194,6 +194,23 @@ describe('TMDB plugin (QYP2-029)', () => {
       expect(request.headers.Authorization).toBe('Bearer secret-token-abc');
       expect(JSON.stringify(request.query)).not.toContain('secret-token-abc');
     }
+  });
+
+  it('Checkpoint E: the token never leaks into error messages (canary scan)', async () => {
+    const canary = 'CANARY-v4-token-EyK9x8Q';
+    const plugin = buildTmdbPlugin();
+    const ctx = makeContext(canary);
+    ctx.respond('/search/movie', 'zh-CN', 401);
+    let thrown: unknown;
+    try {
+      await plugin.search({ query: 'x' }, ctx.context);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(PluginError);
+    // 全链路 canary 扫描：错误消息/堆栈里出现 token 即泄漏。
+    const serialized = `${(thrown as Error).message}|${(thrown as Error).stack ?? ''}`;
+    expect(serialized).not.toContain(canary);
   });
 
   it('maps movie search results to candidates (host scores them)', async () => {
