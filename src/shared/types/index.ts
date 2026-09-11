@@ -105,4 +105,5 @@ export * from './media-info';
 export * from './subtitles';
 export * from './metadata-editor';
 export * from './safe-delete';
+export * from './plugins';
 export * from './actions';
