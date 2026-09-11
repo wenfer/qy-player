@@ -135,6 +135,7 @@ const electronAPI = {
   deletePluginSecret: (pluginId: string, key: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
   testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
+  diagnosticsSummary: () => ipcRenderer.invoke(IPC_CHANNELS.DIAGNOSTICS.SUMMARY),
   // Unified cross-source queries (QYP2-036)
   unifiedContinueWatching: (limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.UNIFIED.CONTINUE_WATCHING, limit),

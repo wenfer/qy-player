@@ -93,6 +93,8 @@ import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
+import { CacheManager } from '../modules/cache/cache-manager';
+import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
   createUnifiedQueryService,
   type OnlineContinueInput,
@@ -280,6 +282,47 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.CANCEL, (_event, reason: unknown) => {
     autoNext.cancel(reason === 'no-next-episode' ? 'no-next-episode' : 'user');
     return ok({ cancelled: true });
+  });
+
+  // ---- Diagnostics (QYP2-037): redacted, shareable snapshot ----
+  const cacheManager = new CacheManager();
+  cacheManager.register(
+    { id: 'probe', description: '技术信息探测缓存（内存 LRU+TTL）', rootDir: null, quota: { maxEntries: 256 }, sweepable: false },
+    []
+  );
+  cacheManager.register(
+    {
+      id: 'plugin-response',
+      description: '插件响应磁盘缓存（mtime-LRU，TTL 7 天）',
+      rootDir: join(app.getPath('userData'), 'scrape-cache'),
+      quota: { maxEntries: 4096 },
+      sweepable: true,
+    },
+    []
+  );
+  cacheManager.register(
+    {
+      id: 'subtitles',
+      description: '人工导入字幕（受保护，永不清扫）',
+      rootDir: join(app.getPath('userData'), 'subtitles'),
+      quota: {},
+      sweepable: false,
+    },
+    []
+  );
+
+  ipcMain.handle(IPC_CHANNELS.DIAGNOSTICS.SUMMARY, () => {
+    return ok(
+      buildDiagnosticsSummary({
+        appVersion: app.getVersion(),
+        servers: storage.getServers(),
+        cacheManager,
+        subsystems: [
+          { id: 'sqlite', ok: Boolean(db), detail: '已打开' },
+          { id: 'player', ok: player.isReady(), detail: player.isReady() ? 'mpv 就绪' : '未启动' },
+        ],
+      })
+    );
   });
 
   // ---- Unified cross-source queries (QYP2-036, plan §11/§16.4) ----
