@@ -113,7 +113,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
-  registerIpcHandlers(player);
+  registerIpcHandlers(player, () => mainWindow);
 
   // Forward renderer console to main stdout
   ipcMain.on('renderer-console', (_event, level: string, message: string) => {

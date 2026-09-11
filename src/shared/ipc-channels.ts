@@ -89,6 +89,12 @@ export const IPC_CHANNELS = {
   },
   RESUME: {
     SERIES: 'resume:series',
+    NEXT: 'resume:next',
+  },
+  AUTO_NEXT: {
+    CANCEL: 'auto-next:cancel',
+    GET_ENABLED: 'auto-next:get-enabled',
+    SET_ENABLED: 'auto-next:set-enabled',
   },
   SCRAPE: {
     START: 'scrape:start',

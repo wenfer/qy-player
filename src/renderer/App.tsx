@@ -12,6 +12,52 @@ import Shortcuts from './pages/Shortcuts';
 import Navigation from './components/Navigation';
 import PlayerControls from './components/PlayerControls';
 import ToastContainer from './components/Toast';
+import NextEpisodeCountdown from './components/NextEpisodeCountdown';
+import { useToastStore } from './stores/toast-store';
+
+/**
+ * Auto-next host (QYP2-035): the countdown overlay lives app-wide; firing
+ * goes through the same resolvePlayback + loadFile path as manual play,
+ * with explicit 0 (下一集从 0 开始, §12.2/§12.3).
+ */
+function AutoNextHost() {
+  const addToast = useToastStore((s) => s.addToast);
+  const handlePlayNext = async (choice: {
+    itemId: number | string;
+    mediaSourceId?: string | null;
+    provider?: string;
+    serverId?: number;
+  }) => {
+    try {
+      if (!choice.provider || typeof choice.serverId !== 'number') {
+        addToast('无法确定下一集的媒体来源', 'error');
+        return;
+      }
+      const result = (await window.electronAPI.resolvePlayback(
+        { provider: choice.provider, serverId: choice.serverId, itemId: String(choice.itemId) },
+        { mode: 'direct', ...(choice.mediaSourceId ? { mediaSourceId: choice.mediaSourceId } : {}) }
+      )) as {
+        ok: boolean;
+        data?: { url: string; streamSessionId?: string; mediaContext: unknown };
+        error?: { message: string };
+      };
+      if (!result.ok || !result.data) {
+        addToast(result.error?.message ?? '无法获取下一集播放地址', 'error');
+        return;
+      }
+      await window.electronAPI.playerLoadFile(
+        result.data.url,
+        0,
+        undefined,
+        result.data.mediaContext as import('../shared/types/catalog').ResolvedMediaContext,
+        result.data.streamSessionId
+      );
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : '自动连播失败', 'error');
+    }
+  };
+  return <NextEpisodeCountdown onPlayNext={handlePlayNext} />;
+}
 
 function App() {
   return (
@@ -38,6 +84,7 @@ function App() {
         </main>
         <PlayerControls />
         <ToastContainer />
+        <AutoNextHost />
       </div>
     </HashRouter>
   );

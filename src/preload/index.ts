@@ -135,9 +135,21 @@ const electronAPI = {
   deletePluginSecret: (pluginId: string, key: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
   testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
+  // Auto-next (QYP2-035): push events + cancel.
+  onAutoNextEvent: (callback: (event: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => callback(payload);
+    ipcRenderer.on('auto-next:event', handler);
+    return () => ipcRenderer.removeListener('auto-next:event', handler);
+  },
+  autoNextCancel: (reason?: 'user' | 'no-next-episode') =>
+    ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.CANCEL, reason ?? 'user'),
+  getAutoNextEnabled: () => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.GET_ENABLED),
+  setAutoNextEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.SET_ENABLED, enabled),
   // Series resume (QYP2-034): pure resolver runs main-side.
   resolveSeriesResume: (episodes: unknown[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes),
+  pickNextEpisode: (input: { episodes: unknown[]; seasonNumber?: number | null; episodeNumber?: number | null }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.RESUME.NEXT, input),
   // Scrape jobs (QYP2-032)
   scrapeStart: (pluginId: string, itemIds: number[], jobId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.START, pluginId, itemIds, jobId),

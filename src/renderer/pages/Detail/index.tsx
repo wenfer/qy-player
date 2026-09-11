@@ -4,6 +4,7 @@ import { Play, Star, Calendar, Clock, ChevronLeft, Film, Users, Clapperboard, Tv
 import SeriesResumeButton from './SeriesResumeButton';
 import EpisodeGrid from './EpisodeGrid';
 import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/playback';
+import { useAutoNextStore, type NextEpisodeChoice } from '../../stores/auto-next-store';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
 import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
 import ProgressSummary from './ProgressSummary';
@@ -263,6 +264,47 @@ export default function Detail() {
     setSelectedSeason(seasonIndex);
     loadEpisodes(seasonId);
   }, [loadEpisodes]);
+
+  // QYP2-035: register the next-episode provider for the auto-next
+  // countdown. The provider answers "given the currently-finished episode
+  // (season/episode from main's snapshot), what plays next?" using the
+  // series' full episode list + the main-side pure picker.
+  const setAutoNextProvider = useAutoNextStore((s) => s.setProvider);
+  useEffect(() => {
+    if (!details || details.Type !== 'Series' || !Number.isInteger(serverId)) {
+      setAutoNextProvider(null);
+      return;
+    }
+    setAutoNextProvider(async ({ seasonNumber, episodeNumber }) => {
+      try {
+        const all = await window.electronAPI.getItems(details.Id, {
+          includeItemTypes: 'Episode',
+          recursive: true,
+        }, serverId) as Episode[];
+        const inputs = all.map((ep) => ({
+          itemId: ep.Id,
+          seasonNumber: ep.ParentIndexNumber ?? null,
+          episodeNumber: ep.IndexNumber ?? null,
+          title: ep.Name,
+          mediaSourceId: ep.MediaSources?.[0]?.Id ?? null,
+        }));
+        const res = (await window.electronAPI.pickNextEpisode({
+          episodes: inputs,
+          seasonNumber: seasonNumber ?? null,
+          episodeNumber: episodeNumber ?? null,
+        })) as {
+          ok: boolean;
+          data?: NextEpisodeChoice | null;
+        };
+        const next = res.ok ? res.data ?? null : null;
+        if (!next) return null;
+        return { ...next, provider: serverType, serverId };
+      } catch {
+        return null;
+      }
+    });
+    return () => setAutoNextProvider(null);
+  }, [details, serverId, serverType, setAutoNextProvider]);
 
   // QYP2-034: series primary-button target. The episode snapshots come
   // from the server (UserData preferred, §12.1); the DECISION runs

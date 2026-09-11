@@ -93,6 +93,8 @@ import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
+import { AutoNextController, pickNextEpisode } from '../modules/playback-state/auto-next';
+import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
@@ -161,7 +163,7 @@ function describeNetworkError(err: unknown): string {
   return e?.message ? `连接失败: ${e.message}` : '无法连接到服务器';
 }
 
-export function registerIpcHandlers(player: PlayerCore): void {
+export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => import('electron').BrowserWindow | null): void {
   const db = getDatabase();
   const storage = createStorage(db);
 
@@ -255,6 +257,36 @@ export function registerIpcHandlers(player: PlayerCore): void {
   });
   playbackStateManager.init();
 
+  // Auto-next (QYP2-035, plan §12.3): registered AFTER playback-state's eof
+  // saver, so the final progress save always runs before the countdown
+  // starts (EventEmitter listener order). markLoaded is called from the
+  // LOAD_FILE handlers; the renderer owns "is there a next episode".
+  const autoNext = new AutoNextController({
+    isEnabled: () => storage.getConfig('playback.autoNext') !== 'false',
+    broadcast: (event) => {
+      const win = getMainWindow?.();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('auto-next:event', event);
+      }
+    },
+  });
+  player.on('eof', () => autoNext.handleEof());
+
+  // Auto-next cancel (user / renderer reports no next episode).
+  ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.CANCEL, (_event, reason: unknown) => {
+    autoNext.cancel(reason === 'no-next-episode' ? 'no-next-episode' : 'user');
+    return ok({ cancelled: true });
+  });
+  // §12.3: 可在设置中关闭（app_config playback.autoNext，默认开）。
+  ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.GET_ENABLED, () => {
+    return ok({ enabled: storage.getConfig('playback.autoNext') !== 'false' });
+  });
+  ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.SET_ENABLED, (_event, enabled: unknown) => {
+    if (typeof enabled !== 'boolean') return err('VALIDATION_FAILED', '开关值不合法');
+    storage.setConfig('playback.autoNext', enabled ? 'true' : 'false');
+    return ok({ enabled });
+  });
+
   // Player handlers
   ipcMain.handle(IPC_CHANNELS.PLAYER.LOAD_FILE, async (
     _event,
@@ -293,6 +325,8 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
       // Set current media for progress tracking
       playbackStateManager!.setCurrentMedia('local', path, title, undefined, localMediaId);
+      // Auto-next dedupe anchor: a fresh load resets the eof gate.
+      autoNext.markLoaded({ mediaType: 'local', mediaId: path });
 
       await player.loadFile(path, finalPosition, effectiveHeaders);
       // QYP2-021: attach sidecar/imported subtitles (catalog items only).
@@ -317,6 +351,15 @@ export function registerIpcHandlers(player: PlayerCore): void {
         mediaContext?.episodeNumber,
         mediaContext?.mediaSourceId
       );
+      // Auto-next dedupe anchor: a freshly loaded media resets the eof
+      // gate (a stale pending countdown from the previous file must die).
+      autoNext.markLoaded({
+        mediaType,
+        mediaId,
+        seriesName: mediaContext?.seriesName ?? null,
+        seasonNumber: mediaContext?.seasonNumber ?? null,
+        episodeNumber: mediaContext?.episodeNumber ?? null,
+      });
       // Resume from last position (same rule as local: skip if nearly finished)
       const resumePosition = playbackStateManager!.getResumePosition(mediaType, mediaId);
       // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
@@ -1352,6 +1395,33 @@ function registerCatalogHandlers(
       inputs.push(item as unknown as ResumeEpisodeInput);
     }
     return ok(resolveSeriesResume(inputs));
+  });
+
+  // ---- Next-episode pick (QYP2-035; pure main-side; renderer owns the
+  // episode list it already loaded for the series page) ----
+  // Next-episode pick (pure, main-side; renderer owns the episode list it
+  // already loaded for the series page).
+  ipcMain.handle(IPC_CHANNELS.RESUME.NEXT, (_event, input: unknown) => {
+    if (typeof input !== 'object' || input === null) return err('VALIDATION_FAILED', '参数不合法');
+    const { episodes, seasonNumber, episodeNumber } = input as {
+      episodes?: unknown;
+      seasonNumber?: unknown;
+      episodeNumber?: unknown;
+    };
+    if (!Array.isArray(episodes)) return err('VALIDATION_FAILED', '单集列表不合法');
+    const clean: AutoNextEpisodeLike[] = [];
+    for (const entry of episodes) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const item = entry as Record<string, unknown>;
+      if (typeof item.itemId !== 'string' && typeof item.itemId !== 'number') continue;
+      clean.push(item as unknown as AutoNextEpisodeLike);
+    }
+    const next = pickNextEpisode(
+      clean,
+      typeof seasonNumber === 'number' ? seasonNumber : null,
+      typeof episodeNumber === 'number' ? episodeNumber : null
+    );
+    return ok(next);
   });
 
   // ---- Plugin config (QYP2-027, plan §11.1/§11.3) ----
