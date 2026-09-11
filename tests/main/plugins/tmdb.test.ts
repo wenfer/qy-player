@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTmdbPlugin } from '../../../src/main/plugins/tmdb';
-import type { MetadataCandidate, PluginContext } from '../../../src/shared/types/plugins';
+import type { MetadataCandidate, MetadataLookupInput, PluginContext } from '../../../src/shared/types/plugins';
 import { validateMetadataPayload } from '../../../src/main/modules/metadata/metadata-merger';
 
 /**
@@ -54,7 +54,7 @@ const TV_ZH = {
   production_companies: [],
   production_countries: [],
   credits: { cast: [{ name: '布莱恩', character: 'Walter' }], crew: [] },
-  external_ids: { imdb_id: 'tt0903747', tvdb_id: '79614' },
+  external_ids: { imdb_id: 'tt0903747', tvdb_id: 79614 },
   images: { posters: [{ file_path: '/tv.jpg' }] },
 };
 
@@ -74,17 +74,37 @@ const TV_EN = {
 };
 
 const SEASON_ZH = {
+  id: 78900,
   season_number: 1,
   name: '第 1 季',
   overview: '第一季剧情。',
   air_date: '2008-01-20',
 };
 
+const SEASON_EN = {
+  id: 78900,
+  season_number: 1,
+  name: 'Season 1',
+  overview: '',
+  air_date: '2008-01-20',
+};
+
 const EPISODE_ZH = {
+  id: 63000,
   season_number: 1,
   episode_number: 3,
-  name: '初见',
-  overview: '第三集剧情。',
+  name: '',
+  overview: '',
+  air_date: '2008-02-10',
+  vote_average: 8.1,
+};
+
+const EPISODE_EN = {
+  id: 63000,
+  season_number: 1,
+  episode_number: 3,
+  name: 'Grey Matter',
+  overview: 'The third episode.',
   air_date: '2008-02-10',
   vote_average: 8.1,
 };
@@ -266,14 +286,56 @@ describe('TMDB plugin (QYP2-029)', () => {
     ]);
 
     ctx.respond('/tv/456/season/1', 'zh-CN', SEASON_ZH);
+    ctx.respond('/tv/456/season/1', 'en-US', SEASON_EN);
     const season = await plugin.getDetails('456', { kind: 'series', season: 1 }, ctx.context);
     expect(validateMetadataPayload(season)).toEqual([]);
     expect(season).toMatchObject({ kind: 'season', season: 1, title: '第 1 季' });
+    // Season carries its own tmdb anchor for incremental refreshes.
+    expect(season.uniqueIds).toEqual([{ provider: 'tmdb', id: '78900' }]);
 
     ctx.respond('/tv/456/season/1/episode/3', 'zh-CN', EPISODE_ZH);
+    ctx.respond('/tv/456/season/1/episode/3', 'en-US', EPISODE_EN);
     const episode = await plugin.getDetails('456', { kind: 'series', season: 1, episode: 3 }, ctx.context);
     expect(validateMetadataPayload(episode)).toEqual([]);
-    expect(episode).toMatchObject({ kind: 'episode', season: 1, episode: 3, title: '初见' });
+    // zh title EMPTY → en fills (§11.3 field-wise fallback applies to
+    // season/episode endpoints too).
+    expect(episode).toMatchObject({ kind: 'episode', season: 1, episode: 3, title: 'Grey Matter', plot: 'The third episode.' });
+    expect(episode.uniqueIds).toEqual([{ provider: 'tmdb', id: '63000' }]);
+  });
+
+  it('movie lookups with stray season/episode stay on the movie endpoint', async () => {
+    const plugin = buildTmdbPlugin();
+    const ctx = makeContext('tok');
+    ctx.respond('/movie/123', 'zh-CN', MOVIE_ZH);
+    ctx.respond('/movie/123', 'en-US', MOVIE_EN);
+    const payload = await plugin.getDetails(
+      '123',
+      { kind: 'movie', season: 1, episode: 2 } as MetadataLookupInput,
+      ctx.context
+    );
+    expect(payload.kind).toBe('movie');
+    expect(ctx.requests.every((r) => r.url.includes('/movie/123'))).toBe(true);
+  });
+
+  it('derives year from the premiere date when the search year is absent', async () => {
+    const plugin = buildTmdbPlugin();
+    const ctx = makeContext('tok');
+    ctx.respond('/movie/123', 'zh-CN', MOVIE_ZH);
+    ctx.respond('/movie/123', 'en-US', MOVIE_EN);
+    const payload = await plugin.getDetails('123', { kind: 'movie' }, ctx.context);
+    expect(payload.year).toBe(2019);
+  });
+
+  it('accepts numeric tvdb_id from external_ids (TMDB shape)', async () => {
+    const plugin = buildTmdbPlugin();
+    const ctx = makeContext('tok');
+    ctx.respond('/tv/456', 'zh-CN', {
+      ...TV_ZH,
+      external_ids: { imdb_id: 'tt0903747', tvdb_id: 79614 },
+    });
+    ctx.respond('/tv/456', 'en-US', TV_EN);
+    const payload = await plugin.getDetails('456', { kind: 'series' }, ctx.context);
+    expect(payload.uniqueIds).toContainEqual({ provider: 'tvdb', id: '79614' });
   });
 
   it('allows only the official TMDB hosts', () => {

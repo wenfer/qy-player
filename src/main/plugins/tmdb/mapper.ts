@@ -1,3 +1,4 @@
+import { TMDB_IMAGE_HOST } from './client';
 import type { MetadataCandidate, MetadataPayload } from '../../../shared/types/plugins';
 
 /**
@@ -36,7 +37,7 @@ interface TmdbCrewMember {
   job?: string;
 }
 
-export function mapSearchResults(results: unknown, kind: 'movie' | 'series'): MetadataCandidate[] {
+export function mapSearchResults(results: unknown): MetadataCandidate[] {
   if (!Array.isArray(results)) return [];
   const out: MetadataCandidate[] = [];
   for (const entry of results) {
@@ -54,7 +55,6 @@ export function mapSearchResults(results: unknown, kind: 'movie' | 'series'): Me
       ...(originalTitle ? { originalTitle } : {}),
       ...(year !== undefined && Number.isFinite(year) ? { year } : {}),
       score: 0, // scored by the host matcher (plan §11.2)
-      ...(kind === 'series' ? {} : {}),
     });
   }
   return out;
@@ -103,7 +103,9 @@ function actorsOf(source: Record<string, unknown>): MetadataPayload['actors'] {
     out.push({
       name: member.name,
       ...(member.character ? { role: member.character } : {}),
-      ...(member.profile_path ? { thumb: `https://${'image.tmdb.org'}/t/p/w185${member.profile_path}` } : {}),
+      ...(member.profile_path && member.profile_path.startsWith('/')
+        ? { thumb: `https://${TMDB_IMAGE_HOST}/t/p/w185${member.profile_path}` }
+        : {}),
     });
     if (out.length >= 50) break;
   }
@@ -129,8 +131,10 @@ function uniqueIdsOf(source: Record<string, unknown>, tmdbId: number): MetadataP
     if (typeof external.imdb_id === 'string' && external.imdb_id) {
       out.push({ provider: 'imdb', id: external.imdb_id });
     }
-    if (typeof external.tvdb_id === 'string' && external.tvdb_id) {
-      out.push({ provider: 'tvdb', id: external.tvdb_id });
+    // TMDB's tvdb_id is a NUMBER in external_ids (unlike imdb_id).
+    const tvdb = numberOr(external.tvdb_id);
+    if (tvdb !== undefined) {
+      out.push({ provider: 'tvdb', id: String(tvdb) });
     }
   }
   return out;
@@ -146,7 +150,8 @@ function thumbsOf(source: Record<string, unknown>): string[] {
       for (const entry of list) {
         if (typeof entry !== 'object' || entry === null) continue;
         const path = (entry as { file_path?: unknown }).file_path;
-        if (typeof path === 'string' && path) out.push(`https://${'image.tmdb.org'}/t/p/original${path}`);
+        if (typeof path === 'string' && path.startsWith('/'))
+          out.push(`https://${TMDB_IMAGE_HOST}/t/p/original${path}`);
         if (out.length >= 20) return out;
       }
     }
@@ -195,6 +200,10 @@ export function mapMovieDetails(zh: Record<string, unknown>, en?: Record<string,
     thumbs: thumbsOf(zh),
   };
   if (en) fillFromEn(base, mapMovieDetails(en));
+  if (base.year === undefined && typeof base.premiered === 'string' && base.premiered.length >= 4) {
+    const year = Number(base.premiered.slice(0, 4));
+    if (Number.isFinite(year)) base.year = year;
+  }
   const payload = base as MetadataPayload;
   // §11.1: empty required collections still need to exist.
   payload.genres ??= [];
@@ -225,6 +234,10 @@ export function mapTvDetails(zh: Record<string, unknown>, en?: Record<string, un
     thumbs: thumbsOf(zh),
   };
   if (en) fillFromEn(base, mapTvDetails(en));
+  if (base.year === undefined && typeof base.premiered === 'string' && base.premiered.length >= 4) {
+    const year = Number(base.premiered.slice(0, 4));
+    if (Number.isFinite(year)) base.year = year;
+  }
   const payload = base as MetadataPayload;
   payload.genres ??= [];
   payload.studios ??= [];
@@ -236,8 +249,8 @@ export function mapTvDetails(zh: Record<string, unknown>, en?: Record<string, un
   return payload;
 }
 
-/** Season details → payload (kind season). */
-export function mapSeasonDetails(zh: Record<string, unknown>): MetadataPayload {
+/** Season details → payload (kind season); en fills zh gaps (§11.3). */
+export function mapSeasonDetails(zh: Record<string, unknown>, en?: Record<string, unknown>): MetadataPayload {
   const season = numberOr(zh.season_number) ?? 0;
   const base: Partial<MetadataPayload> = {
     kind: 'season',
@@ -246,19 +259,20 @@ export function mapSeasonDetails(zh: Record<string, unknown>): MetadataPayload {
     premiered: stringOr(zh.air_date),
     season,
   };
+  if (en) fillFromEn(base, mapSeasonDetails(en));
   const payload = base as MetadataPayload;
   payload.genres = [];
   payload.studios = [];
   payload.countries = [];
   payload.actors = [];
   payload.directors = [];
-  payload.uniqueIds = [];
+  payload.uniqueIds = numberOr(zh.id) !== undefined ? [{ provider: 'tmdb', id: String(numberOr(zh.id)) }] : [];
   payload.thumbs = [];
   return payload;
 }
 
-/** Episode details → payload (kind episode). */
-export function mapEpisodeDetails(zh: Record<string, unknown>): MetadataPayload {
+/** Episode details → payload (kind episode); en fills zh gaps (§11.3). */
+export function mapEpisodeDetails(zh: Record<string, unknown>, en?: Record<string, unknown>): MetadataPayload {
   const base: Partial<MetadataPayload> = {
     kind: 'episode',
     title: stringOr(zh.name),
@@ -268,13 +282,14 @@ export function mapEpisodeDetails(zh: Record<string, unknown>): MetadataPayload 
     episode: numberOr(zh.episode_number),
     rating: numberOr(zh.vote_average),
   };
+  if (en) fillFromEn(base, mapEpisodeDetails(en));
   const payload = base as MetadataPayload;
   payload.genres = [];
   payload.studios = [];
   payload.countries = [];
   payload.actors = [];
   payload.directors = [];
-  payload.uniqueIds = [];
+  payload.uniqueIds = numberOr(zh.id) !== undefined ? [{ provider: 'tmdb', id: String(numberOr(zh.id)) }] : [];
   payload.thumbs = [];
   return payload;
 }

@@ -66,33 +66,34 @@ export function buildTmdbPlugin(): MetadataProviderPlugin {
       const common = { language: LOCALE_PRIMARY, append_to_response: APPEND, include_image_language: IMAGE_LANG };
 
       // Route by LookupInput (§11.3: 电影、剧集、季、集都支持). Season/
-      // episode routes come FIRST: a series lookup carrying season info
-      // targets the episode/season endpoint, not the series payload.
-      if (input.season !== undefined && input.episode !== undefined) {
+      // episode routes come first, and ONLY for series lookups — a movie
+      // query carrying season/episode numbers stays on the movie endpoint.
+      const isSeries = input.kind === 'series' || input.kind === undefined;
+      if (isSeries && input.season !== undefined && input.episode !== undefined) {
         const zh = await client.get(
           `/tv/${safeId}/season/${input.season}/episode/${input.episode}`,
           { language: LOCALE_PRIMARY }
         );
-        return finish(mapEpisodeDetails(zh));
+        const en = await client.get(
+          `/tv/${safeId}/season/${input.season}/episode/${input.episode}`,
+          { language: LOCALE_FALLBACK }
+        );
+        return finish(mapEpisodeDetails(zh, en));
       }
-      if (input.season !== undefined) {
+      if (isSeries && input.season !== undefined) {
         const zh = await client.get(`/tv/${safeId}/season/${input.season}`, { language: LOCALE_PRIMARY });
-        return finish(mapSeasonDetails(zh));
+        const en = await client.get(`/tv/${safeId}/season/${input.season}`, { language: LOCALE_FALLBACK });
+        return finish(mapSeasonDetails(zh, en));
       }
       if (input.kind === 'series') {
         const zh = await client.get(`/tv/${safeId}`, common);
         const en = await client.get(`/tv/${safeId}`, { ...common, language: LOCALE_FALLBACK });
         return finish(mapTvDetails(zh, en));
       }
-      if (input.kind === 'movie' || input.kind === undefined) {
-        const zh = await client.get(`/movie/${safeId}`, common);
-        const en = await client.get(`/movie/${safeId}`, { ...common, language: LOCALE_FALLBACK });
-        return finish(mapMovieDetails(zh, en));
-      }
-      // A series lookup without kind falls back to the tv endpoint.
-      const zh = await client.get(`/tv/${safeId}`, common);
-      const en = await client.get(`/tv/${safeId}`, { ...common, language: LOCALE_FALLBACK });
-      return finish(mapTvDetails(zh, en));
+      // kind === 'movie' or undefined: the default endpoint.
+      const zh = await client.get(`/movie/${safeId}`, common);
+      const en = await client.get(`/movie/${safeId}`, { ...common, language: LOCALE_FALLBACK });
+      return finish(mapMovieDetails(zh, en));
     },
   };
 
@@ -124,6 +125,6 @@ export function buildTmdbPlugin(): MetadataProviderPlugin {
       input.kind === 'series'
         ? await client.get('/search/tv', params)
         : await client.get('/search/movie', params);
-    return mapSearchResults(res.results, input.kind === 'series' ? 'series' : 'movie');
+    return mapSearchResults(res.results);
   }
 }
