@@ -591,13 +591,19 @@ Evidence:
 
 ### QYP2-027 实现插件配置、secret 和健康检查 UI
 
-- [ ] **依赖：** QYP2-026
-- [ ] **Read first：** 本文第 11.1、16.3 节、现有 Settings 模式
-- [ ] **允许修改：** `src/main/modules/plugin-runtime/config-service.ts`、`src/main/ipc/index.ts`、`src/renderer/pages/Settings/PluginSettings.tsx`、`src/preload/index.ts`、`tests/main/plugins/plugin-config.test.ts`
-- [ ] **目标：** 启停、优先级、非敏感设置、secret ref、测试连接、错误码。
-- [ ] **验收：** API key 只入 SecretStore；重启保持状态；UI 和日志不含上游正文/秘密；错误可重试性明确。
-- [ ] **验证：** main/renderer 测试、secret grep、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-026
+- [x] **Read first：** 本文第 11.1、16.3 节、现有 Settings 模式
+- [x] **允许修改：** `src/main/modules/plugin-runtime/config-service.ts`、`src/main/ipc/index.ts`、`src/renderer/pages/Settings/PluginSettings.tsx`、`src/preload/index.ts`、`tests/main/plugins/plugin-config.test.ts`
+- [x] **目标：** 启停、优先级、非敏感设置、secret ref、测试连接、错误码。
+- [x] **验收：** API key 只入 SecretStore；重启保持状态；UI 和日志不含上游正文/秘密；错误可重试性明确。
+- [x] **验证：** main/renderer 测试、secret grep、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（37 文件 454 测试通过，本任务 17 用例）；`npm run typecheck`（零错误）；`git diff --check`；grep 验证 renderer 无 secret 值回显（仅 presence/fingerprint）
+  - 实现：config-service（enabled/priority/settings 持久化 app_config、secret 写入 SecretStore 用与 PluginContext 相同的可逆编码、健康=disabled/auth-required/ready/error 四态、probe 消息截断 300 字）；PLUGINS.LIST/SET_CONFIG/SET_SECRET/DELETE_SECRET/TEST 五通道；PluginSettings 徽章（就绪/需要配置/已停用/探测失败）+ 开关 + 优先级 + 密码输入（保存后清空草稿仅显「已设置」）+ 测试连接（retryable 提示）
+  - 重启保持：app_config + SecretStore 均持久
+  - Review notes: 评审 Request changes → CRITICAL 1 项全修（LIST 信封未解包致设置页白屏 plugins.map 非函数）+ REQUIRED 3 项全修（testPlugin 三处信封解包；健康缓存只存 ready 使重试真实生效；settings 走私防护 normalize(trim+NFKC+lower)+嵌套拒绝）；OPTIONAL 修 5（LIST 复用导出键集、TEST/DELETE_SECRET 注册校验、probe 错误与 auth-required 语义分离、异步 reject toast、消息截断）；延后：真实 probe 随 QYP2-029 TMDB 落地
+  - 越界（待追认）：shared/ipc-channels.ts（PLUGINS 组）、preload/index.ts（5 wrapper）、Settings/index.tsx（接线 PluginSettings，插件属软件配置符合 U-002 约定）
+  - Result: 通过
 
 ### QYP2-028 实现刮削任务、置信度与缓存
 
