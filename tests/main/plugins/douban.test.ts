@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildDoubanPlugin } from '../../../src/main/plugins/douban';
-import { DOUBAN_MIN_INTERVAL_MS, resetDoubanThrottleForTests } from '../../../src/main/plugins/douban/client';
+import {
+  DOUBAN_DETAIL_CACHE_TTL_MS,
+  DOUBAN_MIN_INTERVAL_MS,
+  DOUBAN_SEARCH_CACHE_TTL_MS,
+  resetDoubanThrottleForTests,
+} from '../../../src/main/plugins/douban/client';
 import { PluginError, type MetadataCandidate, type PluginContext } from '../../../src/shared/types/plugins';
 import { validateMetadataPayload } from '../../../src/main/modules/metadata/metadata-merger';
 import { ScrapeJobService, type ScrapeJobDeps } from '../../../src/main/modules/plugin-runtime/job-service';
@@ -22,6 +27,7 @@ const DETAIL_TV_HTML = readFileSync(join(FIXTURE_DIR, 'subject-detail-tv.html'),
 function makeContext(responses: Map<string, { status: number; body: string }>) {
   const requests: Array<{ url: string; headers: Record<string, string>; query: Record<string, unknown> }> = [];
   const cacheStore = new Map<string, unknown>();
+  const cacheTtls = new Map<string, number>();
   const context: PluginContext = {
     pluginId: 'douban',
     locale: 'zh-CN',
@@ -41,13 +47,16 @@ function makeContext(responses: Map<string, { status: number; body: string }>) {
     },
     cache: {
       get: <T>(key: string) => cacheStore.get(key) as T | undefined,
-      set: (key: string, value: unknown) => void cacheStore.set(key, value),
+      set: (key: string, value: unknown, ttlMs?: number) => {
+        void cacheStore.set(key, value);
+        if (ttlMs !== undefined) cacheTtls.set(key, ttlMs);
+      },
       delete: (key: string) => void cacheStore.delete(key),
       clear: () => void cacheStore.clear(),
     },
     secrets: { get: () => null, has: () => false },
   };
-  return { context, requests, cacheStore };
+  return { context, requests, cacheStore, cacheTtls };
 }
 
 /** 压缩自限速（10ms），并保留节流语义可测。 */
@@ -149,6 +158,9 @@ describe('douban plugin safe degradation (QYP2-031)', () => {
     await plugin.search({ query: '示例电影', kind: 'movie' }, ctx.context);
     await plugin.search({ query: '示例电影', kind: 'movie' }, ctx.context);
     expect(ctx.requests.filter((r) => r.url.includes('subject_suggest'))).toHaveLength(1);
+    // TTL 与 ADR-0006 承诺一致：详情 30 天、搜索 6 小时。
+    expect(ctx.cacheTtls.get('subject:25457203')).toBe(DOUBAN_DETAIL_CACHE_TTL_MS);
+    expect(ctx.cacheTtls.get('suggest:示例电影|movie')).toBe(DOUBAN_SEARCH_CACHE_TTL_MS);
   });
 
   it('self-throttles requests ≥ DOUBAN_MIN_INTERVAL_MS (生产默认 3s)', async () => {

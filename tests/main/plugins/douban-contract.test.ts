@@ -118,6 +118,8 @@ describe('douban contract (QYP2-030 / ADR-0006)', () => {
   it('GATE: buildDoubanPlugin is never wired into the app (无注册/启用开关)', () => {
     // 源码级静态检查：除 plugins/douban 自身外，任何启动/接线代码
     // 不得引用豆瓣插件工厂（ADR-0006：人工评审签认前不可启用）。
+    // 边界说明：本检查按工厂名匹配——启用必经 registry 接线，而接线
+    // 必然引用工厂名；直接 import client/mapper 不构成启用路径。
     const scan = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
         const full = join(dir, entry.name);

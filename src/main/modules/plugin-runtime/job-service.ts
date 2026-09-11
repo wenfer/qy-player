@@ -176,7 +176,9 @@ export class ScrapeJobService {
           for (;;) {
             if (this.cancelled.has(jobId)) return;
             // §11.4: 上游结构变化（UPSTREAM_CHANGED）→ 暂停整批，不再
-            // 调度新条目；未处理条目保留在 pending 里供恢复。
+            // 调度新条目；未处理条目保留在 pending 里供恢复。注意语义
+            // 边界：停止调度 ≠ 中断在途——另一 worker 已认领的条目会
+            // 跑完（失败隔离不覆盖旧值，风险可接受）。
             if (pausedByUpstream) return;
             const current = index;
             index += 1;

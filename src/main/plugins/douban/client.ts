@@ -48,7 +48,9 @@ const defaultThrottle: ThrottleOptions = {
 
 /**
  * 进程级共享节流：多个调用方（并发 2 的批量任务）共享同一条请求队列，
- * 任意时刻相邻两次豆瓣请求间隔 ≥ minIntervalMs。
+ * 相邻两次请求的**发起时刻**间隔 ≥ minIntervalMs（start-to-start）。
+ * 语义约定：不中断已在途的请求——上游响应慢时可能同时存在两个连接，
+ * 但新请求永远遵守间隔；这正是 §11.4「低速」要求的落地方式。
  */
 const throttleState = { lastAt: 0, chain: Promise.resolve() };
 
