@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+  QYP2-030 合成 fixture（非真实抓取内容）：结构按
+  docs/decisions/0006-douban-provider.md 文档化的条目页 JSON-LD 锚点手写，
+  用于离线检测上游结构变化。豆瓣改版时更新本文件并跑 douban-contract 测试。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>示例电影 (2023)</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Movie",
+    "name": "示例电影",
+    "image": "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p-sample.jpg",
+    "genre": ["剧情", "科幻"],
+    "datePublished": "2023-04-01",
+    "director": [{ "@type": "Person", "name": "张三" }],
+    "actor": [
+      { "@type": "Person", "name": "李四" },
+      { "@type": "Person", "name": "王五" }
+    ],
+    "aggregateRating": { "ratingValue": "7.6", "ratingCount": "12345" }
+  }
+  </script>
+</head>
+<body>
+  <div id="wrapper">
+    <div id="content">
+      <h1><span property="v:itemreviewed">示例电影</span></h1>
+      <div id="info">合成条目信息骨架（仅结构锚点用）</div>
+    </div>
+  </div>
+</body>
+</html>

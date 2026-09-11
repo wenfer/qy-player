@@ -1,0 +1,28 @@
+[
+  {
+    "id": "25457203",
+    "title": "示例电影",
+    "sub_title": "A Sample Movie",
+    "year": "2023",
+    "url": "https://movie.douban.com/subject/25457203/",
+    "type": "movie",
+    "img": "https://img1.doubanio.com/view/photo/s_ratio_poster/public/p-sample.jpg"
+  },
+  {
+    "id": "35465232",
+    "title": "示例剧集",
+    "year": "2021",
+    "url": "https://movie.douban.com/subject/35465232/",
+    "type": "tv",
+    "img": "https://img9.doubanio.com/view/photo/s_ratio_poster/public/p-sample2.jpg",
+    "episode": "12"
+  },
+  {
+    "id": "1292052",
+    "title": "老条目（无 img/episode）",
+    "sub_title": "An Old Entry",
+    "year": "1994",
+    "url": "https://movie.douban.com/subject/1292052/",
+    "type": "movie"
+  }
+]
