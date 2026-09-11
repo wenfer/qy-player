@@ -647,7 +647,13 @@ Evidence:
 - [ ] **目标：** 先确认合法数据入口、条款、授权、限流和字段范围；不满足则保持不可启用。
 - [ ] **验收：** ADR 记录批准/拒绝原因；无不明第三方 API；fixture 可离线检测结构变化；不得把实验路径写成正式可用。
 - [ ] **验证：** 人工产品/法律/技术评审；contract test。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：fixtures 目录新增 README.md——JSON 数组无法内嵌注释，合成声明移至该文件）：**
+  - 提交：2c9986a（ADR+契约+fixture+contract test）+ 评审修复提交。
+  - 交付：① `docs/decisions/0006-douban-provider.md`（Proposed）——入口①官方 API 拒绝（客观不存在）、②第三方代理拒绝（计划红线，永久）、③模拟登录/验证码拒绝（红线，永久）、④公开页面读取**有条件批准为实验路径**：默认关闭、限速 ≥3s、强缓存、不携带登录态；人工产品/法律/技术评审签认前插件不注册、不可启用。② `src/main/plugins/douban/types.ts` 仅契约（端点/host allowlist movie.douban.com+图片预留 *.doubanio.com/锚点/校验器/UPSTREAM_CHANGED 单一映射），无网络实现、无 plugin factory。③ 合成 fixture（suggest JSON + movie/tv 条目页 HTML + README 合成声明）。④ contract test 9 例：锚点自洽、结构漂移大声失败（删字段/id 形状/url 前缀/一致性/坏 @type）、GATE（registry 无 douban + douban 目录仅 types.ts）+ 未来 manifest 形状兼容。
+  - 门禁：`npm test -- --run` 506 tests/40 files 全绿（metadata-editor 既有并发 flake 单独重跑即过，与本次提交无关）；`npm run typecheck` 0 错误；`git diff --check` 干净。
+  - 独立评审：1×REQUIRED（JSON fixture 合成声明缺失→README+ADR 对齐）+ OPTIONAL×4 + NIT×2 已修复或挂账；复审通过。
+  - 挂账（QYP2-031/032）：① registry GATE 目前依赖测试进程状态，031/032 接线 registry 注册时需补源码级静态检查或让测试 import 启动注册模块（tmdb 同样未注册，见 029 挂账②）；② suggest url/id 一致性校验已落地，031 实现时复用校验器；③ **人工产品/法律/技术评审豆瓣公开页面入口（本 ADR 的签认动作）**——签认前豆瓣插件保持不可启用；若否决则按 ADR「后果」节删除实验契约。
+  - 人工验证清单追加：ADR-0006 三方评审。
 
 ### QYP2-031 开发豆瓣插件安全降级
 
