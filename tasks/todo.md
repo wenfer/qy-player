@@ -712,7 +712,14 @@ Evidence:
 - [ ] **目标：** 统一电影/单集/剧集起播位置和原因。
 - [ ] **验收：** 30 秒有效门槛、90% 完成、已完成后下一集、特别篇、全剧完成均有表驱动测试；不被 0/null 覆盖。
 - [ ] **验证：** `npm test -- --run tests/main/playback/resume-resolver.test.ts`、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：无——仅 3 个允许文件；评审 OPTIONAL 偏差已固化注释）：**
+  - 提交：bc8c47a（实现）+ 评审修复提交。
+  - 契约：`shared/types/playback.ts`——RESUME_MIN_POSITION_S(30s)/RESUME_FINISHED_RATIO(0.9) 常量单源 + ResumeProgress/ResumeReason/ResumeTarget/ResumeEpisodeInput（含 title，§12.2 按钮文案）。
+  - 纯函数：`resolveSingleResume`（§12.1：<30s/看完/无历史→start 0；isFinished 标记优先于比例推导；duration 缺失不吞真实位置——与 phase-1 getResumePosition 行为一致，记为合理偏差）+ `resolveSeriesResume`（§12.2 规则 1–4：最近未完→续播；看完→排序后继从 0（不做智能跳跃，取舍已注释）；无历史→第一集；全完→replay；特别篇 S0 排序键）。0/null 永不伪造历史。
+  - 测试：表驱动 27 例全覆盖验收清单（30s 整点=resume、90% 整点=resume 严格 >、跨季下一集、特别篇排序、<30s 不参与最近播放、updatedAt 平局、空输入 null）。
+  - 评审：1×REQUIRED（title 契约）+ OPTIONAL/NIT 已修或注释固化；复审通过。
+  - 门禁：556 tests/43 files 全绿、typecheck 0 错误、git diff --check 干净。
+  - 挂账（034 接线备忘）：① `getContinueWatching` SQL 用 `position > 30` 与 resolver `>= 30` 在 30s 整点不一致，接线时统一；② playback-state.getResumePosition 与 resolver 的对接；③ metadata-editor 测试既有并发 flake 待排查（与本任务无关）。
 
 ### QYP2-034 交付剧集一键续播和详情进度
 
