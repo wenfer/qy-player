@@ -165,7 +165,7 @@ describe('ScrapeJobs monitor (QYP2-032 批量)', () => {
       ok: true,
       data: [jobRecord({ status: 'running', items: [{ itemId: 5, status: 'applied' }], pending: [6, 7] })],
     });
-    scrapeCancel.mockResolvedValue({ ok: true });
+    scrapeCancel.mockResolvedValue({ ok: true, data: { cancelled: true } });
     render(<ScrapeJobs />);
     await waitFor(() => expect(screen.getByText(/1\/3 项/)).toBeTruthy());
     expect(screen.getByText('进行中')).toBeTruthy();

@@ -104,6 +104,7 @@ export default function ScrapeDialog({
       }
       const jobId = res.data.jobId;
       stopPolling();
+      if (!aliveRef.current) return; // closed while starting: no orphan poller
       pollRef.current = setInterval(async () => {
         try {
           const status = (await window.electronAPI.scrapeStatus(jobId)) as {
@@ -151,10 +152,15 @@ export default function ScrapeDialog({
     [pluginId, itemId, addToast, handleResult]
   );
 
-  // Load enabled providers once per open.
+  // Load enabled providers once per open. Every open resets to a fresh
+  // run: phase stays from the previous run otherwise, and auto-start
+  // (phase === 'idle') would never fire again.
   useEffect(() => {
     if (!open) return;
     aliveRef.current = true;
+    setPhase('idle');
+    setMessage('');
+    setCandidates([]);
     (async () => {
       try {
         const res = (await window.electronAPI.listPlugins()) as { ok: boolean; data?: PluginListEntry[] };

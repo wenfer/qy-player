@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Loader2, Play, RefreshCw, Square, Wand2 } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 
@@ -34,6 +33,12 @@ const STATUS_BADGE: Record<ScrapeJobRecord['status'], { label: string; cls: stri
   interrupted: { label: '上次未完成', cls: 'bg-amber-500/10 text-amber-500' },
 };
 
+/** Provider display names (no internal ids in the UI). */
+const PROVIDER_NAMES: Record<string, string> = {
+  tmdb: 'TMDB',
+  douban: '豆瓣（实验性）',
+};
+
 const ITEM_LABEL: Record<ScrapeItemResult['status'], string> = {
   applied: '已应用',
   confirm: '待人工确认',
@@ -44,20 +49,20 @@ const ITEM_LABEL: Record<ScrapeItemResult['status'], string> = {
 
 export default function ScrapeJobs() {
   const addToast = useToastStore((s) => s.addToast);
-  const navigate = useNavigate();
   const [jobs, setJobs] = useState<ScrapeJobRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busyJob, setBusyJob] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aliveRef = useRef(true);
 
   const load = useCallback(async (): Promise<void> => {
     try {
       const res = (await window.electronAPI.scrapeJobs()) as { ok: boolean; data?: ScrapeJobRecord[] };
-      if (res.ok) setJobs(res.data ?? []);
+      if (aliveRef.current && res.ok) setJobs(res.data ?? []);
     } catch {
       /* 轮询失败保留旧列表 */
     } finally {
-      setLoaded(true);
+      if (aliveRef.current) setLoaded(true);
     }
   }, []);
 
@@ -65,6 +70,7 @@ export default function ScrapeJobs() {
     void load();
     pollRef.current = setInterval(() => void load(), 2000);
     return () => {
+      aliveRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [load]);
@@ -73,8 +79,13 @@ export default function ScrapeJobs() {
     async (jobId: string): Promise<void> => {
       setBusyJob(jobId);
       try {
-        const res = (await window.electronAPI.scrapeCancel(jobId)) as { ok: boolean; error?: { message: string } };
-        if (res.ok) addToast('任务已取消', 'success');
+        const res = (await window.electronAPI.scrapeCancel(jobId)) as {
+          ok: boolean;
+          data?: { cancelled: boolean };
+          error?: { message: string };
+        };
+        if (res.ok && res.data?.cancelled) addToast('任务已取消', 'success');
+        else if (res.ok) addToast('任务已不在运行（可能刚刚完成）', 'error');
         else addToast(res.error?.message ?? '取消失败', 'error');
         await load();
       } catch (err) {
@@ -133,7 +144,7 @@ export default function ScrapeJobs() {
             <div key={job.id} className="bg-card border border-border rounded-xl p-4">
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className={`text-xs px-2 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
-                <span className="text-xs text-muted-foreground font-mono">{job.pluginId}</span>
+                <span className="text-xs text-muted-foreground">{PROVIDER_NAMES[job.pluginId] ?? '第三方插件'}</span>
                 <span className="text-xs text-muted-foreground">
                   {done}/{total} 项 · 成功 {applied}
                   {confirms > 0 ? ` · 待确认 ${confirms}` : ''}
@@ -182,7 +193,7 @@ export default function ScrapeJobs() {
                         title={entry.message}
                         className="text-[11px] px-1.5 py-0.5 bg-muted rounded text-muted-foreground"
                       >
-                        #{entry.itemId} {ITEM_LABEL[entry.status]}
+                        条目 {entry.itemId} · {ITEM_LABEL[entry.status]}
                       </span>
                     ))}
                   {failures > 12 && <span className="text-[11px] text-muted-foreground self-center">…等 {failures} 项</span>}
@@ -200,7 +211,7 @@ export default function ScrapeJobs() {
 
       <button
         type="button"
-        onClick={() => navigate(-1)}
+        onClick={() => void load()}
         className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground focus-ring"
       >
         <RefreshCw size={12} />

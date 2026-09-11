@@ -186,11 +186,15 @@ export function registerIpcHandlers(player: PlayerCore): void {
   // Plugin registry (QYP2-029 挂账② / QYP2-032): tmdb is the ONLY
   // registered metadata provider. Douban stays unregistered per the
   // ADR-0006 gate (contract test enforces no other wiring references it).
-  registerPlugin(buildTmdbPlugin(), {
+  const tmdbRegistration = registerPlugin(buildTmdbPlugin(), {
     getSecret: (namespace, key) => secretStore.getSecret(namespace, key),
     appVersion: app.getVersion(),
     locale: 'zh-CN',
   });
+  if (!tmdbRegistration.ok) {
+    // Registration must never silently degrade into "plugin missing".
+    console.error('[PLUGINS] TMDB 注册失败:', tmdbRegistration.errors.join('; '));
+  }
   const scrapeJobs = new ScrapeJobService({
     repo: {
       getItem: (id) => catalogRepo.getItem(id),
@@ -1320,7 +1324,8 @@ function registerCatalogHandlers(
       if (!Number.isInteger(itemId) || (itemId as number) <= 0) return err('VALIDATION_FAILED', '条目 id 不合法');
       if (typeof candidateId !== 'string' || candidateId.length === 0) return err('VALIDATION_FAILED', '候选 id 不合法');
       const item = catalogRepo.getItem(itemId as number);
-      const kind = item?.kind === 'series' ? 'series' : 'movie';
+      if (!item) return err('NOT_FOUND', '条目不存在');
+      const kind = item.kind === 'series' ? 'series' : 'movie';
       return ok(await scrapeJobs.applyCandidate(pluginId as string, itemId as number, candidateId as string, kind));
     }
   );
