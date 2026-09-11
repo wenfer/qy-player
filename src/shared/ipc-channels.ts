@@ -87,4 +87,11 @@ export const IPC_CHANNELS = {
     DELETE_SECRET: 'plugins:delete-secret',
     TEST: 'plugins:test',
   },
+  SCRAPE: {
+    START: 'scrape:start',
+    JOBS: 'scrape:jobs',
+    STATUS: 'scrape:status',
+    CANCEL: 'scrape:cancel',
+    APPLY: 'scrape:apply',
+  },
 } as const;

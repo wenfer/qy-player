@@ -2,7 +2,7 @@ import { applyProviderFields, validateMetadataPayload, winnerFor, type ProviderS
 import type { MetadataValue } from '../../../shared/types/plugins';
 import { matchCandidates, type MatchResult } from './matcher';
 import { ScrapeCache } from './cache';
-import type { MetadataCandidate, MetadataPayload } from '../../../shared/types/plugins';
+import type { MetadataCandidate, MetadataLookupInput, MetadataPayload } from '../../../shared/types/plugins';
 
 /**
  * Scrape job orchestration (QYP2-028, plan §11.2).
@@ -53,7 +53,7 @@ export interface ScrapeJobDeps {
   /** Runs the registered plugin's search via its PluginContext. */
   runSearch: (pluginId: string, query: { title: string; year?: number; kind?: 'movie' | 'series' }) => Promise<MetadataCandidate[]>;
   /** Runs the registered plugin's getDetails via its PluginContext. */
-  runDetails: (pluginId: string, id: string) => Promise<MetadataPayload>;
+  runDetails: (pluginId: string, id: string, input?: MetadataLookupInput) => Promise<MetadataPayload>;
   concurrency?: number;
   now?: () => number;
 }
@@ -120,6 +120,11 @@ export class ScrapeJobService {
     const all = this.allJobRecords();
     all[id] = record;
     this.deps.kv.set(JOB_KEY, JSON.stringify(all));
+  }
+
+  /** All known job records (newest first) for the jobs monitor page. */
+  listJobs(): ScrapeJobRecord[] {
+    return Object.values(this.allJobRecords()).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   getJob(id: string): ScrapeJobRecord | undefined {
@@ -268,18 +273,22 @@ export class ScrapeJobService {
     }
 
     const candidate = match.autoCandidate as MetadataCandidate;
-    return this.applyCandidate(pluginId, itemId, candidate.id);
+    return this.applyCandidate(pluginId, itemId, candidate.id, kind);
   }
 
   /** Manual-confirm path: the user picked a candidate explicitly. */
   async applyCandidate(
     pluginId: string,
     itemId: number,
-    candidateId: string
+    candidateId: string,
+    kind?: 'movie' | 'series'
   ): Promise<ScrapeItemResult> {
     let payload: MetadataPayload;
     try {
-      payload = await this.deps.runDetails(pluginId, candidateId);
+      // LookupInput carries the item kind so plugins can route endpoints
+      // (029 挂账①: season/episode routes need it too — batch scraping
+      // stays at movie/series level in 二期).
+      payload = await this.deps.runDetails(pluginId, candidateId, kind ? { kind } : undefined);
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
       return {

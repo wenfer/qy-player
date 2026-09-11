@@ -135,6 +135,14 @@ const electronAPI = {
   deletePluginSecret: (pluginId: string, key: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
   testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
+  // Scrape jobs (QYP2-032)
+  scrapeStart: (pluginId: string, itemIds: number[], jobId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.START, pluginId, itemIds, jobId),
+  scrapeJobs: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.JOBS),
+  scrapeStatus: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.STATUS, jobId),
+  scrapeCancel: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.CANCEL, jobId),
+  scrapeApply: (pluginId: string, itemId: number, candidateId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.APPLY, pluginId, itemId, candidateId),
   previewMediaDeletion: (ref: { sourceId: number; itemId: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, ref),
   executeMediaDeletion: (args: { token: string; confirmTitle?: string }) =>

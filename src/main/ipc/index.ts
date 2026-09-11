@@ -83,7 +83,15 @@ import {
   SafeDeleteService,
 } from '../modules/media-operations/delete-service';
 import { PluginConfigService, REQUIRED_SECRET_KEYS } from '../modules/plugin-runtime/config-service';
-import { listPlugins } from '../modules/plugin-runtime/registry';
+import {
+  getPlugin,
+  getPluginContext,
+  listPlugins,
+  registerPlugin,
+} from '../modules/plugin-runtime/registry';
+import { buildTmdbPlugin } from '../plugins/tmdb';
+import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
+import { PluginError } from '../../shared/types/plugins';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -174,6 +182,45 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
   // Stream headers are stashed main-side; renderers only see session ids.
   const streamHeaders: StreamHeaderCache = createStreamHeaderCache();
+
+  // Plugin registry (QYP2-029 挂账② / QYP2-032): tmdb is the ONLY
+  // registered metadata provider. Douban stays unregistered per the
+  // ADR-0006 gate (contract test enforces no other wiring references it).
+  registerPlugin(buildTmdbPlugin(), {
+    getSecret: (namespace, key) => secretStore.getSecret(namespace, key),
+    appVersion: app.getVersion(),
+    locale: 'zh-CN',
+  });
+  const scrapeJobs = new ScrapeJobService({
+    repo: {
+      getItem: (id) => catalogRepo.getItem(id),
+      listMetadataSources: (itemId) => catalogRepo.listMetadataSources(itemId),
+      upsertMetadataSource: (itemId, field, provider, value) =>
+        catalogRepo.upsertMetadataSource(itemId, field, provider, value),
+    },
+    kv: {
+      get: (key) => storage.getConfig(key),
+      set: (key, value) => storage.setConfig(key, value),
+    },
+    cacheDir: join(app.getPath('userData'), 'scrape-cache'),
+    runSearch: async (pluginId, query) => {
+      const registered = getPlugin(pluginId);
+      const ctx = getPluginContext(pluginId);
+      if (!registered || !ctx) throw new PluginError('NOT_FOUND', '插件未注册');
+      return registered.plugin.search({
+        query: query.title,
+        ...(query.year !== undefined ? { year: query.year } : {}),
+        ...(query.kind !== undefined ? { kind: query.kind } : {}),
+      }, ctx);
+    },
+    runDetails: async (pluginId, id, input) => {
+      const registered = getPlugin(pluginId);
+      const ctx = getPluginContext(pluginId);
+      if (!registered || !ctx) throw new PluginError('NOT_FOUND', '插件未注册');
+      return registered.plugin.getDetails(id, input ?? {}, ctx);
+    },
+    concurrency: 2,
+  });
 
   // Initialize playback state manager. WebDAV progress keys bypass the
   // phase-1 tables (media_type CHECK) into catalog_user_state; the key
@@ -798,7 +845,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
     closeDatabase();
   });
 
-  registerCatalogHandlers(db, secretStore, catalogRepo, pluginConfigService);
+  registerCatalogHandlers(db, secretStore, catalogRepo, pluginConfigService, scrapeJobs);
 }
 
 // ---------------------------------------------------------------------------
@@ -836,7 +883,8 @@ function registerCatalogHandlers(
   db: ReturnType<typeof getDatabase>,
   secretStore: SecretStore,
   catalogRepo: ReturnType<typeof createCatalogRepository>,
-  pluginConfigService: PluginConfigService
+  pluginConfigService: PluginConfigService,
+  scrapeJobs: ScrapeJobService
 ): void {
   // Subtitle attachments live under <userData>/subtitles/<itemId>/
   // (plan §13). Interrupted imports leave .tmp- files; sweep them once at
@@ -1226,6 +1274,54 @@ function registerCatalogHandlers(
         );
       }
       return ok({ imported: result.imported });
+    }
+  );
+
+  // ---- Scrape jobs (QYP2-032, plan §11.2) ----
+  const assertScrapePluginUsable = (pluginId: unknown): string | null => {
+    if (typeof pluginId !== 'string' || pluginId.length === 0) return '插件参数不合法';
+    if (!getPlugin(pluginId)) return '插件未注册';
+    if (!pluginConfigService.getConfig(pluginId).enabled) return '插件已停用';
+    return null;
+  };
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPE.START, (_event, pluginId: unknown, itemIds: unknown, jobId: unknown) => {
+    const pluginProblem = assertScrapePluginUsable(pluginId);
+    if (pluginProblem) return err('VALIDATION_FAILED', pluginProblem);
+    if (!Array.isArray(itemIds) || itemIds.some((id) => !Number.isInteger(id) || id <= 0) || itemIds.length === 0) {
+      return err('VALIDATION_FAILED', '条目列表不合法');
+    }
+    if (itemIds.length > 500) return err('VALIDATION_FAILED', '单批最多 500 个条目');
+    if (jobId !== undefined && jobId !== null && typeof jobId !== 'string') {
+      return err('VALIDATION_FAILED', '任务 id 不合法');
+    }
+    return ok(scrapeJobs.startJob(pluginId as string, itemIds as number[], (jobId as string) ?? undefined));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPE.JOBS, () => {
+    return ok(scrapeJobs.listJobs());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPE.STATUS, (_event, jobId: unknown) => {
+    if (typeof jobId !== 'string' || jobId.length === 0) return err('VALIDATION_FAILED', '任务 id 不合法');
+    return ok(scrapeJobs.getJob(jobId));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRAPE.CANCEL, (_event, jobId: unknown) => {
+    if (typeof jobId !== 'string' || jobId.length === 0) return err('VALIDATION_FAILED', '任务 id 不合法');
+    return ok({ cancelled: scrapeJobs.cancelJob(jobId) });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SCRAPE.APPLY,
+    async (_event, pluginId: unknown, itemId: unknown, candidateId: unknown) => {
+      const pluginProblem = assertScrapePluginUsable(pluginId);
+      if (pluginProblem) return err('VALIDATION_FAILED', pluginProblem);
+      if (!Number.isInteger(itemId) || (itemId as number) <= 0) return err('VALIDATION_FAILED', '条目 id 不合法');
+      if (typeof candidateId !== 'string' || candidateId.length === 0) return err('VALIDATION_FAILED', '候选 id 不合法');
+      const item = catalogRepo.getItem(itemId as number);
+      const kind = item?.kind === 'series' ? 'series' : 'movie';
+      return ok(await scrapeJobs.applyCandidate(pluginId as string, itemId as number, candidateId as string, kind));
     }
   );
 
