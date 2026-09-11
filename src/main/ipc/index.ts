@@ -288,6 +288,7 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     onlineContinueWatching: async () => {
       const rows: OnlineContinueInput[] = [];
       for (const { config, client } of getActiveServerClients(storage, secretStore)) {
+        try {
         const items = await client.getContinueWatching();
         for (const item of items) {
           rows.push({
@@ -304,29 +305,36 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             updatedAt: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) || 0 : 0,
           });
         }
+        } catch (err) {
+          console.error(`[UNIFIED] 服务器 ${config.name} 继续观看失败:`, err instanceof Error ? err.message : err);
+        }
       }
       return rows;
     },
     onlineSearch: async (query: string) => {
       const rows: OnlineContinueInput[] = [];
       for (const { config, client } of getActiveServerClients(storage, secretStore)) {
-        const items = await client.getItems(undefined, {
-          searchTerm: query,
-          includeItemTypes: 'Movie,Series,Episode',
-          recursive: true,
-          limit: 100,
-        });
-        for (const item of items) {
-          rows.push({
-            provider: config.type as 'jellyfin' | 'emby',
-            serverId: config.id,
-            itemId: item.Id,
-            title: item.Name,
-            kind: item.Type,
-            year: item.ProductionYear,
-            rating: item.CommunityRating,
-            primaryTag: item.ImageTags?.Primary,
+        try {
+          const items = await client.getItems(undefined, {
+            searchTerm: query,
+            includeItemTypes: 'Movie,Series,Episode',
+            recursive: true,
+            limit: 100,
           });
+          for (const item of items) {
+            rows.push({
+              provider: config.type as 'jellyfin' | 'emby',
+              serverId: config.id,
+              itemId: item.Id,
+              title: item.Name,
+              kind: item.Type,
+              year: item.ProductionYear,
+              rating: item.CommunityRating,
+              primaryTag: item.ImageTags?.Primary,
+            });
+          }
+        } catch (err) {
+          console.error(`[UNIFIED] 服务器 ${config.name} 搜索失败:`, err instanceof Error ? err.message : err);
         }
       }
       return rows;
@@ -334,25 +342,29 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     onlineRecent: async () => {
       const rows: OnlineContinueInput[] = [];
       for (const { config, client } of getActiveServerClients(storage, secretStore)) {
-        const items = await client.getItems(undefined, {
-          sortBy: 'DateCreated',
-          sortOrder: 'Descending',
-          includeItemTypes: 'Movie,Series',
-          recursive: true,
-          limit: 50,
-        });
-        for (const item of items) {
-          rows.push({
-            provider: config.type as 'jellyfin' | 'emby',
-            serverId: config.id,
-            itemId: item.Id,
-            title: item.Name,
-            kind: item.Type,
-            year: item.ProductionYear,
-            rating: item.CommunityRating,
-            primaryTag: item.ImageTags?.Primary,
-            updatedAt: item.DateCreated ? Date.parse(item.DateCreated) || 0 : 0,
+        try {
+          const items = await client.getItems(undefined, {
+            sortBy: 'DateCreated',
+            sortOrder: 'Descending',
+            includeItemTypes: 'Movie,Series',
+            recursive: true,
+            limit: 50,
           });
+          for (const item of items) {
+            rows.push({
+              provider: config.type as 'jellyfin' | 'emby',
+              serverId: config.id,
+              itemId: item.Id,
+              title: item.Name,
+              kind: item.Type,
+              year: item.ProductionYear,
+              rating: item.CommunityRating,
+              primaryTag: item.ImageTags?.Primary,
+              updatedAt: item.DateCreated ? Date.parse(item.DateCreated) || 0 : 0,
+            });
+          }
+        } catch (err) {
+          console.error(`[UNIFIED] 服务器 ${config.name} 最近添加失败:`, err instanceof Error ? err.message : err);
         }
       }
       return rows;

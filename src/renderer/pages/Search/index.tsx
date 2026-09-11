@@ -9,6 +9,7 @@ import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
 import type { UnifiedCard } from '../../../main/modules/catalog/unified-query';
 import type { MediaRef } from '../../../shared/types/catalog';
+import { mediaRefKey } from '../../../main/modules/catalog/unified-query';
 
 
 /** QYP2-036: 统一搜索卡 → 展示/路由适配（catalog /browse，在线 /detail）。 */
@@ -46,7 +47,6 @@ export default function Search() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const queryTextRef = useRef('');
-  const serverMapRef = useRef<Awaited<ReturnType<typeof getServerMap>>>(new Map());
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
@@ -68,10 +68,17 @@ export default function Search() {
         const data = res.data as { items?: UnifiedCard[]; page?: number; total?: number };
         const mapped = (data.items ?? []).map((card) => unifiedToMediaItem(card, serverMap));
         // 局部来源失败不阻塞：main 侧已按来源隔离，缺席来源只是没有卡。
-        setResults((prev) => (replace ? mapped : [...prev, ...mapped]));
+        // load-more 跨页去重：append 前按完整 MediaRef 键过滤（页边界漂移防重）。
+        if (replace) {
+          setResults(mapped);
+        } else {
+          setResults((prev) => {
+            const seen = new Set(prev.map((entry) => mediaRefKey(entry.catalogRef ?? { provider: 'jellyfin', serverId: entry.serverId ?? 0, itemId: entry.id })));
+            return [...prev, ...mapped.filter((entry) => !seen.has(mediaRefKey(entry.catalogRef as MediaRef)))];
+          });
+        }
         setPage(data.page ?? targetPage);
         setTotal(data.total ?? 0);
-        serverMapRef.current = serverMap;
       } catch (err) {
         addToast(`搜索失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
       } finally {

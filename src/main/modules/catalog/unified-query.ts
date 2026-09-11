@@ -192,6 +192,8 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
   };
 
   const catalogSearch = (query: string, limit: number): UnifiedCard[] => {
+    // 用户输入里的 % / _ 必须按字面匹配（语义问题，非注入——已参数化）。
+    const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const rows = db
       .prepare(
         `SELECT ci.id AS item_id, ci.source_id, ci.title, ci.kind, ci.year,
@@ -199,11 +201,11 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
          FROM catalog_items ci
          WHERE ci.kind IN ('movie', 'series', 'video')
            AND ci.availability = 'online'
-           AND ci.title LIKE '%' || ? || '%'
+           AND ci.title LIKE '%' || ? || '%' ESCAPE '\\'
          ORDER BY ci.title
          LIMIT ?`
       )
-      .all(query, limit) as Array<{ item_id: number; source_id: number; title: string | null; kind: string; year: number | null; rating_json: string | null }>;
+      .all(escaped, limit) as Array<{ item_id: number; source_id: number; title: string | null; kind: string; year: number | null; rating_json: string | null }>;
     return rows.map((row) => {
       let rating: number | undefined;
       try {

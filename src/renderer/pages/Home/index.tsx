@@ -31,12 +31,16 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: ReturnType<typeof getS
     imageUrl,
     year: card.year,
     rating: card.rating,
-    type: isCatalog ? 'Movie' : card.kind === 'series' ? 'Series' : card.kind === 'episode' ? 'Episode' : 'Movie',
+    type: card.kind === 'series' || card.kind === 'Series' ? 'Series' : card.kind === 'episode' ? 'Episode' : 'Movie',
     serverId,
     serverType: isCatalog ? 'local' : provider,
     catalogRef: card.ref,
     ...(card.position != null && card.duration
-      ? { catalogProgress: { position: card.position, duration: card.duration, isFinished: card.isFinished ?? false } }
+      ? {
+          catalogProgress: { position: card.position, duration: card.duration, isFinished: card.isFinished ?? false },
+          // PosterCard 渲染 0–1 比例（统一后两来源都恢复进度条）
+          progress: Math.min(1, Math.max(0, card.position / card.duration)),
+        }
       : {}),
     dateCreated: card.updatedAt ? new Date(card.updatedAt).toISOString() : undefined,
   };
