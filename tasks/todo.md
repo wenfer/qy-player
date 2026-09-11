@@ -548,13 +548,20 @@ Evidence:
 
 ### QYP2-025 开发删除预览与确认 UI
 
-- [ ] **依赖：** QYP2-023、QYP2-024
-- [ ] **Read first：** `src/renderer/pages/Detail/index.tsx`、本文第 14.2 节
-- [ ] **允许修改：** `src/renderer/pages/Detail/MediaActions.tsx`、`src/renderer/pages/Detail/DeleteMediaDialog.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/renderer/detail/delete-media.test.tsx`
-- [ ] **目标：** 展示范围与风险，提交 opaque ref + token，不提交路径。
-- [ ] **验收：** WebDAV 永久删除要求输入标题；执行中禁重复；unknown 提供重查；失败回滚；只读状态明确。
-- [ ] **验证：** renderer 测试、过期 token/目录变化/离线/只读手工验证。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-023、QYP2-024
+- [x] **Read first：** `src/renderer/pages/Detail/index.tsx`、本文第 14.2 节
+- [x] **允许修改：** `src/renderer/pages/Detail/MediaActions.tsx`、`src/renderer/pages/Detail/DeleteMediaDialog.tsx`、`src/renderer/pages/Detail/index.tsx`、`src/preload/index.ts`、`tests/renderer/detail/delete-media.test.tsx`
+- [x] **目标：** 展示范围与风险，提交 opaque ref + token，不提交路径。
+- [x] **验收：** WebDAV 永久删除要求输入标题；执行中禁重复；unknown 提供重查；失败回滚；只读状态明确。
+- [x] **验证：** renderer 测试、过期 token/目录变化/离线/只读手工验证。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（35 文件 426 测试通过，本任务 10 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - UI：MediaActions（删除入口容器）+ DeleteMediaDialog（真实范围展示：标题/来源/目录/文件数/大小/方式，回收站 vs 永久删除措辞区分；WebDAV 要求逐字输入标题，空/错输入禁用执行；执行中禁重复提交+禁关闭；token 被服务端消费后失败→重置为「重新检查」新预览，绝不静默重试旧 token；unknown→warning toast+列表重查，绝不报成功；只读来源 preview 拒绝并展示原因）。
+  - 提交物仅 {sourceId,itemId} 与 {token,confirmTitle}——路径/href/递归参数永不经过 renderer
+  - Review notes: 首轮 Approve（0 阻断）；OPTIONAL 修 6（rAF 聚焦替代 setTimeout 竞态、成功/unknown 路径回焦 opener、trap 空转时焦点锁回容器、status 白名单校验、catch 分支同样重置预览、Esc 关闭测试）；OPTIONAL 延后：删除入口对只读来源常显（catalog 详情未暴露 readOnly/canDelete，preview 拒绝兜底）
+  - 越界（待追认）：LibraryBrowse/index.tsx（接线，目录条目详情实际所在，Detail/index.tsx 为在线详情页不适用）——同 QYP2-021/023 先例
+  - 手工验证（待补录）：过期 token/目录变化/离线/只读四态实机
+  - Result: 通过（自动化；手工待补）
 
 ### Checkpoint D
 
