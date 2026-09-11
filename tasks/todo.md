@@ -761,7 +761,14 @@ Evidence:
 - [ ] **目标：** 合并四类来源的继续观看/最近添加/搜索，并保留 owner 精确路由。
 - [ ] **验收：** 仅按完整 MediaRef 去重；来源局部失败不阻塞其他内容；分页 ≤200；网格换行无横向滚动。
 - [ ] **验证：** mixed-source renderer/main 测试和手工混合来源流程。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① 接线必需越界文件——`ipc-channels.ts`（UNIFIED 三通道）、`main/ipc/index.ts`（service 装配 + handlers）、`preload`、`jellyfin-client.ts`（UserData/DateCreated 类型补全）；② Home/LibraryBrowse 等沿用既有接线惯例）：**
+  - 提交：775b217（实现）+ 评审修复提交。
+  - `unified-query.ts`：mediaRefKey 完整键（provider+owner+itemId）+ dedupeByMediaRef（跨源同名保留两卡，宁可重复不错归属）+ clampPageSize ≤200 + paginate + isolateSource（来源失败折叠为缺席）+ service（继续观看=catalog_user_state≥30s 未完 + 在线 ContinueWatching；最近添加=created_at + DateCreated；搜索=catalog LIKE 转义通配符 + 全服务器）。
+  - UNIFIED 三通道 handlers：在线循环 per-server try/catch（一台故障只缺席该服务器）。
+  - Home：统一继续观看/最近添加（进度条 0–1 恢复渲染）；catalog 卡走 /browse + catalogRef 播放。Search：统一搜索 + ≤200 分页 load-more + 跨页 MediaRef 去重。
+  - 测试：unified-sources 8 例（键含 owner、跨源同名不合并、clamp/切片、首页混合源渲染、统一端点失败首页可用、load-more、空态）。共 601 tests/47 files 全绿。
+  - 评审：2×REQUIRED（进度条回归、per-server 隔离）+ OPTIONAL/NIT 全部修复。
+  - 人工验证清单追加：混合来源手工流程（local+WebDAV+Jellyfin+Emby 的继续观看/最近添加/搜索）。
 
 ### QYP2-037 完成缓存、性能与脱敏诊断
 
