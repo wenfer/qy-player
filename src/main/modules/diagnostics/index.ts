@@ -14,45 +14,8 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CacheManager } from '../cache/cache-manager';
+import type { DiagnosticsSummary } from '../../../shared/types/diagnostics';
 import { CONCURRENCY_BUDGET, MAX_EVENT_HZ, MAX_PAGE_SIZE } from '../cache/cache-manager';
-
-export interface DiagnosticsServerInfo {
-  id: number;
-  /** 服务端显示名（用户自己起的，非秘密）。 */
-  name: string;
-  /** 'jellyfin' | 'emby'（非秘密）。 */
-  type: string;
-  /** 永远脱敏后的形态。 */
-  addressMasked: string;
-  ok: boolean;
-}
-
-export interface DiagnosticsPartitionInfo {
-  id: string;
-  description: string;
-  rootDirMasked: string | null;
-  maxEntries?: number;
-  sweepable: boolean;
-  fileCount?: number;
-  approxBytes?: number;
-}
-
-export interface DiagnosticsSummary {
-  generatedAt: string;
-  appVersion: string;
-  servers: DiagnosticsServerInfo[];
-  caches: DiagnosticsPartitionInfo[];
-  budgets: {
-    localScan: number;
-    webdavScan: number;
-    probe: number;
-    scraper: number;
-    maxEventHz: number;
-    maxPageSize: number;
-  };
-  /** 已知子系统就绪状态（无敏感值，只有 ok/失败计数）。 */
-  subsystems: Array<{ id: string; ok: boolean; detail: string }>;
-}
 
 const SECRET_KEY_PATTERN = /(api[_-]?key|token|secret|password|credential|bearer)/i;
 
@@ -67,11 +30,18 @@ export function maskUrl(raw: string): string {
   return `${url.protocol}//***${url.pathname === '/' ? '' : '/*'}`;
 }
 
-/** 任意字符串值脱敏：疑似秘密（键名匹配）整段替换。 */
+/**
+ * 任意字符串值脱敏：疑似秘密（键名匹配）整段替换；URL 内嵌凭据
+ * （user:pass@ 与 query 里的 token/api_key 变体）整段替换。
+ */
 export function redactValue(key: string, value: string): string {
   if (SECRET_KEY_PATTERN.test(key)) return '***';
-  // URL 内嵌凭据（user:pass@）或长 token 形态
-  if (/[?&](api_key|token|api_key_id)=/i.test(value)) return '***';
+  // 值本身含秘密字样（api_key=… / token=… 等任意分隔）→ 整段打码。
+  if (SECRET_KEY_PATTERN.test(value) && /(=|:\s*)/i.test(value)) return '***';
+  // 值内嵌 URL（含 userinfo/私有地址）→ 逐个 URL 打码替换。
+  if (/https?:\/\//i.test(value)) {
+    return value.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => maskUrl(url));
+  }
   return value;
 }
 
@@ -85,7 +55,8 @@ export interface DiagnosticsInput {
 export function buildDiagnosticsSummary(input: DiagnosticsInput): DiagnosticsSummary {
   const servers = input.servers.map((server) => ({
     id: server.id,
-    name: server.name,
+    // 用户自起名仍过一遍脱敏（防调用方误传秘密进 name）。
+    name: redactValue('server_name', server.name),
     type: server.type,
     addressMasked: redactValue('base_url', maskUrl(server.base_url)),
     ok: server.is_active === 1 && server.last_ok !== false,
@@ -146,6 +117,10 @@ export function buildDiagnosticsSummary(input: DiagnosticsInput): DiagnosticsSum
       maxEventHz: MAX_EVENT_HZ,
       maxPageSize: MAX_PAGE_SIZE,
     },
-    subsystems: input.subsystems ?? [],
+    // detail 由调用方生成，但红线在此兜底：疑似秘密/URL 一律打码。
+    subsystems: (input.subsystems ?? []).map((sub) => ({
+      ...sub,
+      detail: redactValue('detail', sub.detail),
+    })),
   };
 }

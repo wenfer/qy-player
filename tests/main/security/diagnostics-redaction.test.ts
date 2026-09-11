@@ -18,7 +18,10 @@ import * as fsmod from 'node:fs';
 const fs = fsmod as typeof import('node:fs');
 
 /**
- * QYP2-037: 缓存配额/LRU/过期、并发预算、脱敏诊断 + 10k 基线不回退。
+ * QYP2-037: 缓存配额/LRU/过期、并发预算与诊断脱敏。
+ * 10,000 项扫描基线由 tests/main/library-scanner/{local,webdav}-scan 的
+ * 既有基线测试维持（本轮复跑 local≈16.7s / webdav≈16.9s，门限 <60s
+ * 未回退）；本文件不重复跑 benchmark。
  */
 
 let tempDirs: string[] = [];
@@ -134,6 +137,17 @@ describe('诊断脱敏（验收：无秘密/完整私有 URL）', () => {
     // 预算展示
     expect(summary.budgets).toMatchObject({ localScan: 8, webdavScan: 4, probe: 1, scraper: 2 });
     expect(summary.caches.find((c) => c.id === 'plugin-response')?.approxBytes).toBe(10);
+  });
+
+  it('subsystem detail / server name pass through redaction (脱敏兜底)', () => {
+    const summary = buildDiagnosticsSummary({
+      appVersion: 't',
+      servers: [{ id: 1, name: '服务器-api_key=abcd', type: 'jellyfin', base_url: 'http://x', is_active: 1 }],
+      cacheManager: new CacheManager(),
+      subsystems: [{ id: 'probe', ok: false, detail: '失败于 http://192.168.1.10:8096 连接' }],
+    });
+    expect(JSON.stringify(summary)).not.toContain('abcd');
+    expect(JSON.stringify(summary)).not.toContain('192.168.1.10');
   });
 });
 

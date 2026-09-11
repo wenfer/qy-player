@@ -14,7 +14,7 @@
  * 诊断展示：local≤8、WebDAV≤4、probe≤1、scraper≤2。
  */
 
-import { readdirSync, statSync, unlinkSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, lstatSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const CONCURRENCY_BUDGET = {
@@ -95,8 +95,12 @@ export class CacheManager {
   private collectFiles(
     dir: string,
     protectedNames: string[],
-    out: Array<{ path: string; size: number; mtime: number }>
+    out: Array<{ path: string; size: number; mtime: number }>,
+    depth = 0
   ): void {
+    // 深度上限 + 不跟随目录符号链接：sweepable 分区里的链接绝不成为
+    // 删除逃逸通道（链接目标里的真实文件永远不会被本清扫触碰）。
+    if (depth > 16) return;
     let names: string[];
     try {
       names = readdirSync(dir);
@@ -107,16 +111,17 @@ export class CacheManager {
       const full = join(dir, name);
       // 受保护名（人工字幕所在目录）绝不进入删除候选。
       if (protectedNames.some((p) => name === p)) continue;
-      let stat;
+      let lstat;
       try {
-        stat = statSync(full);
+        lstat = lstatSync(full);
       } catch {
         continue;
       }
-      if (stat.isDirectory()) {
-        this.collectFiles(full, protectedNames, out);
+      if (lstat.isSymbolicLink()) continue;
+      if (lstat.isDirectory()) {
+        this.collectFiles(full, protectedNames, out, depth + 1);
       } else {
-        out.push({ path: full, size: stat.size, mtime: stat.mtimeMs });
+        out.push({ path: full, size: lstat.size, mtime: lstat.mtimeMs });
       }
     }
   }

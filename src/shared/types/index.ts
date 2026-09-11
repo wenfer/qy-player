@@ -109,3 +109,4 @@ export * from './plugins';
 export * from './actions';
 
 export * from './playback';
+export * from './diagnostics';
