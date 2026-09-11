@@ -778,7 +778,13 @@ Evidence:
 - [ ] **目标：** 实现图片/技术信息/插件响应配额、LRU/过期、并发控制、脱敏诊断摘要。
 - [ ] **验收：** local≤8、WebDAV≤4、probe≤1、scraper≤2；缓存不删人工字幕；诊断无秘密/完整私有 URL；10,000 项基线不回退。
 - [ ] **验证：** synthetic benchmark、诊断脱敏测试、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① 允许清单外——`ipc-channels.ts`/`preload`（DIAGNOSTICS.SUMMARY 通道成套接线）、`shared/types/diagnostics.ts`（新契约，按 §16.6 成套要求）+ barrel 导出；清单内的 `job-controller.ts` 未动——并发预算已在 job-controller/config-service/媒体内部实现，本轮以常量单源 + 测试断言钉死阈值）：**
+  - 提交：aab2dc6（实现）+ dcc8800（评审修复）+ flaky 修复提交。
+  - `cache-manager.ts`：分区注册表（probe 内存 LRU / 插件响应磁盘 mtime-LRU / **人工字幕受保护分区**）+ sweep（mtime 最旧先删、到配额即停、受保护名不进删除候选、lstat 不跟随 symlink + 深度上限 16 防删除逃逸）；§16.4 预算常量单源。
+  - `diagnostics/index.ts`：maskUrl（主机/端口/路径/查询打码）+ redactValue（秘密键名/值含秘密字样/URL 内嵌凭据/值内嵌 URL 逐个打码）+ **DiagnosticsSummary 类型在 shared/types**（字段即脱敏形态：addressMasked/rootDirMasked）+ subsystem detail/name 兜底脱敏。
+  - 测试：diagnostics-redaction 9 例（预算阈值、sweep 顺序+字幕保护、防误删、脱敏红线含兜底、ScrapeCache 配额）；10k 基线由 library-scanner 既有基线测试维持（复跑 local≈16.7s/webdav≈16.9s <60s 未回退）。共 610 tests/48 files 全绿。
+  - 评审：4×REQUIRED（redactValue userinfo 契约、subsystem/name 兜底、shared 类型成套、Evidence/注释修正）+ 2×OPTIONAL（symlink 逃逸、配额语义）全部修复；复审通过。
+  - 门禁：typecheck 0 错误、git diff --check 干净。
 
 ### QYP2-038 全量回归、文档同步与发布门禁
 
