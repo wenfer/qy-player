@@ -663,7 +663,14 @@ Evidence:
 - [ ] **目标：** 按批准路径实现候选/详情；公开页面仅可低速强缓存、无需登录。
 - [ ] **验收：** 默认关闭；不模拟登录/验证码/绕过限制；结构变化返回 UPSTREAM_CHANGED 并暂停批量；空结果不覆盖旧值。
 - [ ] **验证：** fixture 覆盖正常、空、限流、结构变化；获准环境单项手工测试。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① job-service.ts 越界改动——ScrapeItemResult 增加 errorCode + UPSTREAM_CHANGED 暂停批量，为 §11.4 明文要求，允许清单未列；② douban-contract.test.ts GATE 更新（目录仅 types.ts → 源码级无引用检查），因本任务落地实现工厂；③ ADR-0006 措辞两处对齐（工厂已存在未注册 / 限流措辞）；④ douban.test.ts 使用真实 job-service 做暂停集成测试）：**
+  - 提交：beb7323（实现）+ 评审改进提交。
+  - 实现：`client.ts`（仅 GET 两个无需登录公开入口；无 Cookie/登录态、明确 UA；进程级 3s start-to-start 节流；强缓存详情 30 天/搜索 6h 命中零请求；结构锚点失败→UPSTREAM_CHANGED fail-closed）+ `mapper.ts`（保守字段映射 + douban uniqueId）+ `index.ts`（工厂按 ADR 门禁未注册；季/集→NOT_FOUND 诚实拒绝；payload 过 validateMetadataPayload）。
+  - 降级语义：结构变化→暂停批量（pending 保留，startJob 同 id 可恢复）；RATE_LIMITED→条目隔离不暂停；空结果→matcher 拒绝保留旧值；任何失败不阻断播放。
+  - 测试：douban.test.ts 22 例（正常/空/限流/结构变化/坏 JSON/无 ld+json、30 天 TTL 断言、3s 节流注入时钟断言、无 Cookie、分集拒绝、批量暂停集成 + 非致命不暂停）+ contract 9 例含源码级 GATE。共 519 tests/41 files 全绿。
+  - 独立评审：**Approve**（无 CRITICAL/REQUIRED；4×OPTIONAL+NIT 全部落实：节流语义注释、暂停边界注释、GATE 边界说明、TTL 断言、ADR 措辞）。
+  - 门禁：typecheck 0 错误、git diff --check 干净。
+  - 挂账：① 人工评审 ADR-0006 签认后，接线注册（含 job-service runDetails 带 LookupInput 的签名扩展，见 029 挂账①）；② 获准环境单项手工测试（真实豆瓣页面冒烟，验证 fixture 结构未漂移）列入人工验证清单。
 
 ### QYP2-032 开发单项/批量刮削 UI
 
