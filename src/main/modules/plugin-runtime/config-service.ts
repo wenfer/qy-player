@@ -25,8 +25,9 @@ export interface PluginConfig {
 }
 
 export interface PluginHealth {
-  /** 'ready' = configured+enabled; 'auth-required' = no secret; 'disabled'. */
-  status: 'ready' | 'auth-required' | 'disabled';
+  /** 'ready' = configured+enabled; 'auth-required' = no secret; 'disabled';
+   * 'error' = probe failure distinct from missing credentials (§11.1). */
+  status: 'ready' | 'auth-required' | 'disabled' | 'error';
   /** Retryability guidance for the UI (plan §11.1 unified codes). */
   retryable: boolean;
   message: string;
@@ -45,7 +46,26 @@ export interface PluginConfigDeps {
 }
 
 const DEFAULT_CONFIG: PluginConfig = { enabled: false, priority: 100, settings: {} };
-const REQUIRED_SECRET_KEYS = new Set(['api-token', 'api-key', 'token']);
+/** Keys that must travel the SecretStore channel, never the plain KV. */
+export const REQUIRED_SECRET_KEYS = new Set(['api-token', 'api-key', 'token']);
+
+/** Normalized (trim + NFKC + lowercase) so variants cannot bypass the guard. */
+function normalizedKey(key: string): string {
+  return key.normalize('NFKC').trim().toLowerCase();
+}
+
+/** Recursively reject secret-grade keys and nested objects in settings. */
+function assertSettingsSafe(settings: Record<string, unknown>): void {
+  for (const [rawKey, value] of Object.entries(settings)) {
+    const key = normalizedKey(rawKey);
+    if (REQUIRED_SECRET_KEYS.has(key)) {
+      throw new Error(`敏感键 "${rawKey}" 必须通过 secret 通道设置`);
+    }
+    if (value !== null && typeof value === 'object') {
+      throw new Error('settings 不允许嵌套对象');
+    }
+  }
+}
 
 function configKey(pluginId: string): string {
   // The id is registry-validated ([a-z0-9-]) - safe as a key suffix.
@@ -94,12 +114,9 @@ export class PluginConfigService {
         : current.priority,
       settings: patch.settings ?? current.settings,
     };
-    // Defense in depth: non-sensitive settings must never smuggle secrets.
-    for (const key of Object.keys(next.settings)) {
-      if (REQUIRED_SECRET_KEYS.has(key.toLowerCase())) {
-        throw new Error('敏感键必须通过 secret 通道设置');
-      }
-    }
+    // Defense in depth: settings must never smuggle secrets (normalized
+    // keys, no nested objects) into the plaintext app_config KV.
+    assertSettingsSafe(next.settings);
     this.deps.setConfig(configKey(pluginId), JSON.stringify(next));
     this.healthCache.delete(pluginId);
     return next;
@@ -160,17 +177,18 @@ export class PluginConfigService {
       const secret = this.readSecret(pluginId, requiredSecretKey);
       try {
         const probe = await this.deps.probe(pluginId, secret);
-        health = {
-          status: probe.ok ? 'ready' : 'auth-required',
-          retryable: probe.retryable,
-          message: probe.message,
-          checkedAt: this.deps.now?.() ?? Date.now(),
-        };
+        // Probe messages are UI-bound: truncated, sanitized by contract.
+        const message = probe.message.slice(0, 300);
+        if (probe.ok) {
+          health = { status: 'ready', retryable: false, message, checkedAt: this.deps.now?.() ?? Date.now() };
+        } else {
+          health = { status: 'error', retryable: probe.retryable, message, checkedAt: this.deps.now?.() ?? Date.now() };
+        }
       } catch (err) {
         health = {
-          status: 'auth-required',
+          status: 'error',
           retryable: true,
-          message: err instanceof Error ? err.message : '探测失败，可重试',
+          message: (err instanceof Error ? err.message : '探测失败').slice(0, 300),
           checkedAt: this.deps.now?.() ?? Date.now(),
         };
       }
@@ -182,7 +200,11 @@ export class PluginConfigService {
         checkedAt: this.deps.now?.() ?? Date.now(),
       };
     }
-    this.healthCache.set(pluginId, health);
+    // Only stable 'ready' state is cached; failures stay uncached so
+    // 「测试连接」retries actually re-run (review REQUIRED).
+    if (health.status === 'ready') {
+      this.healthCache.set(pluginId, health);
+    }
     return health;
   }
 }

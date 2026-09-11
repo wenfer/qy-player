@@ -82,7 +82,7 @@ import {
   mapDeletePreviewResult,
   SafeDeleteService,
 } from '../modules/media-operations/delete-service';
-import { PluginConfigService } from '../modules/plugin-runtime/config-service';
+import { PluginConfigService, REQUIRED_SECRET_KEYS } from '../modules/plugin-runtime/config-service';
 import { listPlugins } from '../modules/plugin-runtime/registry';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
@@ -1234,7 +1234,7 @@ function registerCatalogHandlers(
     return ok(
       listPlugins().map(({ manifest }) => {
         const config = pluginConfigService.getConfig(manifest.id);
-        const secretKeys = ['api-token', 'api-key', 'token'].filter((key) =>
+        const secretKeys = [...REQUIRED_SECRET_KEYS].filter((key) =>
           pluginConfigService.hasSecret(manifest.id, key)
         );
         return {
@@ -1289,16 +1289,22 @@ function registerCatalogHandlers(
   );
 
   ipcMain.handle(IPC_CHANNELS.PLUGINS.DELETE_SECRET, (_event, pluginId: unknown, key: unknown) => {
-    if (typeof pluginId !== 'string' || typeof key !== 'string') {
+    if (typeof pluginId !== 'string' || typeof key !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
       return err('VALIDATION_FAILED', '参数无效');
+    }
+    if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
+      return err('NOT_FOUND', '插件未注册');
     }
     pluginConfigService.deleteSecret(pluginId, key);
     return ok({ deleted: true });
   });
 
   ipcMain.handle(IPC_CHANNELS.PLUGINS.TEST, async (_event, pluginId: unknown) => {
-    if (typeof pluginId !== 'string') {
+    if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
       return err('VALIDATION_FAILED', '插件 ID 无效');
+    }
+    if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
+      return err('NOT_FOUND', '插件未注册');
     }
     const health = await pluginConfigService.checkHealth(pluginId);
     return ok(health);

@@ -134,12 +134,23 @@ describe('PluginConfigService (QYP2-027)', () => {
     expect(probe).toHaveBeenCalledTimes(2);
   });
 
-  it('probe failures map to auth-required + retryable', async () => {
+  it('probe failures map to a distinct retryable error (not auth-required)', async () => {
     service.setConfig('tmdb', { enabled: true });
     service.setSecret('tmdb', 'api-token', 'v');
-    probe.mockRejectedValueOnce(new Error('401'));
+    probe.mockRejectedValueOnce(new Error('网络故障'));
     const health = await service.checkHealth('tmdb');
-    expect(health.status).toBe('auth-required');
+    expect(health.status).toBe('error');
     expect(health.retryable).toBe(true);
+    // Failures are NOT cached: the retry actually re-runs the probe.
+    probe.mockResolvedValueOnce({ ok: true, retryable: false, message: 'ok' });
+    const retried = await service.checkHealth('tmdb');
+    expect(retried.status).toBe('ready');
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('settings guard normalizes keys and rejects nesting', () => {
+    expect(() => service.setConfig('tmdb', { settings: { ' api-token ': 'leak' } })).toThrow(/secret/);
+    expect(() => service.setConfig('tmdb', { settings: { 'ＡＰＩ-token': 'leak' } })).toThrow(/secret/);
+    expect(() => service.setConfig('tmdb', { settings: { nested: { inner: 1 } as unknown as string } })).toThrow(/嵌套/);
   });
 });

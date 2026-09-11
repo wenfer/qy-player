@@ -21,7 +21,7 @@ interface PluginListEntry {
 }
 
 interface PluginHealth {
-  status: 'ready' | 'auth-required' | 'disabled';
+  status: 'ready' | 'auth-required' | 'disabled' | 'error';
   retryable: boolean;
   message: string;
   checkedAt: number;
@@ -31,6 +31,7 @@ const HEALTH_BADGE: Record<PluginHealth['status'], { label: string; cls: string 
   ready: { label: '就绪', cls: 'bg-emerald-500/10 text-emerald-500' },
   'auth-required': { label: '需要配置', cls: 'bg-amber-500/10 text-amber-500' },
   disabled: { label: '已停用', cls: 'bg-muted text-muted-foreground' },
+  error: { label: '探测失败', cls: 'bg-destructive/10 text-destructive' },
 };
 
 const REQUIRED_SECRET_KEY = 'api-token';
@@ -42,21 +43,41 @@ export default function PluginSettings() {
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
+  const applyHealth = useCallback((pluginId: string, promise: Promise<unknown>): void => {
+    setHealth((prev) => ({ ...prev, [pluginId]: 'loading' }));
+    promise
+      .then((envelope) => {
+        // Wire envelope: { ok, data: PluginHealth }.
+        const res = envelope as { ok: boolean; data?: PluginHealth };
+        setHealth((prev) => ({
+          ...prev,
+          [pluginId]: res.ok && res.data ? res.data : { status: 'error', retryable: true, message: '检查失败，可重试', checkedAt: Date.now() },
+        }));
+      })
+      .catch(() => {
+        setHealth((prev) => ({
+          ...prev,
+          [pluginId]: { status: 'error', retryable: true, message: '检查失败，可重试', checkedAt: Date.now() },
+        }));
+      });
+  }, []);
+
   const load = useCallback(async () => {
     try {
-      const result = (await window.electronAPI.listPlugins()) as PluginListEntry[];
-      setPlugins(result ?? []);
-      for (const plugin of result ?? []) {
-        setHealth((prev) => ({ ...prev, [plugin.id]: 'loading' }));
-        window.electronAPI
-          .testPlugin(plugin.id)
-          .then((h) => setHealth((prev) => ({ ...prev, [plugin.id]: h as PluginHealth })))
-          .catch(() => setHealth((prev) => ({ ...prev, [plugin.id]: 'loading' })));
+      // Wire envelope: { ok, data: PluginListEntry[] }.
+      const res = (await window.electronAPI.listPlugins()) as {
+        ok: boolean;
+        data?: PluginListEntry[];
+      };
+      const rows = res.ok && Array.isArray(res.data) ? res.data : [];
+      setPlugins(rows);
+      for (const plugin of rows) {
+        applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
       }
     } catch {
       addToast('加载插件列表失败', 'error');
     }
-  }, [addToast]);
+  }, [addToast, applyHealth]);
 
   useEffect(() => {
     load();
@@ -69,10 +90,12 @@ export default function PluginSettings() {
         const result = (await window.electronAPI.setPluginConfig(plugin.id, { enabled })) as { ok: boolean };
         if (result.ok) {
           setPlugins((rows) => rows.map((p) => (p.id === plugin.id ? { ...p, enabled } : p)));
-          window.electronAPI.testPlugin(plugin.id).then((h) => setHealth((prev) => ({ ...prev, [plugin.id]: h as PluginHealth })));
+          applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
         } else {
           addToast('更新失败', 'error');
         }
+      } catch {
+        addToast('更新失败', 'error');
       } finally {
         setBusy(null);
       }
@@ -91,6 +114,8 @@ export default function PluginSettings() {
         } else {
           addToast('更新失败', 'error');
         }
+      } catch {
+        addToast('更新失败', 'error');
       } finally {
         setBusy(null);
       }
@@ -122,10 +147,12 @@ export default function PluginSettings() {
             )
           );
           addToast('密钥已保存（仅存于系统密钥存储）', 'success');
-          window.electronAPI.testPlugin(plugin.id).then((h) => setHealth((prev) => ({ ...prev, [plugin.id]: h as PluginHealth })));
+          applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
         } else {
           addToast('密钥保存失败', 'error');
         }
+      } catch {
+        addToast('密钥保存失败', 'error');
       } finally {
         setBusy(null);
       }
@@ -133,18 +160,12 @@ export default function PluginSettings() {
     [secretDrafts, addToast]
   );
 
-  const handleTest = useCallback(async (plugin: PluginListEntry) => {
-    setHealth((prev) => ({ ...prev, [plugin.id]: 'loading' }));
-    try {
-      const h = (await window.electronAPI.testPlugin(plugin.id)) as PluginHealth;
-      setHealth((prev) => ({ ...prev, [plugin.id]: h }));
-    } catch {
-      setHealth((prev) => ({
-        ...prev,
-        [plugin.id]: { status: 'auth-required', retryable: true, message: '测试失败，可重试', checkedAt: Date.now() },
-      }));
-    }
-  }, []);
+  const handleTest = useCallback(
+    (plugin: PluginListEntry) => {
+      applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
+    },
+    [applyHealth]
+  );
 
   return (
     <section className="mb-10" aria-label="插件">
