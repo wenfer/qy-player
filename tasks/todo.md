@@ -680,7 +680,15 @@ Evidence:
 - [ ] **目标：** provider/candidate 选择、字段差异、批量进度、取消、失败重试。
 - [ ] **验收：** 低置信候选不能自动套用；人工锁定字段有明显标识；离开页面后任务可恢复；分页/换行无横向滚动。
 - [ ] **验证：** 自动命中/待确认/无结果/限流/取消 renderer 测试和手工验证。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence（待人工追认的偏差：① 允许清单外的接线必需文件——`ipc-channels.ts`（SCRAPE 五通道）、`main/ipc/index.ts`（handlers + tmdb 注册）、`job-service.ts`（runDetails 携带 LookupInput【029 挂账①】+ listJobs()）、`preload`、`App.tsx`/`Navigation`（/scrape-jobs 路由+导航）、`LibraryBrowse/index.tsx`（刮削按钮，沿用 021/023/025 惯例——目录详情在 LibraryBrowse）；② 新增导航项「刮削任务」）：**
+  - 提交：5cd5d3b（实现）+ 评审修复提交。
+  - UI：`ScrapeDialog`（单项：自动命中→字段数；confirm 0.75–0.92 候选人工点选，低置信永不自动套用——main 侧 matcher 门槛强制；rejected 保留旧值；failed 带原因+重试；每次打开重置可重刮）+ `Libraries/ScrapeJobs`（批量监控：进度条、成功/待确认/未应用计数、取消、暂停后恢复剩余条目、UPSTREAM_CHANGED 自动暂停原因、无横向滚动）+ LibraryBrowse 详情「刮削元数据」/列表「批量刮削」（电影/剧集，≤500/批）。
+  - 主进程：registry 注册 tmdb（029 挂账②，注册失败 console.error）+ SCRAPE.{START,JOBS,STATUS,CANCEL,APPLY} handlers（插件启用校验、条目存在校验）。
+  - 测试：scrape-ui 9 例（自动命中/人工确认应用/拒绝重试/限流/启动失败/豆瓣不可见/取消/恢复 pending+jobId/空态）。共 528 tests/42 files 全绿。
+  - 独立评审：2×REQUIRED（刷新按钮语义、对话框 phase 重置）+ OPTIONAL/NIT 全部修复；复审通过。
+  - 门禁：typecheck 0 错误、git diff --check 干净。
+  - 挂账（人工验证清单）：① TMDB 真实 key 全链路手工刮削（配置→单项→批量→确认→取消→恢复）；② Checkpoint E 三项勾验（TMDB fixture+真实 key、密钥不泄漏、豆瓣 UI 不可见且零请求）。
+  - Phase E（QYP2-026～032）全部完成，进入 Checkpoint E。
 
 ### Checkpoint E
 
