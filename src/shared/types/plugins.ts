@@ -7,19 +7,14 @@
  * is a capability discipline for plugin authors, not a security boundary.
  */
 
-/** Structural mirrors of main's metadata types (shared must not import
- * from main; keep in sync with src/main/modules/metadata/types.ts). */
-export interface NfoActor {
-  name: string;
-  role?: string;
-  thumb?: string;
-}
+import type {
+  MetadataValue,
+  NfoActor,
+  NfoUniqueId,
+} from './metadata-editor';
 
-export interface NfoUniqueId {
-  provider: string;
-  id: string;
-  isDefault?: boolean;
-}
+export { MetadataValue };
+export type { NfoActor, NfoUniqueId };
 
 /** Unified plugin error codes (plan §11.1). */
 export type PluginErrorCode =

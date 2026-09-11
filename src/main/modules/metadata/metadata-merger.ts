@@ -186,3 +186,76 @@ export function clearManualField(store: ProviderStore, field: string): ProviderS
   else next[field] = slots;
   return next;
 }
+
+// ---------------------------------------------------------------------------
+// Runtime payload schema validation (QYP2-028, plan §11.1: 输出需 runtime
+// schema 验证) — plugin output must pass here before entering the merger.
+// ---------------------------------------------------------------------------
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((entry) => typeof entry === 'string');
+}
+
+/**
+ * Structural validation of a plugin/NFO-shaped payload. Returns the list
+ * of problems (empty = valid). Extra unknown keys are ignored; missing
+ * optional fields are fine; wrong-typed fields are not.
+ */
+export function validateMetadataPayload(payload: unknown): string[] {
+  const problems: string[] = [];
+  if (typeof payload !== 'object' || payload === null) {
+    return ['payload 必须是对象'];
+  }
+  const p = payload as Record<string, unknown>;
+  if (p.kind !== 'movie' && p.kind !== 'tvshow' && p.kind !== 'season' && p.kind !== 'episode') {
+    problems.push('kind 必须是 movie/tvshow/season/episode');
+  }
+  const stringFields = ['title', 'originalTitle', 'sortTitle', 'premiered', 'plot', 'tagline', 'contentRating', 'set'];
+  for (const field of stringFields) {
+    const value = p[field];
+    if (value !== undefined && typeof value !== 'string') {
+      problems.push(`${field} 必须是字符串`);
+    }
+  }
+  const numberFields = ['year', 'runtime', 'rating', 'season', 'episode'];
+  for (const field of numberFields) {
+    const value = p[field];
+    if (value !== undefined && typeof value !== 'number') {
+      problems.push(`${field} 必须是数字`);
+    }
+  }
+  if (p.rating !== undefined && (typeof p.rating !== 'number' || p.rating < 0 || p.rating > 10)) {
+    problems.push('rating 必须在 0–10 之间');
+  }
+  for (const field of ['genres', 'studios', 'countries', 'directors', 'thumbs']) {
+    const value = p[field];
+    if (value !== undefined && !isStringArray(value)) {
+      problems.push(`${field} 必须是字符串数组`);
+    }
+  }
+  if (p.actors !== undefined) {
+    if (!Array.isArray(p.actors)) {
+      problems.push('actors 必须是数组');
+    } else {
+      for (const entry of p.actors) {
+        if (typeof entry !== 'object' || entry === null || typeof (entry as { name?: unknown }).name !== 'string') {
+          problems.push('actors 每项必须包含 name');
+          break;
+        }
+      }
+    }
+  }
+  if (p.uniqueIds !== undefined) {
+    if (!Array.isArray(p.uniqueIds)) {
+      problems.push('uniqueIds 必须是数组');
+    } else {
+      for (const entry of p.uniqueIds) {
+        if (typeof entry !== 'object' || entry === null || typeof (entry as { provider?: unknown }).provider !== 'string' || typeof (entry as { id?: unknown }).id !== 'string') {
+          problems.push('uniqueIds 每项必须包含 provider 和 id');
+          break;
+        }
+      }
+    }
+  }
+  return problems;
+}

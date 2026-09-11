@@ -7,7 +7,21 @@
  * not import from main); keep in sync with src/main/modules/metadata/types. */
 export type MetadataProvider = 'manual' | 'nfo' | 'scraper' | 'filename';
 
-export type MetadataValue = string | number | string[] | Array<{ name: string; role?: string; thumb?: string }> | Array<{ provider: string; id: string; isDefault?: boolean }>;
+export type MetadataValue = string | number | string[] | NfoActor[] | NfoUniqueId[];
+
+/** Structural mirrors of main's metadata types (shared must not import
+ * from main; keep in sync with src/main/modules/metadata/types.ts). */
+export interface NfoActor {
+  name: string;
+  role?: string;
+  thumb?: string;
+}
+
+export interface NfoUniqueId {
+  provider: string;
+  id: string;
+  isDefault?: boolean;
+}
 
 export interface MetadataFieldInfo {
   field: string;
