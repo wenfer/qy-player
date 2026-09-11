@@ -80,4 +80,11 @@ export const IPC_CHANNELS = {
     DELETE_PREVIEW: 'media:delete-preview',
     DELETE_EXECUTE: 'media:delete-execute',
   },
+  PLUGINS: {
+    LIST: 'plugins:list',
+    SET_CONFIG: 'plugins:set-config',
+    SET_SECRET: 'plugins:set-secret',
+    DELETE_SECRET: 'plugins:delete-secret',
+    TEST: 'plugins:test',
+  },
 } as const;

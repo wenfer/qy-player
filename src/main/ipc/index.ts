@@ -82,6 +82,8 @@ import {
   mapDeletePreviewResult,
   SafeDeleteService,
 } from '../modules/media-operations/delete-service';
+import { PluginConfigService } from '../modules/plugin-runtime/config-service';
+import { listPlugins } from '../modules/plugin-runtime/registry';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -158,6 +160,12 @@ export function registerIpcHandlers(player: PlayerCore): void {
   // Failure must never block app startup: the legacy column stays as-is and
   // the next launch retries. The log must not contain the token itself.
   const secretStore = createSecretStore(db);
+  // Plugin config (QYP2-027): secrets write-only through the IPC surface.
+  const pluginConfigService = new PluginConfigService({
+    store: secretStore,
+    getConfig: (key) => storage.getConfig(key),
+    setConfig: (key, value) => storage.setConfig(key, value),
+  });
   try {
     migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
   } catch (err) {
@@ -790,7 +798,7 @@ export function registerIpcHandlers(player: PlayerCore): void {
     closeDatabase();
   });
 
-  registerCatalogHandlers(db, secretStore, catalogRepo);
+  registerCatalogHandlers(db, secretStore, catalogRepo, pluginConfigService);
 }
 
 // ---------------------------------------------------------------------------
@@ -827,7 +835,8 @@ function broadcastScanEvent(event: ScanProgressEvent): void {
 function registerCatalogHandlers(
   db: ReturnType<typeof getDatabase>,
   secretStore: SecretStore,
-  catalogRepo: ReturnType<typeof createCatalogRepository>
+  catalogRepo: ReturnType<typeof createCatalogRepository>,
+  pluginConfigService: PluginConfigService
 ): void {
   // Subtitle attachments live under <userData>/subtitles/<itemId>/
   // (plan §13). Interrupted imports leave .tmp- files; sweep them once at
@@ -1219,6 +1228,81 @@ function registerCatalogHandlers(
       return ok({ imported: result.imported });
     }
   );
+
+  // ---- Plugin config (QYP2-027, plan §11.1/§11.3) ----
+  ipcMain.handle(IPC_CHANNELS.PLUGINS.LIST, () => {
+    return ok(
+      listPlugins().map(({ manifest }) => {
+        const config = pluginConfigService.getConfig(manifest.id);
+        const secretKeys = ['api-token', 'api-key', 'token'].filter((key) =>
+          pluginConfigService.hasSecret(manifest.id, key)
+        );
+        return {
+          id: manifest.id,
+          name: manifest.name,
+          version: manifest.version,
+          apiVersion: manifest.apiVersion,
+          capability: manifest.capability,
+          enabled: config.enabled,
+          priority: config.priority,
+          settings: config.settings,
+          /** Fingerprints only - secret values never cross the boundary. */
+          secrets: secretKeys.map((key) => ({ key, set: true })),
+        };
+      })
+    );
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS.SET_CONFIG,
+    (_event, pluginId: unknown, patch: { enabled?: boolean; priority?: number; settings?: Record<string, string | number | boolean> }) => {
+      if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
+        return err('VALIDATION_FAILED', '插件 ID 无效');
+      }
+      if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
+        return err('NOT_FOUND', '插件未注册');
+      }
+      try {
+        return ok({ config: pluginConfigService.setConfig(pluginId, patch ?? {}) });
+      } catch (e) {
+        return err('VALIDATION_FAILED', e instanceof Error ? e.message : '配置无效');
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGINS.SET_SECRET,
+    (_event, pluginId: unknown, key: unknown, value: unknown) => {
+      if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
+        return err('VALIDATION_FAILED', '插件 ID 无效');
+      }
+      if (typeof key !== 'string' || typeof value !== 'string') {
+        return err('VALIDATION_FAILED', 'secret 参数无效');
+      }
+      try {
+        const { fingerprint } = pluginConfigService.setSecret(pluginId, key, value);
+        return ok({ fingerprint }); // never the secret itself
+      } catch (e) {
+        return err('VALIDATION_FAILED', e instanceof Error ? e.message : 'secret 无效');
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PLUGINS.DELETE_SECRET, (_event, pluginId: unknown, key: unknown) => {
+    if (typeof pluginId !== 'string' || typeof key !== 'string') {
+      return err('VALIDATION_FAILED', '参数无效');
+    }
+    pluginConfigService.deleteSecret(pluginId, key);
+    return ok({ deleted: true });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGINS.TEST, async (_event, pluginId: unknown) => {
+    if (typeof pluginId !== 'string') {
+      return err('VALIDATION_FAILED', '插件 ID 无效');
+    }
+    const health = await pluginConfigService.checkHealth(pluginId);
+    return ok(health);
+  });
 
   // ---- Safe delete (QYP2-024, plan §14.2) ----
   ipcMain.handle(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, (_event, ref: { sourceId?: unknown; itemId?: unknown }) => {

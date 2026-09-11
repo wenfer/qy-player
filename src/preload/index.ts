@@ -126,6 +126,15 @@ const electronAPI = {
   importImages: (itemId: number, inputs: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.METADATA.IMPORT_IMAGES, itemId, inputs),
   // Safe delete (QYP2-024): preview/execute two-phase
+  // Plugin config (QYP2-027)
+  listPlugins: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.LIST),
+  setPluginConfig: (pluginId: string, patch: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.SET_CONFIG, pluginId, patch),
+  setPluginSecret: (pluginId: string, key: string, value: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.SET_SECRET, pluginId, key, value),
+  deletePluginSecret: (pluginId: string, key: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
+  testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
   previewMediaDeletion: (ref: { sourceId: number; itemId: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, ref),
   executeMediaDeletion: (args: { token: string; confirmTitle?: string }) =>
