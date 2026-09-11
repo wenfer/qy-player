@@ -34,6 +34,14 @@
 │     playback-state/            进度保存（10s 定时 + pause/eof/disconnect/crashed）+ 服务器同步回调
 │     storage/db.ts              SQLite（better-sqlite3）+ MIGRATIONS
 │     online-connector/          Jellyfin/Emby REST 客户端（EmbyClient 继承 JellyfinClient，路径加 /emby 前缀）
+│     catalog/                   目录查询/仓储 + unified-query（四来源统一首页/搜索）
+│     media-probe/               headless mpv 探测（ADR-0005，probe≤1）
+│     media-operations/          字幕导入 / 两阶段安全删除
+│     metadata/                  NFO 解析 / 字段合并 / 元数据编辑器
+│     plugin-runtime/            插件 registry/配置/刮削任务/匹配器/缓存（§11）
+│     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
+│     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
+│     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
 │     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
@@ -44,6 +52,10 @@
 - **播放**：renderer 调 `playerLoadFile(url, startPos, headers, mediaContext)` → IPC → `PlaybackStateManager.setCurrentMedia(...)` → mpv `loadfile`
 - **进度**：主进程每 10s 从内存态保存（读 `player.getState()`，不走 IPC）→ 本地 SQLite + 经 `reportProgress` 回传 Emby/Jellyfin（`/Sessions/Playing/Progress|Stopped`）
 - **历史**：`watch_history` 表按 `(media_type, media_id)` upsert；剧集记录含 `series_name/season_number/episode_number`
+- **续播**：位置/原因只由 `playback-state/resume-resolver.ts` 纯函数决定（30s/90%/看完下一集/重播）——renderer 不得复制算法；「从头播放」显式传 0（LOAD_FILE 区分显式 0 与未指定）
+- **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
+- **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
+- **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 
 ## 已知机制与陷阱（改相关代码前必读）
 
@@ -100,6 +112,14 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 - MPV 日志被有意静默（见硬性约束 3）；需要看 mpv 行为时，用独立脚本连 socket 测试（参考 `scripts/cdp-test.mjs` 里的 MpvSocket 类）
 - CDP 调试：`scripts/dev.js` 可临时加 `--remote-debugging-port=9222`，配 `npm run test:ui`
 - 用户数据库在 `~/.config/qy-player/qy-player.db`，可用 sqlite3 直接查证数据问题
+
+## 二期运维与测试矩阵
+
+- 运行时说明（缓存/并发预算/诊断/回滚）：`docs/PHASE2-OPERATIONS.md`
+- 回归与手工矩阵（含目标机必跑清单）：`docs/PHASE2-TEST-MATRIX.md`
+- 版本历史：`CHANGELOG.md`
+- 发布流程：tag 由人工批准发布说明后创建；GitHub Actions 全格式打包
+  （依赖 `rpm`、`libarchive-tools`）
 
 ## Git 规范
 

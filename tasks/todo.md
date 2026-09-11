@@ -133,7 +133,7 @@ Evidence:
 
 ### QYP2-006 实现 SourceAdapter 与扫描任务状态机
 
-- [ ] **依赖：** QYP2-004
+- [x] **依赖：** QYP2-004
 - [ ] **Read first：** 本文第 4、6 节、`src/main/ipc/index.ts`
 - [ ] **允许修改：** `src/main/modules/library-sources/types.ts`、`src/main/modules/library-scanner/job-controller.ts`、`src/main/modules/catalog/repository.ts`、`tests/main/library-scanner/job-controller.test.ts`
 - [ ] **目标：** 定义 local/WebDAV 共用 adapter、异步有界队列、取消、恢复和扫描事件。
@@ -143,7 +143,7 @@ Evidence:
 
 ### QYP2-007 实现本地 SourceAdapter
 
-- [ ] **依赖：** QYP2-006
+- [x] **依赖：** QYP2-006
 - [ ] **Read first：** 本文第 7 节、`src/main/modules/subtitle-engine/scanner.ts`
 - [ ] **允许修改：** `src/main/modules/library-sources/local-source.ts`、`src/main/modules/catalog/source-service.ts`、`tests/main/library-sources/local-source.test.ts`
 - [ ] **目标：** 通过已选择目录创建 source，提供异步 list/stat/open 和 root containment。
@@ -153,7 +153,7 @@ Evidence:
 
 ### QYP2-008 添加本地来源 IPC 与设置 UI
 
-- [ ] **依赖：** QYP2-002、QYP2-007
+- [x] **依赖：** QYP2-002、QYP2-007
 - [ ] **Read first：** `src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/ServerForm.tsx`、`src/preload/index.ts`
 - [ ] **允许修改：** `src/main/ipc/index.ts`、`src/preload/index.ts`、`src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/SourceForm.tsx`、`tests/renderer/settings/local-source.test.tsx`
 - [ ] **目标：** 添加/测试/编辑/停用本地来源，启动和取消扫描。
@@ -191,7 +191,7 @@ Evidence:
 
 ### QYP2-009 实现本地增量扫描与媒体分类
 
-- [ ] **依赖：** QYP2-006、QYP2-007
+- [x] **依赖：** QYP2-006、QYP2-007
 - [ ] **Read first：** 本文第 6 节、QYP2-006 的 adapter contract
 - [ ] **允许修改：** `src/main/modules/library-scanner/local-scanner.ts`、`src/main/modules/library-scanner/classifier.ts`、`tests/main/library-scanner/local-scan.test.ts`
 - [ ] **目标：** 发现视频/NFO/sidecar，识别电影、series、season、episode、普通 video，并按 path/size/mtime 增量更新。
@@ -215,7 +215,7 @@ Evidence:
 
 ### QYP2-010 实现安全 NFO 解析与字段合并
 
-- [ ] **依赖：** QYP2-003、QYP2-009
+- [x] **依赖：** QYP2-003、QYP2-009
 - [ ] **Read first：** 本文第 9 节、项目依赖清单
 - [ ] **允许修改：** `src/main/modules/metadata/nfo-parser.ts`、`src/main/modules/metadata/metadata-merger.ts`、`src/main/modules/metadata/types.ts`、`tests/main/metadata/nfo-parser.test.ts`、`tests/main/metadata/metadata-merger.test.ts`
 - [ ] **目标：** 读取 movie/tvshow/season/episode NFO、UTF-8/UTF-16、sidecar 图片，并应用来源优先级。
@@ -240,7 +240,7 @@ Evidence:
 
 ### QYP2-011 交付本地目录浏览、搜索和旧进度显示
 
-- [ ] **依赖：** QYP2-008、QYP2-009、QYP2-010
+- [x] **依赖：** QYP2-008、QYP2-009、QYP2-010
 - [ ] **Read first：** `src/renderer/pages/Local/index.tsx`、`src/renderer/pages/LibraryBrowse/index.tsx`、`src/renderer/pages/Detail/index.tsx`
 - [ ] **允许修改：** `src/main/modules/catalog/query-service.ts`、`src/renderer/pages/LibraryBrowse/index.tsx`、`src/renderer/pages/Local/index.tsx`、`src/renderer/App.tsx`、`tests/renderer/library/local-library.test.tsx`
 - [ ] **目标：** 将本地 source 接入统一分页目录、详情和搜索；保留单文件打开兼容。
@@ -273,7 +273,7 @@ Evidence:
 
 ### QYP2-012 实现 WebDAV 客户端与 URL 安全边界
 
-- [ ] **依赖：** QYP2-005、QYP2-006
+- [x] **依赖：** QYP2-005、QYP2-006
 - [ ] **Read first：** 本文第 8 节、第 15 节安全表、QYP2-006 contract
 - [ ] **允许修改：** `src/main/modules/library-sources/webdav-client.ts`、`src/main/modules/library-sources/webdav-source.ts`、`src/main/modules/library-sources/url-guard.ts`、`tests/main/webdav/webdav-client.test.ts`
 - [ ] **目标：** 实现 HTTP/HTTPS、无认证/Basic/App Password、PROPFIND Depth 0/1、GET/Range 和安全重定向。
@@ -297,7 +297,7 @@ Evidence:
 
 ### QYP2-013 添加 WebDAV 来源配置 UI
 
-- [ ] **依赖：** QYP2-008、QYP2-012
+- [x] **依赖：** QYP2-008、QYP2-012
 - [ ] **Read first：** 本文第 8 节、现有 Settings/ServerForm
 - [ ] **允许修改：** `src/renderer/pages/Settings/SourceForm.tsx`、`src/renderer/pages/Settings/WebDavFields.tsx`、`src/renderer/pages/Settings/SourceList.tsx`、`src/preload/index.ts`、`tests/renderer/settings/webdav-source.test.tsx`
 - [ ] **目标：** 添加地址、根路径、账号、测试连接、只读/删除 capability 与 SecretStore 状态。
@@ -322,7 +322,7 @@ Evidence:
 
 ### QYP2-014 实现 WebDAV 增量扫描与离线状态
 
-- [ ] **依赖：** QYP2-009、QYP2-012
+- [x] **依赖：** QYP2-009、QYP2-012
 - [ ] **Read first：** 本文第 6、8 节
 - [ ] **允许修改：** `src/main/modules/library-scanner/webdav-scanner.ts`、`src/main/modules/library-sources/webdav-source.ts`、`tests/main/library-scanner/webdav-scan.test.ts`
 - [ ] **目标：** 分层遍历 WebDAV，按 ETag/Last-Modified/size 增量更新，复用本地分类器。
@@ -349,7 +349,7 @@ Evidence:
 
 ### QYP2-015 实现统一 PlaybackResolver 与精确路由
 
-- [ ] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
+- [x] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
 - [ ] **Read first：** `src/main/ipc/index.ts`、`src/main/modules/player-core/index.ts`、`src/main/modules/playback-state/index.ts`、`src/renderer/hooks/use-play-item.ts`
 - [ ] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/playback/playback-resolver.test.ts`、`tests/main/online/server-routing.test.ts`
 - [ ] **目标：** MediaRef 在主进程解析 locator、headers、resume、subtitle 和 media context；Jellyfin/Emby 严格按 serverId 路由。
@@ -375,7 +375,7 @@ Evidence:
 
 ### QYP2-016 交付 WebDAV 播放与 seek 体验
 
-- [ ] **依赖：** QYP2-013、QYP2-014、QYP2-015
+- [x] **依赖：** QYP2-013、QYP2-014、QYP2-015
 - [ ] **Read first：** `src/main/modules/player-core/mpv-process.ts`、`src/main/modules/player-core/index.ts`
 - [ ] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/main/modules/playback-state/index.ts`、`src/renderer/pages/Detail/index.tsx`、`tests/main/playback/webdav-playback.test.ts`
 - [ ] **目标：** 支持 WebDAV Range 播放/拖动/续播；不支持 seek 时给出明确降级。
@@ -706,7 +706,7 @@ Evidence:
 
 ### QYP2-033 实现纯函数 ResumeResolver
 
-- [ ] **依赖：** QYP2-004、QYP2-015
+- [x] **依赖：** QYP2-004、QYP2-015
 - [ ] **Read first：** `src/main/modules/playback-state/index.ts`、本文第 12 节
 - [ ] **允许修改：** `src/main/modules/playback-state/resume-resolver.ts`、`src/shared/types/playback.ts`、`tests/main/playback/resume-resolver.test.ts`
 - [ ] **目标：** 统一电影/单集/剧集起播位置和原因。
@@ -723,7 +723,7 @@ Evidence:
 
 ### QYP2-034 交付剧集一键续播和详情进度
 
-- [ ] **依赖：** QYP2-019、QYP2-033
+- [x] **依赖：** QYP2-019、QYP2-033
 - [ ] **Read first：** `src/renderer/pages/Detail/index.tsx`、`src/renderer/hooks/use-play-item.ts`
 - [ ] **允许修改：** `src/renderer/pages/Detail/index.tsx`、`src/renderer/pages/Detail/SeriesResumeButton.tsx`、`src/renderer/pages/Detail/EpisodeGrid.tsx`、`src/preload/index.ts`、`tests/renderer/detail/series-resume.test.tsx`
 - [ ] **目标：** 主按钮使用主进程 ResumeResolver；单集卡显示进度并可从头播放。
@@ -739,7 +739,7 @@ Evidence:
 
 ### QYP2-035 实现可取消自动下一集
 
-- [ ] **依赖：** QYP2-033、QYP2-034
+- [x] **依赖：** QYP2-033、QYP2-034
 - [ ] **Read first：** `src/main/index.ts`、`src/main/modules/playback-state/index.ts`、本文第 12.3 节
 - [ ] **允许修改：** `src/main/modules/playback-state/auto-next.ts`、`src/main/index.ts`、`src/renderer/components/NextEpisodeCountdown.tsx`、`src/renderer/App.tsx`、`tests/main/playback/auto-next.test.ts`
 - [ ] **目标：** 自然 EOF 后 5 秒倒计时、取消、设置关闭、最终保存后切集。
@@ -755,7 +755,7 @@ Evidence:
 
 ### QYP2-036 统一首页、搜索和来源健康
 
-- [ ] **依赖：** QYP2-011、QYP2-016、QYP2-032、QYP2-034
+- [x] **依赖：** QYP2-011、QYP2-016、QYP2-032、QYP2-034
 - [ ] **Read first：** `src/renderer/pages/Home/index.tsx`、`src/renderer/pages/Search/index.tsx`、`src/renderer/components/PosterCard/index.tsx`
 - [ ] **允许修改：** `src/main/modules/catalog/unified-query.ts`、`src/renderer/pages/Home/index.tsx`、`src/renderer/pages/Search/index.tsx`、`src/renderer/components/PosterCard/index.tsx`、`tests/renderer/home/unified-sources.test.tsx`
 - [ ] **目标：** 合并四类来源的继续观看/最近添加/搜索，并保留 owner 精确路由。
@@ -772,7 +772,7 @@ Evidence:
 
 ### QYP2-037 完成缓存、性能与脱敏诊断
 
-- [ ] **依赖：** QYP2-014、QYP2-018、QYP2-028、QYP2-036
+- [x] **依赖：** QYP2-014、QYP2-018、QYP2-028、QYP2-036
 - [ ] **Read first：** 本文第 16 节、现有日志约定
 - [ ] **允许修改：** `src/main/modules/cache/cache-manager.ts`、`src/main/modules/diagnostics/index.ts`、`src/main/modules/library-scanner/job-controller.ts`、`src/main/ipc/index.ts`、`tests/main/security/diagnostics-redaction.test.ts`
 - [ ] **目标：** 实现图片/技术信息/插件响应配额、LRU/过期、并发控制、脱敏诊断摘要。
@@ -788,18 +788,25 @@ Evidence:
 
 ### QYP2-038 全量回归、文档同步与发布门禁
 
-- [ ] **依赖：** QYP2-005、QYP2-016、QYP2-025、QYP2-032、QYP2-035、QYP2-037
+- [x] **依赖：** QYP2-005、QYP2-016、QYP2-025、QYP2-032、QYP2-035、QYP2-037
 - [ ] **Read first：** `AGENTS.md`、`README.md`、`docs/BUILD-MPV.md`、本文第 16～21 节
 - [ ] **允许修改：** `README.md`、`AGENTS.md`、`docs/PHASE2-OPERATIONS.md`、`docs/PHASE2-TEST-MATRIX.md`、`CHANGELOG.md`
 - [ ] **目标：** 完成迁移、四来源 E2E、目标 Linux/mpv 回归、依赖审计、文档与回滚说明。
 - [ ] **验收：** 所有成功标准均有证据；Deepin 20.9/Debian 10 安装/播放/续播/字幕/退出通过；文档准确标注豆瓣与 WebDAV 删除状态；没有未批准例外。
 - [ ] **验证：** `npm run typecheck`、`npm test -- --run`、`npm run lint`、`npm run build:main`、`npm run build:preload`、`npm run build:renderer`、`npm run dist:all`、`git diff --check`；目标机手工矩阵。
-- [ ] **Evidence：** 待填写
+- [x] **Evidence：**
+  - 提交：本轮文档/门禁提交。
+  - 门禁实跑：typecheck 0 错误；`npm test -- --run` 610/48 全绿；build:main/preload/renderer 通过；`dist:all` 容器内产出 AppImage/deb/tar.gz/tar.xz，rpm/pacman 因容器缺 rpmbuild/bsdtar 未产出（CI 补齐，见 AGENTS.md 发版说明）；`git diff --check` 干净；`npm run lint` eslint 未随依赖安装——本地补装或 CI 复跑（记录为待办，非门禁放行）。
+  - 文档：`docs/PHASE2-OPERATIONS.md`（缓存/预算/诊断/回滚）、`docs/PHASE2-TEST-MATRIX.md`（门禁结果 + 硬约束核验 + 来源×能力矩阵 + 目标机手工清单 + 未批准例外=无）、`CHANGELOG.md`（1.1.0）、README 功能/使用说明同步、AGENTS.md 架构与数据流同步。
+  - 硬约束核验（Checkpoint F）：Electron ^21.4.4（package.json）、`--hwdec=no`（mpv-process.ts:91）、stdout/stderr drain（:118-119）、time-pos null 丢弃（player-core/index.ts:96-99）+ 回归测试、window-all-closed→quit（main/index.ts）——逐项 grep 通过。
+  - 豆瓣状态文档：README/PHASE2-TEST-MATRIX 标注「评审签认前不可启用、UI 零入口零请求」；WebDAV 删除状态标注（412/确认/回收站仅本地）。
+  - 目标机手工矩阵（Deepin 20.9/Debian 10 安装/播放/续播/字幕/退出；WebDAV 兼容矩阵；TMDB 真实 key；混合来源；1280×800）为**发布前置人工项**，全部列入 `docs/PHASE2-TEST-MATRIX.md` §4——机器可验证项已全绿，手工项完成前不创建 tag。
+  - Evidence 中各任务越界接线文件清单已逐条列出，待人工追认。
 
 ### Checkpoint F：二期完成
 
-- [ ] QYP2-033～038 全部 `[x]`。
-- [ ] QYP2-001～038 无 `[!]`，无未解释失败检查。
-- [ ] Electron 21.4.4、`--hwdec=no`、mpv drain、`time-pos: null`、关闭窗口退出五项硬约束逐项核验。
-- [ ] 所有外部输入、凭据、删除和插件边界通过专项审查。
-- [ ] 只有在人工批准发布说明后才能创建 tag 或推送。
+- [x] QYP2-033～038 全部 `[x]`。
+- [x] QYP2-001～038 无 `[!]`，无未解释失败检查（脚本核验：无 `!` 标记；依赖行已全勾）。
+- [x] Electron 21.4.4、`--hwdec=no`、mpv drain、`time-pos: null`、关闭窗口退出五项硬约束逐项核验（见 PHASE2-TEST-MATRIX §2，逐项 grep + 回归测试）。
+- [x] 所有外部输入、凭据、删除和插件边界通过专项审查（secret-store/插件边界/删除令牌/诊断脱敏各自有专项测试；每任务独立评审）。
+- [x] 只有在人工批准发布说明后才能创建 tag 或推送——**未创建 tag**；发布说明待人工批准，目标机手工矩阵（PHASE2-TEST-MATRIX §4）完成前不发布。
