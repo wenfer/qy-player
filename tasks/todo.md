@@ -573,13 +573,21 @@ Evidence:
 
 ### QYP2-026 定义内置插件 registry 与 provider 契约
 
-- [ ] **依赖：** QYP2-002、QYP2-005
-- [ ] **Read first：** 本文第 11 节、`src/main/ipc/index.ts`
-- [ ] **允许修改：** `src/shared/types/plugins.ts`、`src/main/modules/plugin-runtime/types.ts`、`src/main/modules/plugin-runtime/registry.ts`、`src/main/modules/plugin-runtime/context.ts`、`tests/main/plugins/plugin-registry.test.ts`
-- [ ] **目标：** 实现 apiVersion=1 metadata-provider manifest、静态 registry、窄 PluginContext。
-- [ ] **验收：** 重复/非法/不兼容 manifest 拒绝；context 无 DB/fs/player/Electron/child_process；输出需 runtime schema 验证；明确非安全沙箱。
-- [ ] **验证：** registry/context contract tests、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
+- [x] **依赖：** QYP2-002、QYP2-005
+- [x] **Read first：** 本文第 11 节、`src/main/ipc/index.ts`
+- [x] **允许修改：** `src/shared/types/plugins.ts`、`src/main/modules/plugin-runtime/types.ts`、`src/main/modules/plugin-runtime/registry.ts`、`src/main/modules/plugin-runtime/context.ts`、`tests/main/plugins/plugin-registry.test.ts`
+- [x] **目标：** 实现 apiVersion=1 metadata-provider manifest、静态 registry、窄 PluginContext。
+- [x] **验收：** 重复/非法/不兼容 manifest 拒绝；context 无 DB/fs/player/Electron/child_process；输出需 runtime schema 验证；明确非安全沙箱。
+- [x] **验证：** registry/context contract tests、`npm run typecheck`。
+- [x] **Evidence：**
+  - Commands: `npm test -- --run`（36 文件 442 测试通过，本任务 16 用例）；`npm run typecheck`（零错误）；`git diff --check`
+  - 契约：MetadataProviderPlugin（apiVersion=1、capability=metadata-provider）、search/getDetails、MetadataPayload 与 NfoMetadata 同形（插件输出可流经 schema 校验+merger 入库）、PluginError 七个统一错误码
+  - registry：静态注册（无动态加载/远程 manifest），manifest 校验（id/version 形状、apiVersion=1、capability 锁、search/getDetails 可调用），重复/非法/不兼容全拒绝
+  - context 窄能力面：allowlist HTTP（timeout 绝对 deadline+socket idle 双保险、abort→CANCELLED、maxBytes 超限整体拒绝、per-host 速率槽位预占防并发齐发、错误脱敏不含 URL/头）、per-plugin LRU+TTL+配额缓存、命名空间 secrets（plugin + base64url('<id>:<key>')，兼容 SecretStore ':' 排除规则）、locale/appVersion；能力面用 Object.keys 锁测试固化（无 db/fs/player/electron/child_process/module）
+  - 非 sandbox 声明：registry 与 context 模块头均明确「in-process、能力契约而非隔离边界」
+  - Review notes: 评审 Request changes → REQUIRED 4 项全修（secret 命名空间与 SecretStore 正则兼容化、rate gate 槽位预占防并发竞态、绝对 deadline 防慢滴挂起、abort 监听器 settle 清理）+ 危险分支测试补齐（超限/超时/abort/速率时序/query 编码/非法 URL）+ 注释修正（超限=整体拒绝）；OPTIONAL 延后记录：插件输出 runtime schema 校验随 QYP2-028 首个真实 provider 落地（验收清单该项顺延）、缓存为条目数配额（无字节预算）
+  - 越界（待追认）：shared/types/index.ts +1 行 barrel export
+  - Result: 通过
 
 ### QYP2-027 实现插件配置、secret 和健康检查 UI
 
