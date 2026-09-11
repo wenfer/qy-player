@@ -285,8 +285,10 @@ export function registerIpcHandlers(player: PlayerCore): void {
 
       // Query resume position
       const resumePosition = playbackStateManager!.getResumePosition('local', path);
-      const finalPosition = startPosition !== undefined && startPosition > 0
-        ? startPosition
+      // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
+      // undefined = 未指定 → 走续播解析。
+      const finalPosition = startPosition !== undefined
+        ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
 
       // Set current media for progress tracking
@@ -317,8 +319,10 @@ export function registerIpcHandlers(player: PlayerCore): void {
       );
       // Resume from last position (same rule as local: skip if nearly finished)
       const resumePosition = playbackStateManager!.getResumePosition(mediaType, mediaId);
-      const finalPosition = startPosition !== undefined && startPosition > 0
-        ? startPosition
+      // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
+      // undefined = 未指定 → 走续播解析。
+      const finalPosition = startPosition !== undefined
+        ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
       await player.loadFile(path, finalPosition, effectiveHeaders);
       // QYP2-021: WebDAV streams accept local subtitles too (plan §13);

@@ -1,4 +1,5 @@
 import { Play, RotateCcw } from 'lucide-react';
+import { RESUME_FINISHED_RATIO } from '../../../shared/types/playback';
 import type { Episode } from './index';
 
 /**
@@ -36,7 +37,7 @@ export default function EpisodeGrid({
         const epPosterUrl = ep.ImageTags?.Primary ? getImageUrl(ep.Id, 'Primary', ep.ImageTags.Primary) : undefined;
         const duration = ep.RunTimeTicks ? ep.RunTimeTicks / 10000000 : 0;
         const position = ep.UserData?.PlaybackPositionTicks ? ep.UserData.PlaybackPositionTicks / 10000000 : 0;
-        const finished = ep.UserData?.Played === true || (duration > 0 && position / duration > 0.9);
+        const finished = ep.UserData?.Played === true || (duration > 0 && position / duration > RESUME_FINISHED_RATIO);
         const pct = duration > 0 && !finished ? Math.min(100, Math.round((position / duration) * 100)) : 0;
         return (
           <div

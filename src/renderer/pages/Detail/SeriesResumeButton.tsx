@@ -33,13 +33,14 @@ function formatTime(totalSeconds: number): string {
 
 function buttonLabel(target: ResumeTarget): string {
   const code = formatEpisodeCode(target);
+  const codePart = code ? `${code} · ` : '';
   switch (target.reason) {
     case 'resume':
-      return `继续播放 ${code} · ${formatTime(target.position)}`.trim();
+      return `继续播放 ${codePart}${formatTime(target.position)}`;
     case 'next-episode':
-      return `播放下一集 ${code}`.trim();
+      return `播放下一集 ${code}`.replace(/\s+$/, '');
     case 'start':
-      return `播放第一集 ${code}`.trim();
+      return `播放第一集 ${code}`.replace(/\s+$/, '');
     case 'replay':
       return '重新播放';
   }
@@ -122,7 +123,7 @@ export default function SeriesResumeButton({
         }`}
       >
         {confirmingReplay ? <RotateCcw size={14} /> : <Play size={14} fill="currentColor" />}
-        {buttonLabel(target)}
+        {confirmingReplay ? '确认重新播放（从第一集开始）' : buttonLabel(target)}
       </button>
       {confirmingReplay && (
         <button

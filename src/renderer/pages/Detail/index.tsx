@@ -252,8 +252,8 @@ export default function Detail() {
         playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
         'success'
       );
-      // 回到本页时（focus）会静默重解析；这里先主动失效一次。
-      setResumeEpoch((n) => n + 1);
+      // 静默重解析交给 focus 事件：播放刚启动时服务器 UserData 尚未
+      // 更新，立即重解析必然拿到旧目标。
     } catch (err) {
       addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
     }
@@ -267,8 +267,7 @@ export default function Detail() {
   // QYP2-034: series primary-button target. The episode snapshots come
   // from the server (UserData preferred, §12.1); the DECISION runs
   // main-side via the pure resolver — the renderer never copies the
-  // algorithm. resumeEpoch lets play-back/focus refresh re-resolve.
-  const [resumeEpoch, setResumeEpoch] = useState(0);
+  // algorithm. Re-resolution happens on window focus (play-back/eof).
   const resolveResumeTarget = useCallback(async (): Promise<ResumeTarget | null> => {
     if (!details || details.Type !== 'Series' || !Number.isInteger(serverId)) return null;
     try {
@@ -296,7 +295,7 @@ export default function Detail() {
     } catch {
       return null;
     }
-  }, [details, serverId, resumeEpoch]);
+  }, [details, serverId]);
 
   const getImageUrl = useCallback(
     (itemId: string, imageType: string, tag: string) => {
