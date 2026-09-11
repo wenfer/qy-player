@@ -92,6 +92,8 @@ import {
 import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
+import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
+import type { ResumeEpisodeInput } from '../../shared/types/playback';
 import type { ProbeItemInput } from '../../shared/types/media-info';
 import {
   isCatalogBrowseQuery,
@@ -1329,6 +1331,24 @@ function registerCatalogHandlers(
       return ok(await scrapeJobs.applyCandidate(pluginId as string, itemId as number, candidateId as string, kind));
     }
   );
+
+  // ---- Series resume resolution (QYP2-034, plan §12.2) ----
+  // The renderer never copies the algorithm: it collects the series'
+  // episode snapshots (server UserData preferred, §12.1) and the pure
+  // resolver decides target/position/reason main-side.
+  ipcMain.handle(IPC_CHANNELS.RESUME.SERIES, (_event, episodes: unknown) => {
+    if (!Array.isArray(episodes)) return err('VALIDATION_FAILED', '单集列表不合法');
+    const inputs = [];
+    for (const entry of episodes) {
+      if (typeof entry !== 'object' || entry === null) return err('VALIDATION_FAILED', '单集条目不合法');
+      const item = entry as Record<string, unknown>;
+      if (typeof item.itemId !== 'string' && typeof item.itemId !== 'number') {
+        return err('VALIDATION_FAILED', '单集 id 不合法');
+      }
+      inputs.push(item as unknown as ResumeEpisodeInput);
+    }
+    return ok(resolveSeriesResume(inputs));
+  });
 
   // ---- Plugin config (QYP2-027, plan §11.1/§11.3) ----
   ipcMain.handle(IPC_CHANNELS.PLUGINS.LIST, () => {

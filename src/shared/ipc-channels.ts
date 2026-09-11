@@ -87,6 +87,9 @@ export const IPC_CHANNELS = {
     DELETE_SECRET: 'plugins:delete-secret',
     TEST: 'plugins:test',
   },
+  RESUME: {
+    SERIES: 'resume:series',
+  },
   SCRAPE: {
     START: 'scrape:start',
     JOBS: 'scrape:jobs',

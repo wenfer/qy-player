@@ -135,6 +135,9 @@ const electronAPI = {
   deletePluginSecret: (pluginId: string, key: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
   testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
+  // Series resume (QYP2-034): pure resolver runs main-side.
+  resolveSeriesResume: (episodes: unknown[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes),
   // Scrape jobs (QYP2-032)
   scrapeStart: (pluginId: string, itemIds: number[], jobId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.START, pluginId, itemIds, jobId),

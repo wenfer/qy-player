@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Play, Star, Calendar, Clock, ChevronLeft, Film, Users, Clapperboard, Tv } from 'lucide-react';
+import SeriesResumeButton from './SeriesResumeButton';
+import EpisodeGrid from './EpisodeGrid';
+import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/playback';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
 import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
 import ProgressSummary from './ProgressSummary';
@@ -36,14 +39,17 @@ interface Season {
   SeriesId: string;
 }
 
-interface Episode {
+export interface Episode {
   Id: string;
   Name: string;
   IndexNumber?: number;
+  ParentIndexNumber?: number;
   Overview?: string;
   ImageTags?: { Primary?: string };
   RunTimeTicks?: number;
   MediaSources?: Array<{ Id: string }>;
+  /** Server-side watch state (§12.1: server UserData preferred). */
+  UserData?: { PlaybackPositionTicks?: number; Played?: boolean; LastPlayedDate?: string };
 }
 
 function formatRuntime(ticks?: number): string {
@@ -246,6 +252,8 @@ export default function Detail() {
         playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
         'success'
       );
+      // 回到本页时（focus）会静默重解析；这里先主动失效一次。
+      setResumeEpoch((n) => n + 1);
     } catch (err) {
       addToast(`播放失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
     }
@@ -255,6 +263,40 @@ export default function Detail() {
     setSelectedSeason(seasonIndex);
     loadEpisodes(seasonId);
   }, [loadEpisodes]);
+
+  // QYP2-034: series primary-button target. The episode snapshots come
+  // from the server (UserData preferred, §12.1); the DECISION runs
+  // main-side via the pure resolver — the renderer never copies the
+  // algorithm. resumeEpoch lets play-back/focus refresh re-resolve.
+  const [resumeEpoch, setResumeEpoch] = useState(0);
+  const resolveResumeTarget = useCallback(async (): Promise<ResumeTarget | null> => {
+    if (!details || details.Type !== 'Series' || !Number.isInteger(serverId)) return null;
+    try {
+      const all = await window.electronAPI.getItems(details.Id, {
+        includeItemTypes: 'Episode',
+        recursive: true,
+      }, serverId) as Episode[];
+      const inputs: ResumeEpisodeInput[] = all.map((ep) => ({
+        itemId: ep.Id,
+        seasonNumber: ep.ParentIndexNumber ?? null,
+        episodeNumber: ep.IndexNumber ?? null,
+        title: ep.Name,
+        progress: {
+          position: ep.UserData?.PlaybackPositionTicks ? ep.UserData.PlaybackPositionTicks / 10000000 : 0,
+          duration: ep.RunTimeTicks ? ep.RunTimeTicks / 10000000 : 0,
+          isFinished: ep.UserData?.Played === true,
+          updatedAt: ep.UserData?.LastPlayedDate ? Date.parse(ep.UserData.LastPlayedDate) || 0 : 0,
+        },
+      }));
+      const res = (await window.electronAPI.resolveSeriesResume(inputs)) as {
+        ok: boolean;
+        data?: ResumeTarget | null;
+      };
+      return res.ok ? res.data ?? null : null;
+    } catch {
+      return null;
+    }
+  }, [details, serverId, resumeEpoch]);
 
   const getImageUrl = useCallback(
     (itemId: string, imageType: string, tag: string) => {
@@ -356,13 +398,30 @@ export default function Detail() {
               )}
             </div>
 
-            <button
-              onClick={() => handlePlay()}
-              className="w-full mt-4 flex items-center justify-center gap-2 px-5 py-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-colors focus-ring font-medium text-sm"
-            >
-              <Play size={16} fill="currentColor" />
-              立即播放
-            </button>
+            {details.Type === 'Series' ? (
+              <div className="mt-4">
+                <SeriesResumeButton
+                  resolve={resolveResumeTarget}
+                  onPlay={(target) =>
+                    void handlePlay(
+                      String(target.itemId),
+                      undefined,
+                      'direct',
+                      // 明确传 0：start/next/replay 不吃该集旧位置（§12.2）
+                      target.position > 0 ? Math.floor(target.position) : 0
+                    )
+                  }
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => handlePlay()}
+                className="w-full mt-4 flex items-center justify-center gap-2 px-5 py-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-colors focus-ring font-medium text-sm"
+              >
+                <Play size={16} fill="currentColor" />
+                立即播放
+              </button>
+            )}
             <button
               onClick={() => {
                 const s = usePlayerStore.getState();
@@ -478,54 +537,19 @@ export default function Detail() {
                   ))}
                 </div>
 
-                {episodes.length > 0 && (
-                  <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                    {episodes.map((ep) => {
-                      const msId = ep.MediaSources?.[0]?.Id;
-                      const epPosterUrl = ep.ImageTags?.Primary
-                        ? getImageUrl(ep.Id, 'Primary', ep.ImageTags.Primary)
-                        : undefined;
-                      return (
-                        <button
-                          key={ep.Id}
-                          className="group relative aspect-[16/10] rounded-xl overflow-hidden bg-card border border-border hover:border-primary/30 transition-colors text-left focus-ring"
-                          onClick={() => msId && handlePlay(ep.Id, msId)}
-                        >
-                          {epPosterUrl ? (
-                            <img
-                              src={epPosterUrl}
-                              alt=""
-                              className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                            />
-                          ) : (
-                            <div className="absolute inset-0 flex items-center justify-center bg-muted">
-                              <span className="text-3xl font-bold text-muted-foreground/20 select-none">
-                                {ep.IndexNumber}
-                              </span>
-                            </div>
-                          )}
-                          {/* Gradient overlay */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent" />
-                          {/* Content */}
-                          <div className="absolute bottom-0 left-0 right-0 p-2">
-                            <div className="text-xs font-medium line-clamp-2 leading-snug">
-                              {ep.IndexNumber !== undefined ? `${ep.IndexNumber}. ` : ''}{ep.Name}
-                            </div>
-                            {ep.RunTimeTicks && (
-                              <div className="text-[10px] text-muted-foreground mt-0.5">{formatRuntime(ep.RunTimeTicks)}</div>
-                            )}
-                          </div>
-                          {/* Play overlay */}
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                            <div className="p-2 bg-primary text-primary-foreground rounded-full">
-                              <Play size={14} fill="currentColor" />
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <EpisodeGrid
+                  episodes={episodes}
+                  getImageUrl={getImageUrl}
+                  onPlay={(ep) => {
+                    const msId = ep.MediaSources?.[0]?.Id;
+                    if (msId) handlePlay(ep.Id, msId);
+                  }}
+                  onPlayFromStart={(ep) => {
+                    const msId = ep.MediaSources?.[0]?.Id;
+                    // 从头播放：显式 0 起播，不清除历史（§12.1）
+                    if (msId) handlePlay(ep.Id, msId, 'direct', 0);
+                  }}
+                />
               </div>
             )}
           </div>

@@ -30,7 +30,8 @@ export type ResumeReason =
   | 'replay';
 
 export interface ResumeTarget {
-  itemId: number;
+  /** Catalog item id (number) or online server item id (string). */
+  itemId: number | string;
   position: number;
   reason: ResumeReason;
   seasonNumber?: number | null;
@@ -41,7 +42,8 @@ export interface ResumeTarget {
 
 /** 剧集续播解析的输入：该系列下全部单集（季/集号与各自进度）。 */
 export interface ResumeEpisodeInput {
-  itemId: number;
+  /** Catalog item id (number) or online server item id (string). */
+  itemId: number | string;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
   progress?: ResumeProgress | null;
