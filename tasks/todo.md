@@ -118,18 +118,28 @@
 - 验收：全量 685/57；实机 DB 查证 progress/history 双落
 - Evidence: /tmp/qy-run10 系列日志 + DB 查询记录
 
-### QYP3-012 均衡器 `[ ]`
+### QYP3-012 均衡器 + mpv 音频参数 `[x]`
 - 依赖：010,011
-- 内容：10 频段（预设+自定义），双引擎参数映射；设置持久化
-- 验收：映射纯函数单测；实机听感验证记录
-- Evidence：
+- 内容：equalizer.ts 契约单源（10 频段、7 预设、sanitize 限幅
+  ±12dB）；双引擎映射——renderer 直连 BiquadFilter（store 起播读
+  playback.eqGains），mpv 映射 lavfi equalizer 链（lowshelf/peaking/
+  highshelf 对应，平直=不挂滤镜）；mpv --gapless-audio=weak（spawn）
+  + ReplayGain（replaygain 属性）；视频加载复位 af（跨 loadfile
+  持久语义）
+- 设置 UI：设置→音乐（引擎偏好/ReplayGain/均衡器预设+10 滑条，
+  实时保存）
+- 验收：契约单测 5 例；CDP 实机（预设落库 [7,6,4,2,...]）
+- Evidence: equalizer.test 5/5；全量 690/58；实机设置区截图+DB 查证
 
-### QYP3-013 迷你控制条 + 快捷键 `[ ]`
+### QYP3-013 全局迷你条 + 媒体键双用途 `[x]`（收藏快捷键归 P1——catalog_user_state music 收藏未接）
 - 依赖：010
-- 内容：底部常驻条（可折叠）；全局快捷键：上一曲/下一曲/收藏（复用
-  shortcut 框架与格式化规则）
-- 验收：快捷键冲突 UI 提示；折叠状态持久化
-- Evidence：
+- 内容：MusicMiniBar 全局常驻（App 层，可折叠为悬浮圆钮，进度条 +
+  上下曲/播放暂停）；媒体键双用途——main 侧 music-active 桥（renderer
+  webaudio 起播/停止上报 SET_ENGINE_ACTIVE），MediaPlayPause/Next/
+  PreviousTrack 在音乐激活时转发 ON_COMMAND → store 单点处理，
+  否则保持 mpv 视频/音频语义
+- 验收：设置区 CDP 实机；快捷键冲突 UI 由既有框架覆盖（Media 键 fixed）
+- Evidence: 全量 690/58；构建三产物绿
 
 ### QYP3-014 音乐续播 `[x]`（播放计数 catalog_user_state 归 P1，暂用 watch_history）
 - 依赖：011

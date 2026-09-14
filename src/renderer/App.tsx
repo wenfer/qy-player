@@ -12,6 +12,7 @@ import History from './pages/History';
 import Shortcuts from './pages/Shortcuts';
 import Navigation from './components/Navigation';
 import PlayerControls from './components/PlayerControls';
+import MusicMiniBar from './components/MusicMiniBar';
 import ToastContainer from './components/Toast';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
@@ -85,6 +86,7 @@ function App() {
           </Routes>
         </main>
         <PlayerControls />
+        <MusicMiniBar />
         <ToastContainer />
         <AutoNextHost />
       </div>

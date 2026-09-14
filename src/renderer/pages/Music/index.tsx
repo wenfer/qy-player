@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Disc3, ListMusic, Music2, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { Disc3, ListMusic, Music2 } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicTrackRow } from '../../../shared/types/music';
@@ -107,56 +107,6 @@ export default function MusicPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
-      {/* 迷你控制条（webaudio 引擎；mpv 引擎由全局 PlayerControls 驱动） */}
-      {playback.engine === 'webaudio' && playback.current && (
-        <div className="sticky top-0 z-10 bg-card/95 border border-border rounded-lg px-3 py-2 mb-4 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void playback.prev()}
-            aria-label="上一曲"
-            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-          >
-            <SkipBack size={16} />
-          </button>
-          {playback.isPlaying ? (
-            <button
-              type="button"
-              onClick={() => playback.pause()}
-              aria-label="暂停"
-              className="p-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
-            >
-              <Pause size={14} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => playback.resume()}
-              aria-label="继续播放"
-              className="p-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
-            >
-              <Play size={14} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void playback.next()}
-            aria-label="下一曲"
-            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-          >
-            <SkipForward size={16} />
-          </button>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs truncate">{playback.current.title}</p>
-            <p className="text-[10px] text-muted-foreground truncate">
-              {playback.current.artist ?? '未知歌手'}
-            </p>
-          </div>
-          <span className="text-[10px] text-muted-foreground">
-            {fmtDuration(playback.position) || '0:00'}
-          </span>
-        </div>
-      )}
-
       {/* 视图切换 */}
       <div className="flex items-center gap-2 mb-6">
         <button

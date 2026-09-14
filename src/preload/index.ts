@@ -29,7 +29,8 @@ const electronAPI = {
     startPosition?: number,
     httpHeaders?: string,
     mediaContext?: MediaContext,
-    streamSessionId?: string
+    streamSessionId?: string,
+    audioChain?: { eqGains?: number[]; replaygain?: string }
   ) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.PLAYER.LOAD_FILE,
@@ -37,7 +38,8 @@ const electronAPI = {
       startPosition,
       httpHeaders,
       mediaContext,
-      streamSessionId
+      streamSessionId,
+      audioChain
     ),
   playerControl: (action: string, ...args: unknown[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.CONTROL, action, ...args),
@@ -162,6 +164,13 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_TRACKS, { offset, limit }),
   reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
+  setMusicEngineActive: (value: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, value),
+  onMusicCommand: (cb: (command: string) => void) => {
+    const listener = (_event: unknown, command: string): void => cb(command);
+    ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
+  },
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, { key, enabled }),

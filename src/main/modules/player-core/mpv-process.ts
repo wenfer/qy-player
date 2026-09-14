@@ -85,6 +85,8 @@ export class MpvProcessManager extends EventEmitter {
       '--keep-open',
       '--save-position-on-quit=no',
       '--sub-auto=fuzzy',
+      // 音乐（QYP3-012）：曲间无爆音衔接；对视频无副作用（仅音频轨道过渡）
+      '--gapless-audio=weak',
       '--fs=no',
       // Software decoding only: hwdec on Linux (vaapi/vdpau) is unstable
       // with online streams and commonly freezes after ~30s of playback.

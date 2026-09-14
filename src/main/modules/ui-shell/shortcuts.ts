@@ -1,4 +1,6 @@
 import { globalShortcut, BrowserWindow } from 'electron';
+import { isMusicEngineActive } from '../playback-engine/music-active';
+import { IPC_CHANNELS } from '../../../shared/ipc-channels';
 import { PlayerCore } from '../player-core';
 import { GLOBAL_SHORTCUTS, type ShortcutDef } from '../../../shared/shortcut-defs';
 
@@ -23,13 +25,27 @@ export function registerGlobalShortcuts(
   let aspectIndex = 0;
 
   const handlers: Record<string, () => void> = {
+    // 媒体键双用途（QYP3-013）：音乐（renderer 引擎）激活时转发给
+    // renderer（store 单点处理），否则走 mpv 视频/音频语义。
     togglePause: () => {
+      if (isMusicEngineActive()) {
+        mainWindow.webContents.send(IPC_CHANNELS.MUSIC.ON_COMMAND, 'toggle');
+        return;
+      }
       if (player.isReady()) player.togglePause().catch(() => {});
     },
     seekForward: () => {
+      if (isMusicEngineActive()) {
+        mainWindow.webContents.send(IPC_CHANNELS.MUSIC.ON_COMMAND, 'next');
+        return;
+      }
       if (player.isReady()) player.seek(30, 'relative').catch(() => {});
     },
     seekBack: () => {
+      if (isMusicEngineActive()) {
+        mainWindow.webContents.send(IPC_CHANNELS.MUSIC.ON_COMMAND, 'prev');
+        return;
+      }
       if (player.isReady()) player.seek(-30, 'relative').catch(() => {});
     },
     toggleWindow: () => {

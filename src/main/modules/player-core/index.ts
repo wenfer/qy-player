@@ -166,6 +166,20 @@ export class PlayerCore extends EventEmitter {
     await this.ipc.command('loadfile', ...args);
   }
 
+  /**
+   * 音乐音频链（QYP3-012）：EQ（af=lavfi equalizer）与 ReplayGain。
+   * null = 清空（视频加载复位，属性跨 loadfile 持久）。失败静默。
+   */
+  async applyMusicAudioChain(eqFilter: string | null, replaygain: string | null): Promise<void> {
+    if (!this.ipc) return;
+    if (eqFilter !== null) {
+      await this.ipc.setProperty('af', eqFilter).catch(() => {});
+    }
+    if (replaygain !== null) {
+      await this.ipc.setProperty('replaygain', replaygain).catch(() => {});
+    }
+  }
+
   async pause(): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
     await this.ipc.setProperty('pause', true);

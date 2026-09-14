@@ -1,5 +1,6 @@
 import PluginSettings from './PluginSettings';
 import PlaybackSettings from './PlaybackSettings';
+import MusicSettings from './MusicSettings';
 
 export default function Settings() {
   // 设置页仅保留软件配置（U-002：媒体服务器与媒体来源已迁至「媒体库」页）。
@@ -11,6 +12,7 @@ export default function Settings() {
         软件配置。媒体服务器（Jellyfin / Emby）与媒体来源（本地目录 / WebDAV）都在「媒体库」页面管理。
       </p>
       <PlaybackSettings />
+      <MusicSettings />
       <PluginSettings />
     </div>
   );

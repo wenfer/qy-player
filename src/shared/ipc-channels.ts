@@ -24,6 +24,10 @@ export const IPC_CHANNELS = {
     GET_TRACKS: 'music:get-tracks',
     /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
     REPORT_PROGRESS: 'music:report-progress',
+    /** webaudio 起播/停止时上报激活态（媒体键双用途路由）。 */
+    SET_ENGINE_ACTIVE: 'music:set-engine-active',
+    /** 全局媒体键转发（renderer 引擎激活时 main → renderer）。 */
+    ON_COMMAND: 'music:on-command',
   },
   UNIFIED: {
     CONTINUE_WATCHING: 'unified:continue-watching',

@@ -95,6 +95,8 @@ import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import { CacheManager } from '../modules/cache/cache-manager';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
+import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
+import { setMusicEngineActive } from '../modules/playback-engine/music-active';
 import { registerCoversPartition } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
@@ -374,6 +376,13 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     }
   );
 
+  // 引擎激活态（QYP3-013）：媒体键双用途路由依据；renderer 引擎停止
+  // 时必须置 false，否则媒体键失联。
+  ipcMain.handle(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, (_event, value: unknown) => {
+    setMusicEngineActive(value === true);
+    return ok({ value: Boolean(value) });
+  });
+
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_TRACKS, (_event, args: { offset?: number; limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
     const offset = Math.max(Number(args?.offset) || 0, 0);
@@ -610,16 +619,31 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   }
 
   // Player handlers
+  // mpv af 复位跟踪（音乐 af 跨 loadfile 持久，视频加载需复位）
+  let mpvAfWasSet = false;
+
   ipcMain.handle(IPC_CHANNELS.PLAYER.LOAD_FILE, async (
     _event,
     path: string,
     startPosition?: number,
     httpHeaders?: string,
     mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string; serverId?: number },
-    streamSessionId?: string
+    streamSessionId?: string,
+    audioChain?: { eqGains?: number[]; replaygain?: string }
   ) => {
     if (!player.isReady()) {
       await player.start();
+    }
+
+    // 音乐音频链（QYP3-012）：仅音乐加载时设置，视频加载复位（af 跨
+    // loadfile 持久）。必须在 mpv 启动后设置。
+    if (audioChain) {
+      const gains = sanitizeEqGains(audioChain.eqGains);
+      void player.applyMusicAudioChain(mpvAudioFilterFromEq(gains) ?? '', audioChain.replaygain ?? null);
+      mpvAfWasSet = true;
+    } else if (mpvAfWasSet) {
+      void player.applyMusicAudioChain('', null);
+      mpvAfWasSet = false;
     }
 
     // Real headers never cross the IPC boundary: the renderer hands back the

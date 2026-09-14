@@ -87,6 +87,26 @@ function reportProgress(final: boolean): void {
   });
 }
 
+/** 音频链设置读取（QYP3-012）：EQ dB 数组 + ReplayGain 模式。 */
+async function readAudioChainSettings(): Promise<[number[] | null, string | null]> {
+  try {
+    const eqRes = (await window.electronAPI.getSettings('playback.eqGains')) as {
+      ok?: boolean;
+      data?: unknown;
+    };
+    const eqValue = eqRes?.data;
+    let eqGains: number[] | null = null;
+    if (Array.isArray(eqValue)) {
+      eqGains = eqValue.map((v) => Number(v) || 0);
+    }
+    const rgRes = (await window.electronAPI.getSettings('playback.replaygain')) as { data?: unknown };
+    const rg = typeof rgRes?.data === 'string' ? rgRes.data : null;
+    return [eqGains, rg && rg !== 'off' ? rg : null];
+  } catch {
+    return [null, null];
+  }
+}
+
 interface TrackInput {
   trackId: number;
   sourceId: number;
@@ -116,11 +136,14 @@ async function fallbackToMpv(): Promise<void> {
   }
   engineSingleton?.pause();
   useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false });
+  const [eqGains, replaygain] = await readAudioChainSettings();
   await window.electronAPI.playerLoadFile(
     resolution.data.url,
     resolution.data.startPosition > 0 ? resolution.data.startPosition : undefined,
     undefined,
-    resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3]
+    resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
+    undefined,
+    { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) }
   );
 }
 
@@ -191,9 +214,13 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         const idx = Math.max(0, queue.findIndex((q) => q.id === start.trackId));
         if (token !== playToken) return;
         const engineInstance = getEngine();
+        // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
+        const [eqGains] = await readAudioChainSettings();
+        if (eqGains) engineInstance.setEq(eqGains);
         lastReportAt = Date.now();
         await engineInstance.playQueue(queue, idx, get().repeat, get().shuffle);
         const st = engineInstance.queueState;
+        void window.electronAPI.setMusicEngineActive(true); // 媒体键双用途路由
         set({
           engine: 'webaudio',
           current: engineSnapshotCurrent(queue, st.currentTrackId),
@@ -206,6 +233,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           errorMessage: null,
         });
       } else {
+        // mpv 引擎接管：音乐激活态解除（媒体键回到视频语义）
+        void window.electronAPI.setMusicEngineActive(false);
         set({
           engine: 'mpv',
           current: {
@@ -222,11 +251,15 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           isPlaying: true,
           errorMessage: null,
         });
+        // QYP3-012：mpv 引擎同样带 EQ/ReplayGain（设置在主进程消费）
+        const [eqGains, replaygain] = await readAudioChainSettings();
         await window.electronAPI.playerLoadFile(
           url,
           startPosition > 0 ? startPosition : undefined,
           undefined,
-          mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3]
+          mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
+          undefined,
+          { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
         );
       }
     } catch (e) {
@@ -240,6 +273,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       engineSingleton?.pause();
       reportProgress(false);
       set({ isPlaying: false });
+      void window.electronAPI.setMusicEngineActive(false); // 暂停时媒体键还给视频（若无视频则无操作）
     } else if (s.engine === 'mpv') {
       void window.electronAPI.playerControl('pause');
     }
@@ -250,6 +284,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     if (s.engine === 'webaudio') {
       void engineSingleton?.resume();
       set({ isPlaying: true });
+      void window.electronAPI.setMusicEngineActive(true);
     } else if (s.engine === 'mpv') {
       void window.electronAPI.playerControl('pause');
     }
