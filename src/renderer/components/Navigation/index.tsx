@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Home, FolderOpen, Library, Search, Settings, History, Keyboard, Wand2 } from 'lucide-react';
 
 const navItems = [
@@ -12,9 +13,24 @@ const navItems = [
   { path: '/settings', label: '设置', icon: Settings },
 ];
 
+/** 窗口标题随页面内容变化（GNOME 任务栏可辨识当前所在页面）。 */
+function pageTitleFor(pathname: string): string {
+  if (pathname.startsWith('/detail/')) return '详情';
+  if (pathname.startsWith('/library/') || pathname.startsWith('/browse/')) return '媒体库';
+  const hit = navItems.find(
+    (item) => item.path !== '/' && pathname.startsWith(item.path)
+  );
+  return hit?.label ?? '首页';
+}
+
 export default function Navigation() {
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const page = pageTitleFor(location.pathname);
+    document.title = page === '首页' ? 'QY Player' : `${page} · QY Player`;
+  }, [location.pathname]);
 
   return (
     <nav

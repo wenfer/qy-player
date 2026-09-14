@@ -115,6 +115,22 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // 单实例锁：防止重复启动造成两个同名窗口（GNOME 窗口列表出现
+  // 「QY Player<2>」计数、mpv/数据库竞争）。二次启动改为唤起已有窗口。
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+
   registerIpcHandlers(player, () => mainWindow);
 
   // Forward renderer console to main stdout
