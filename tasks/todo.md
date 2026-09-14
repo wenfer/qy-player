@@ -50,12 +50,15 @@
 - Evidence: cover-service.test 5/5；全量 653/53；mpv 导出 0.29/0.32
   一致性属实机 spike 项（TARGET-VERIFY 补记）
 
-### QYP3-006 CUE 分轨 `[ ]`
+### QYP3-006 CUE 分轨 `[x]`
 - 依赖：004
-- 内容：CUE 解析（TRACK/INDEX 01）→ music_cue_entries；strict：引用
-  文件缺失即整张不入库并报告
-- 验收：正常/损坏 CUE fixture 用例
-- Evidence：
+- 内容：cue-parser 纯函数（MM:SS:FF→秒、相邻区间闭合、乱序排序、
+  无 INDEX 跳过、无 TITLE 回退 Track n）+ strict 校验（引用音频缺失
+  = 整张不入库）+ 扫描接线（readText 钩子：本地 fs / WebDAV 64KiB
+  bounded GET；basename→relativePath 解析）+ repository.
+  replaceMusicCueEntries（整体替换幂等）
+- 验收：cue-parser 5 例 + 扫描集成 2 例（存在→分轨入库；缺失→跳过）
+- Evidence: cue-parser.test 5/5；local-scan.test 38/38；全量 660/54
 
 ### QYP3-007 音频 probe 扩展 `[ ]`
 - 依赖：005

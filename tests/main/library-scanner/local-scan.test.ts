@@ -337,6 +337,60 @@ describe('music ingest (QYP3-003)', () => {
   });
 });
 
+describe('cue ingest (QYP3-006)', () => {
+  it('splits a CUE into cue entries when the audio file exists', async () => {
+    const sourceId = makeSource();
+    const cueContent = [
+      'TITLE "叶惠美"',
+      'FILE "叶惠美.flac" WAVE',
+      '  TRACK 01 AUDIO',
+      '    TITLE "以父之名"',
+      '    INDEX 01 00:00:00',
+      '  TRACK 02 AUDIO',
+      '    TITLE "晴天"',
+      '    INDEX 01 05:10:00',
+    ].join('\n');
+    const adapter = makeTreeAdapter({
+      '周杰伦/叶惠美/叶惠美.flac': { size: 9000, mtime: 1 },
+      '周杰伦/叶惠美/叶惠美.cue': { size: 200, mtime: 2 },
+    });
+    const driver = createLocalScanDriver({
+      repo,
+      sourceId,
+      readText: async () => Buffer.from(cueContent, 'utf8'),
+    });
+    await runScan(scanningAdapterOf(adapter), driver, sourceId);
+    const db = new Database(dbPath, { readonly: true });
+    const tracks = db
+      .prepare('SELECT * FROM music_tracks WHERE source_id = ? AND source_key LIKE \'cue:%\'')
+      .all(sourceId) as Array<{ id: number; title: string; path: string }>;
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0].title).toBe('以父之名');
+    const cueRows = db
+      .prepare('SELECT * FROM music_cue_entries WHERE track_id = ? ORDER BY position')
+      .all(tracks[0].id) as Array<{ position: number; title: string; start: number; end: number | null }>;
+    expect(cueRows).toHaveLength(2);
+    expect(cueRows[0]).toMatchObject({ title: '以父之名', start: 0, end: 310 });
+    expect(cueRows[1]).toMatchObject({ title: '晴天', start: 310, end: null });
+  });
+
+  it('skips the whole cue when the referenced audio file is missing (strict)', async () => {
+    const sourceId = makeSource();
+    const cueContent = 'FILE "不存在.wav" WAVE\n  TRACK 01 AUDIO\n    TITLE "幽灵"\n    INDEX 01 00:00:00\n';
+    const adapter = makeTreeAdapter({
+      '周杰伦/叶惠美/叶惠美.flac': { size: 9000, mtime: 1 },
+      '周杰伦/叶惠美/叶惠美.cue': { size: 200, mtime: 2 },
+    });
+    const driver = createLocalScanDriver({ repo, sourceId, readText: async () => Buffer.from(cueContent, 'utf8') });
+    await runScan(scanningAdapterOf(adapter), driver, sourceId);
+    const db = new Database(dbPath, { readonly: true });
+    const cueTracks = db
+      .prepare('SELECT COUNT(*) c FROM music_tracks WHERE source_id = ? AND source_key LIKE \'cue:%\'')
+      .get(sourceId) as { c: number };
+    expect(cueTracks.c).toBe(0);
+  });
+});
+
 describe('local scan driver', () => {
   it('builds series → season → episode hierarchy', async () => {
     const sourceId = makeSource();

@@ -1452,6 +1452,9 @@ function registerCatalogHandlers(
                 await fh.close();
               }
             },
+            // QYP3-006：CUE 文本（小文件，整读）
+            readText: async (entry) =>
+              (await readFile((adapter as LocalSourceAdapter).resolveInside(entry.relativePath))) as Buffer,
           });
     const controller = new ScanJobController({
       repo,

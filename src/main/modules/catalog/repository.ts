@@ -432,6 +432,17 @@ export function createCatalogRepository(db: Database.Database) {
 
     // -- Files --------------------------------------------------------------
 
+    /** QYP3-006：CUE 分轨整体替换写入（重扫幂等）。 */
+    replaceMusicCueEntries(trackId: number, entries: Array<{ position: number; title: string; start: number; end: number | null }>): void {
+      const insert = db.prepare(
+        'INSERT INTO music_cue_entries (track_id, position, title, start, end) VALUES (?, ?, ?, ?, ?)'
+      );
+      db.transaction(() => {
+        db.prepare('DELETE FROM music_cue_entries WHERE track_id = ?').run(trackId);
+        for (const e of entries) insert.run(trackId, e.position, e.title, e.start, e.end);
+      })();
+    },
+
     listMusicTracks(sourceId: number): Array<{ source_key: string; fingerprint: string }> {
       return db
         .prepare('SELECT source_key, fingerprint FROM music_tracks WHERE source_id = ?')

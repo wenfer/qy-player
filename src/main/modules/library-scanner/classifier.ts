@@ -21,13 +21,16 @@ export const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set([
   '.mpc', '.mka', '.ac3', '.dts', '.amr', '.au', '.ra',
 ]);
 
+// CUE 分轨描述（QYP3-006）：不是媒体本体，解析后指向音频文件
+export const CUE_EXTENSIONS: ReadonlySet<string> = new Set(['.cue']);
+
 const NFO_EXTENSIONS: ReadonlySet<string> = new Set(['.nfo']);
 const SIDECAR_EXTENSIONS: ReadonlySet<string> = new Set([
   '.jpg', '.jpeg', '.png', '.tbn', // artwork
   '.srt', '.ass', '.ssa', '.sub', '.smi', // subtitles
 ]);
 
-export type MediaFileClass = 'video' | 'audio' | 'nfo' | 'sidecar' | 'ignored';
+export type MediaFileClass = 'video' | 'audio' | 'audio-cue' | 'nfo' | 'sidecar' | 'ignored';
 
 export interface EpisodeInfo {
   season: number;
@@ -119,6 +122,7 @@ function extensionOf(path: string): string {
 function fileClassOf(ext: string): MediaFileClass {
   if (VIDEO_EXTENSIONS.has(ext)) return 'video';
   if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
+  if (CUE_EXTENSIONS.has(ext)) return 'audio-cue';
   if (NFO_EXTENSIONS.has(ext)) return 'nfo';
   if (SIDECAR_EXTENSIONS.has(ext)) return 'sidecar';
   return 'ignored';

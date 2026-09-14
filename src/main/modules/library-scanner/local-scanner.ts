@@ -3,6 +3,7 @@ import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
 import { parseAudioTagsFromBuffer, type ParsedAudioTags } from './tag-parser';
 import { saveCoverFromTags } from './cover-service';
+import { parseCue } from './cue-parser';
 import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
 import { applyNfoMetadata } from '../metadata/metadata-merger';
 import type { MetadataValue, NfoMetadata, ProviderStore } from '../metadata/types';
@@ -208,6 +209,8 @@ export function createLocalScanDriver(deps: {
   readAudio?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
   /** 封面落盘目录（QYP3-005）；缺省则不落盘（has_cover 仍入行）。 */
   coversDir?: string;
+  /** CUE 文本读取（QYP3-006）：本地=fs；WebDAV=bounded GET。缺省则 CUE 跳过。 */
+  readText?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   // Existing files snapshot: cheap in-driver change detection without extra
@@ -225,6 +228,7 @@ export function createLocalScanDriver(deps: {
   // dir-keyed payloads for movie.nfo / tvshow.nfo / season.nfo; dir → item
   // registrations so late-arriving NFOs (DFS sort order) still find their
   // series/season items.
+  const cueFiles: SourceEntry[] = [];
   const stemItem = new Map<string, number>();
   const seriesItemByDir = new Map<string, number>();
   const seasonItemByDir = new Map<string, number>();
@@ -341,6 +345,11 @@ export function createLocalScanDriver(deps: {
         }
         return;
       }
+      // CUE 描述文件（QYP3-006）：收进列表，finalize 统一解析
+      if (parsed.fileClass === 'audio-cue') {
+        cueFiles.push(entry);
+        return;
+      }
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
 
       seen.add(entry.relativePath);
@@ -442,6 +451,77 @@ export function createLocalScanDriver(deps: {
     if (finalized) return;
     finalized = true;
     flushGroup();
+    processCueFiles();
+  }
+
+  /**
+   * CUE 分轨入库（QYP3-006，strict）：引用的音频文件必须在本次扫描
+   * 批次里（按文件名与 seen 集合匹配），缺失即整张跳过并告警。
+   */
+  function processCueFiles(): void {
+    if (cueFiles.length === 0) return;
+    // basename → relativePath（CUE 里的 FILE 通常只有文件名）
+    const byBasename = new Map<string, string>();
+    for (const seenPath of seen) {
+      const name = seenPath.split('/').pop() ?? seenPath;
+      const lower = name.toLowerCase();
+      if (!byBasename.has(lower)) byBasename.set(lower, seenPath);
+    }
+    const knownLower = new Set([...seen].map((p) => p.toLowerCase()));
+    for (const cueEntry of cueFiles) {
+      void processOneCue(cueEntry, knownLower, byBasename);
+    }
+  }
+
+  async function processOneCue(
+    entry: SourceEntry,
+    knownLower: ReadonlySet<string>,
+    byBasename: ReadonlyMap<string, string>
+  ): Promise<void> {
+    if (!deps.readText) return;
+    try {
+      const buf = await deps.readText(entry, new AbortController().signal);
+      if (!buf) return;
+      const cue = parseCue(buf.toString('utf8'));
+      if (cue.entries.length === 0) return;
+      // strict：把 FILE 名解析到 seen 里的相对路径；解析不到 = 整张跳过
+      const resolved: Array<{ entry: (typeof cue.entries)[number]; audio: string }> = [];
+      let missing = false;
+      for (const e of cue.entries) {
+        const rel = knownLower.has(e.audioFile.toLowerCase())
+          ? e.audioFile
+          : byBasename.get(e.audioFile.toLowerCase());
+        if (!rel) {
+          missing = true;
+          break;
+        }
+        resolved.push({ entry: e, audio: rel });
+      }
+      if (missing || resolved.length === 0) {
+        console.warn('[CUE] 引用的音频文件缺失，整张跳过:', entry.relativePath);
+        return;
+      }
+      const fingerprint = fingerprintFor(entry);
+      const trackId = repo.upsertMusicTrack({
+        sourceId,
+        sourceKey: `cue:${entry.relativePath}`,
+        path: resolved[0].audio,
+        title: cue.entries[0].title,
+        codec: resolved[0].audio.split('.').pop()?.toLowerCase(),
+        fingerprint,
+      });
+      repo.replaceMusicCueEntries(
+        trackId,
+        resolved.map((r, i) => ({
+          position: i,
+          title: r.entry.title,
+          start: r.entry.start,
+          end: r.entry.end,
+        }))
+      );
+    } catch (err) {
+      console.warn('[CUE] 解析失败:', entry.relativePath, err instanceof Error ? err.message : err);
+    }
   }
 
   function flushGroup(): void {

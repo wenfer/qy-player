@@ -113,6 +113,11 @@ export function createWebDavScanDriver(deps: {
       const resource = await adapter.open({ sourceId: deps.sourceId, relativePath }, signal);
       return collectBounded(resource.stream, 2 * 1024 * 1024, signal);
     },
+    // QYP3-006：CUE 文本走 bounded GET（64 KiB 上限——CUE 从未这么大）
+    readText: async (entry, signal) => {
+      const resource = await adapter.open({ sourceId: deps.sourceId, relativePath: entry.relativePath }, signal);
+      return collectBounded(resource.stream, 64 * 1024, signal);
+    },
   });
 }
 
