@@ -53,6 +53,8 @@ export interface MediaContext {
   seasonNumber?: number;
   episodeNumber?: number;
   mediaSourceId?: string;
+  /** 解析来源服务器（Sessions/Playing 系列回传按此精确路由）。 */
+  serverId?: number;
 }
 
 // 观看历史

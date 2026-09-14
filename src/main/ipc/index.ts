@@ -521,7 +521,7 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     path: string,
     startPosition?: number,
     httpHeaders?: string,
-    mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string },
+    mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string; serverId?: number },
     streamSessionId?: string
   ) => {
     if (!player.isReady()) {
@@ -570,6 +570,10 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       // which differs between direct/transcode and would split the record)
       const mediaType = mediaContext?.mediaType || 'jellyfin';
       const mediaId = mediaContext?.mediaId || path;
+      // 服务端播放会话：起播先报告 Sessions/Playing，Progress/Stopped
+      // 携带同一 PlaySessionId 才会被 Emby/Jellyfin 接受（缺失 → 400，
+      // UserData 永不更新——实测教训）。
+      const playSessionId = randomUUID();
       playbackStateManager!.setCurrentMedia(
         mediaType,
         mediaId,
@@ -578,8 +582,37 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         undefined,
         mediaContext?.seasonNumber,
         mediaContext?.episodeNumber,
-        mediaContext?.mediaSourceId
+        mediaContext?.mediaSourceId,
+        playSessionId
       );
+      // fire-and-forget：报告失败只损失服务端进度展示，绝不阻塞播放。
+      // 服务器路由：mediaContext.serverId（解析时确定）精确匹配；
+      // 旧上下文无 serverId 时回退同类型活跃服务器。
+      void (async () => {
+        try {
+          const servers = storage.getServers().filter(
+            (s) => s.is_active && s.type === mediaType && s.user_id &&
+              (mediaContext?.serverId === undefined || s.id === mediaContext.serverId)
+          );
+          for (const server of servers) {
+            const apiKey = resolveServerApiKey(server, secretStore);
+            if (!apiKey) continue;
+            const client = createClient({
+              type: server.type as 'jellyfin' | 'emby',
+              baseUrl: server.base_url,
+              apiKey,
+              userId: server.user_id,
+            });
+            await client.reportPlayingStart(
+              mediaId,
+              mediaContext?.mediaSourceId || mediaId,
+              playSessionId
+            );
+          }
+        } catch {
+          // 静默：进度回传失败不影响本地播放与进度保存
+        }
+      })();
       // Resume from last position (same rule as local: skip if nearly finished)
       const resumePosition = playbackStateManager!.getResumePosition(mediaType, mediaId);
       // Explicit 0 = 从头播放（§12.1：不清历史、不回退旧位置）；
@@ -626,12 +659,16 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
           apiKey,
           userId: server.user_id,
         });
+        // 收尾（disconnect/crashed/退出）一律走 Stopped：Emby 仅在
+        // Stopped 时把 PositionTicks 写入 UserData。
         await client.reportProgress(
           payload.mediaId,
           payload.mediaSourceId || payload.mediaId,
           Math.floor(payload.position * 10000000),
-          payload.isFinished,
-          !player.getState().isPlaying
+          payload.isFinished || payload.final === true,
+          !player.getState().isPlaying,
+          'DirectPlay',
+          payload.playSessionId
         );
       } catch (err) {
         console.error(`[SYNC-PROGRESS] ${server.name}:`, err);
@@ -1194,6 +1231,9 @@ function registerCatalogHandlers(
   pluginConfigService: PluginConfigService,
   scrapeJobs: ScrapeJobService
 ): void {
+  // Legacy tables (watch_history) live in the same database; the series
+  // resume merge (RESUME.SERIES) needs them alongside the catalog repo.
+  const storage = createStorage(db);
   // Subtitle attachments live under <userData>/subtitles/<itemId>/
   // (plan §13). Interrupted imports leave .tmp- files; sweep them once at
   // startup (restart recovery, QYP2-020).
@@ -1638,7 +1678,7 @@ function registerCatalogHandlers(
   // The renderer never copies the algorithm: it collects the series'
   // episode snapshots (server UserData preferred, §12.1) and the pure
   // resolver decides target/position/reason main-side.
-  ipcMain.handle(IPC_CHANNELS.RESUME.SERIES, (_event, episodes: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.RESUME.SERIES, (_event, episodes: unknown, mediaType?: unknown) => {
     if (!Array.isArray(episodes)) return err('VALIDATION_FAILED', '单集列表不合法');
     const inputs = [];
     for (const entry of episodes) {
@@ -1648,6 +1688,26 @@ function registerCatalogHandlers(
         return err('VALIDATION_FAILED', '单集 id 不合法');
       }
       inputs.push(item as unknown as ResumeEpisodeInput);
+    }
+    // 本地历史合并（防御：服务器同步可能失败/滞后——实测教训）。
+    // 本地 watched_at 较新时覆盖服务器快照；决策仍全在 resolveSeriesResume。
+    if (typeof mediaType === 'string' && (mediaType === 'jellyfin' || mediaType === 'emby')) {
+      const ids = inputs.map((e) => String((e as { itemId: unknown }).itemId));
+      const locals = storage.getWatchHistoryByMediaIds(mediaType, ids);
+      for (const input of inputs) {
+        const local = locals.get(String((input as { itemId: unknown }).itemId));
+        if (!local) continue;
+        const localMs = local.watched_at * 1000;
+        const serverMs = (input as { progress?: { updatedAt?: number } }).progress?.updatedAt ?? -1;
+        if (localMs > serverMs) {
+          (input as { progress: unknown }).progress = {
+            position: local.position,
+            duration: local.duration ?? 0,
+            isFinished: false, // 看完与否由 resolver 比例推导兜底
+            updatedAt: localMs,
+          };
+        }
+      }
     }
     return ok(resolveSeriesResume(inputs));
   });

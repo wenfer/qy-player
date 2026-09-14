@@ -333,7 +333,8 @@ export default function Detail() {
           updatedAt: ep.UserData?.LastPlayedDate ? Date.parse(ep.UserData.LastPlayedDate) || 0 : 0,
         },
       }));
-      const res = (await window.electronAPI.resolveSeriesResume(inputs)) as {
+      // 传媒体类型：main 侧把本地历史合并进服务器快照（防御同步失败）
+      const res = (await window.electronAPI.resolveSeriesResumeOfType(inputs, serverType === 'emby' ? 'emby' : 'jellyfin')) as {
         ok: boolean;
         data?: ResumeTarget | null;
       };

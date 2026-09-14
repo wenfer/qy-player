@@ -169,7 +169,9 @@ const electronAPI = {
   }) => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_OVERRIDE, input),
   // Series resume (QYP2-034): pure resolver runs main-side.
   resolveSeriesResume: (episodes: unknown[]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes),
+    ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes, undefined),
+  resolveSeriesResumeOfType: (episodes: unknown[], mediaType: 'jellyfin' | 'emby') =>
+    ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes, mediaType),
   pickNextEpisode: (input: { episodes: unknown[]; seasonNumber?: number | null; episodeNumber?: number | null }) =>
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.NEXT, input),
   // Scrape jobs (QYP2-032)

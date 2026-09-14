@@ -385,6 +385,11 @@ export interface Storage {
   }>;
   clearWatchHistory(): void;
   deleteWatchHistory(mediaType: string, mediaId: string): void;
+  /** 按条目 id 批量取本地观看历史（剧集续播合并本地侧事实用）。 */
+  getWatchHistoryByMediaIds(
+    mediaType: string,
+    mediaIds: string[]
+  ): Map<string, { position: number; duration?: number; watched_at: number }>;
 
   // 剧集自定义片头/片尾（migration 006）。
   // 查找顺序：单集覆盖（key=itemId）→ 整剧设定（key=seriesName）。
@@ -574,6 +579,28 @@ export function createStorage(db: Database.Database): Storage {
       } else {
         db.prepare('DELETE FROM playback_progress WHERE media_type = ? AND server_id = ?').run(mediaType, mediaId);
       }
+    },
+
+    getWatchHistoryByMediaIds(mediaType, mediaIds) {
+      const out = new Map<string, { position: number; duration?: number; watched_at: number }>();
+      if (mediaIds.length === 0) return out;
+      // IN 子句按 id 数量逐个占位（数量受剧集集数限制，几十个安全）。
+      const placeholders = mediaIds.map(() => '?').join(',');
+      const rows = db
+        .prepare(
+          `SELECT media_id, position, duration, watched_at FROM watch_history
+           WHERE media_type = ? AND media_id IN (${placeholders})`
+        )
+        .all(mediaType, ...mediaIds) as Array<{
+        media_id: string;
+        position: number;
+        duration: number | null;
+        watched_at: number;
+      }>;
+      for (const row of rows) {
+        out.set(row.media_id, { position: row.position, duration: row.duration ?? undefined, watched_at: row.watched_at });
+      }
+      return out;
     },
 
     getSkipOverride(serverType, serverId, itemId, seriesName) {

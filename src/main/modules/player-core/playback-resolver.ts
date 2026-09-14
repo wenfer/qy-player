@@ -473,6 +473,8 @@ export async function resolvePlayback(
       ...(target.seasonNumber !== undefined ? { seasonNumber: target.seasonNumber } : {}),
       ...(target.episodeNumber !== undefined ? { episodeNumber: target.episodeNumber } : {}),
       mediaSourceId: target.mediaSourceId,
+      // Sessions/Playing 系列回传按解析出的服务器精确路由
+      serverId: binding.id,
     },
   };
 }

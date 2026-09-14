@@ -110,13 +110,29 @@ export class EmbyClient extends JellyfinClient {
     return `${this.baseUrl}/emby/Videos/${itemId}/stream?${params.toString()}`;
   }
 
+  async reportPlayingStart(
+    itemId: string,
+    mediaSourceId: string,
+    playSessionId: string,
+    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay'
+  ): Promise<void> {
+    await this.client.post('/emby/Sessions/Playing', {
+      ItemId: itemId,
+      MediaSourceId: mediaSourceId,
+      PlaySessionId: playSessionId,
+      CanSeek: true,
+      PlayMethod: playMethod,
+    });
+  }
+
   async reportProgress(
     itemId: string,
     mediaSourceId: string,
     positionTicks: number,
     isFinished: boolean,
     isPaused: boolean,
-    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay'
+    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay',
+    playSessionId?: string
   ): Promise<void> {
     const endpoint = isFinished ? '/emby/Sessions/Playing/Stopped' : '/emby/Sessions/Playing/Progress';
     await this.client.post(endpoint, {
@@ -125,6 +141,7 @@ export class EmbyClient extends JellyfinClient {
       PositionTicks: positionTicks,
       IsPaused: isPaused,
       PlayMethod: playMethod,
+      ...(playSessionId ? { PlaySessionId: playSessionId } : {}),
     });
   }
 }

@@ -221,13 +221,34 @@ export class JellyfinClient {
    * Report playback progress to the server so that resume position
    * is synced across devices (web, mobile, other clients).
    */
+  /**
+   * 播放开始报告（POST /Sessions/Playing）：创建服务端播放会话。
+   * Emby 要求后续 Progress/Stopped 携带同一 PlaySessionId，否则 400
+   * （实测：缺失时进度上报永远被拒，UserData 永不更新）。失败静默。
+   */
+  async reportPlayingStart(
+    itemId: string,
+    mediaSourceId: string,
+    playSessionId: string,
+    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay'
+  ): Promise<void> {
+    await this.client.post('/Sessions/Playing', {
+      ItemId: itemId,
+      MediaSourceId: mediaSourceId,
+      PlaySessionId: playSessionId,
+      CanSeek: true,
+      PlayMethod: playMethod,
+    });
+  }
+
   async reportProgress(
     itemId: string,
     mediaSourceId: string,
     positionTicks: number,
     isFinished: boolean,
     isPaused: boolean,
-    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay'
+    playMethod: 'DirectPlay' | 'Transcode' | 'DirectStream' = 'DirectPlay',
+    playSessionId?: string
   ): Promise<void> {
     const endpoint = isFinished ? '/Sessions/Playing/Stopped' : '/Sessions/Playing/Progress';
     await this.client.post(endpoint, {
@@ -236,6 +257,7 @@ export class JellyfinClient {
       PositionTicks: positionTicks,
       IsPaused: isPaused,
       PlayMethod: playMethod,
+      ...(playSessionId ? { PlaySessionId: playSessionId } : {}),
     });
   }
 }

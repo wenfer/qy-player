@@ -18,6 +18,9 @@ export interface ProgressSyncPayload {
   duration?: number;
   isFinished: boolean;
   mediaSourceId?: string;
+  playSessionId?: string;
+  /** 连接断开/退出等收尾场景：服务端走 Stopped（位置才能落 UserData）。 */
+  final?: boolean;
 }
 
 /**
@@ -42,6 +45,7 @@ export class PlaybackStateManager {
   private currentSeasonNumber: number | null = null;
   private currentEpisodeNumber: number | null = null;
   private currentMediaSourceId: string | null = null;
+  private currentPlaySessionId: string | null = null;
   private onProgressSaved?: (payload: ProgressSyncPayload) => void | Promise<void>;
   private catalogProgress?: CatalogProgressSink;
 
@@ -68,22 +72,24 @@ export class PlaybackStateManager {
       this.saveCurrentProgress();
     });
 
-    // Save when MPV disconnects (window closed, process killed)
+    // Save when MPV disconnects (window closed, process killed).
+    // final=true：服务端走 Stopped——Emby 仅以 Stopped 把位置写入
+    // UserData（实测教训），Progress 只更新会话状态。
     this.player.on('disconnect', () => {
-      this.saveCurrentProgress();
+      this.saveCurrentProgress(true);
       this.clearCurrentMedia();
     });
 
     // Save when MPV crashes/exits
     this.player.on('crashed', () => {
-      this.saveCurrentProgress();
+      this.saveCurrentProgress(true);
       this.clearCurrentMedia();
     });
   }
 
   destroy(): void {
     // Final save before shutdown
-    this.saveCurrentProgress();
+    this.saveCurrentProgress(true);
     if (this.saveInterval) {
       clearInterval(this.saveInterval);
       this.saveInterval = null;
@@ -102,7 +108,8 @@ export class PlaybackStateManager {
     localMediaId?: number,
     seasonNumber?: number,
     episodeNumber?: number,
-    mediaSourceId?: string
+    mediaSourceId?: string,
+    playSessionId?: string
   ): void {
     this.currentMediaType = mediaType;
     this.currentMediaId = mediaId;
@@ -112,6 +119,8 @@ export class PlaybackStateManager {
     this.currentSeasonNumber = seasonNumber ?? null;
     this.currentEpisodeNumber = episodeNumber ?? null;
     this.currentMediaSourceId = mediaSourceId ?? null;
+    // 服务端播放会话（Sessions/Playing 系列 API 的 PlaySessionId）。
+    this.currentPlaySessionId = playSessionId ?? null;
   }
 
   clearCurrentMedia(): void {
@@ -123,6 +132,7 @@ export class PlaybackStateManager {
     this.currentSeasonNumber = null;
     this.currentEpisodeNumber = null;
     this.currentMediaSourceId = null;
+    this.currentPlaySessionId = null;
   }
 
   getResumePosition(mediaType: string, mediaId: string): number {
@@ -143,7 +153,7 @@ export class PlaybackStateManager {
     return this.storage.getContinueWatching(limit);
   }
 
-  private saveCurrentProgress(): void {
+  private saveCurrentProgress(final = false): void {
     if (!this.currentMediaType || !this.currentMediaId) return;
 
     const state = this.player.getState();
@@ -200,6 +210,8 @@ export class PlaybackStateManager {
         duration,
         isFinished,
         mediaSourceId: this.currentMediaSourceId ?? undefined,
+        playSessionId: this.currentPlaySessionId ?? undefined,
+        final,
       });
     }
   }
