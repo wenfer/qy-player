@@ -115,6 +115,9 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 
 ## 文档索引
 
+- 三期规划（音乐播放，未动工）：`docs/PHASE3-PLAN.md` + `tasks/todo.md`
+  + ADR-0007（音乐引擎）/ADR-0008（桌面歌词）
+
 - 运行时说明（缓存/并发预算/诊断/回滚）：`docs/OPERATIONS.md`
 - 发布后待目标机验证清单：`docs/TARGET-VERIFY.md`
 - 架构决策记录：`docs/decisions/`（0001 MediaRef/目录域、0005 mpv probe、
