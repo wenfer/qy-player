@@ -30,6 +30,7 @@ export interface MediaTrackInfo {
   fps?: number;
   channels?: number;
   samplerate?: number;
+  bitrate?: number;
   external?: boolean;
   isDefault?: boolean;
 }
@@ -40,7 +41,7 @@ export interface MediaProbeInfo {
   duration?: number;
   container?: string;
   video?: { codec?: string; width?: number; height?: number; fps?: number; aspect?: number };
-  audio?: { codec?: string; channels?: number; samplerate?: number };
+  audio?: { codec?: string; channels?: number; samplerate?: number; bitrate?: number };
   tracks: MediaTrackInfo[];
   /** Field keys no candidate property could supply on this mpv version. */
   unsupported: string[];

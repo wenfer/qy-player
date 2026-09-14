@@ -71,6 +71,7 @@ export interface ProbeTrack {
   fps?: number;
   channels?: number;
   samplerate?: number;
+  bitrate?: number;
   external?: boolean;
   isDefault?: boolean;
 }
@@ -83,7 +84,7 @@ export interface ProbeResult {
   /** Demuxer/container name (file-format), e.g. 'Matroska'. */
   container?: string;
   video?: { codec?: string; width?: number; height?: number; fps?: number; aspect?: number };
-  audio?: { codec?: string; channels?: number; samplerate?: number };
+  audio?: { codec?: string; channels?: number; samplerate?: number; bitrate?: number };
   tracks: ProbeTrack[];
   /** Field keys no candidate property could supply on this version. */
   unsupported: string[];
@@ -105,6 +106,7 @@ export const PROBE_FIELD_CANDIDATES: Record<string, string[]> = {
   'audio.codec': ['audio-codec'],
   'audio.channels': ['audio-params/channel-count', 'audio-channels'],
   'audio.samplerate': ['audio-params/samplerate', 'audio-samplerate', 'demux-samplerate'],
+  'audio.bitrate': ['audio-params/bitrate', 'audio-bitrate', 'demux-bitrate'],
 };
 
 function num(value: unknown): number | undefined {
@@ -148,6 +150,7 @@ export function assembleProbeResult(version: string, props: Map<string, unknown>
     codec: str(get('audio.codec')),
     channels: num(get('audio.channels')),
     samplerate: num(get('audio.samplerate')),
+    bitrate: num(get('audio.bitrate')),
   };
 
   const tracks: ProbeTrack[] = [];
@@ -174,6 +177,7 @@ export function assembleProbeResult(version: string, props: Map<string, unknown>
       if (track.kind === 'audio') {
         track.channels = num(entry['audio-channels']) ?? num(entry['demux-channel-count']);
         track.samplerate = num(entry['demux-samplerate']);
+        track.bitrate = num(entry['demux-bitrate']);
       }
       tracks.push(track);
     }
@@ -191,11 +195,12 @@ export function assembleProbeResult(version: string, props: Map<string, unknown>
       ...(video.aspect !== undefined ? { aspect: video.aspect } : {}),
     };
   }
-  if (audio.codec !== undefined || audio.channels !== undefined) {
+  if (audio.codec !== undefined || audio.channels !== undefined || audio.bitrate !== undefined) {
     result.audio = {
       ...(audio.codec !== undefined ? { codec: audio.codec } : {}),
       ...(audio.channels !== undefined ? { channels: audio.channels } : {}),
       ...(audio.samplerate !== undefined ? { samplerate: audio.samplerate } : {}),
+      ...(audio.bitrate !== undefined ? { bitrate: audio.bitrate } : {}),
     };
   }
   return result;

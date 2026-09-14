@@ -60,12 +60,14 @@
 - 验收：cue-parser 5 例 + 扫描集成 2 例（存在→分轨入库；缺失→跳过）
 - Evidence: cue-parser.test 5/5；local-scan.test 38/38；全量 660/54
 
-### QYP3-007 音频 probe 扩展 `[ ]`
+### QYP3-007 音频 probe 扩展 `[x]`
 - 依赖：005
-- 内容：media-probe 支持音频（时长/标签/codec/bitrate）；串行预算共用
-  （probe≤1 语义不变）
-- 验收：0.29/0.32 属性回退表补音频用例
-- Evidence：
+- 内容：probe 属性回退表补 audio.bitrate（audio-params/bitrate →
+  audio-bitrate → demux-bitrate，0.29/0.32 兼容机制不变）；track-list
+  音频轨补 demux-bitrate；MediaProbeInfo.audio / MediaTrackInfo 加
+  bitrate 可选字段；probe≤1 串行预算语义不变（音频与视频同队列）
+- 验收：spike 用例断言 bitrate 贯通（result.audio + track）
+- Evidence: media-probe 30 例全绿；全量 660/54
 
 ### QYP3-008 音乐库 UI `[ ]`
 - 依赖：003,007

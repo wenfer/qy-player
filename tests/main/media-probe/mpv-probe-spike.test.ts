@@ -22,7 +22,7 @@ type PropMap = Record<string, unknown>;
 
 const TRACKS_032 = [
   { type: 'video', codec: 'h264', 'demux-w': 1920, 'demux-h': 1080, 'demux-fps': 23.976 },
-  { type: 'audio', codec: 'aac', lang: 'eng', 'audio-channels': 6, 'demux-samplerate': 48000 },
+  { type: 'audio', codec: 'aac', lang: 'eng', 'audio-channels': 6, 'demux-samplerate': 48000, 'demux-bitrate': 256000 },
   { type: 'sub', codec: 'subrip', lang: 'chi', title: '中文', external: false, default: true },
 ];
 
@@ -37,6 +37,7 @@ const PROPS_032: PropMap = {
   'video-params/aspect': 1.7778,
   'audio-codec': 'aac',
   'audio-params/channel-count': 6,
+  'audio-params/bitrate': 256000,
   'track-list': TRACKS_032,
 };
 
@@ -168,7 +169,7 @@ describe('assembleProbeResult', () => {
     expect(result.duration).toBeCloseTo(3600.5);
     expect(result.container).toBe('Matroska');
     expect(result.video).toMatchObject({ codec: 'h264', width: 1920, height: 1080, fps: 23.976, aspect: 1.7778 });
-    expect(result.audio).toMatchObject({ codec: 'aac', channels: 6 });
+    expect(result.audio).toMatchObject({ codec: 'aac', channels: 6, bitrate: 256000 });
     expect(result.tracks).toHaveLength(3);
     expect(result.tracks.find((t) => t.kind === 'subtitle')).toMatchObject({
       codec: 'subrip',
