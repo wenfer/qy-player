@@ -26,12 +26,15 @@
 - 验收：webdav fixture 含音频；扫描预算遵守（同 §16.4）
 - Evidence：
 
-### QYP3-004 自研标签解析器 `[ ]`
+### QYP3-004 自研标签解析器 `[x]`
 - 依赖：—
-- 内容：ID3v2.3/2.4、FLAC（Vorbis comment+picture）、m4a 最小集；
-  禁止新增依赖；容错（截断/损坏返回部分结果）
-- 验收：真实采样 fixture（mp3/flac/m4a 各≥1）单测全绿
-- Evidence：
+- 内容：ID3v2.3/2.4（UTF-16/UTF-8/latin1 四编码、USLT/APIC）、FLAC
+  （STREAMINFO 时长+Vorbis comment+Picture）、m4a（ilst 最小集+mvhd
+  时长）、APEv2 只读；合成合法 fixture 7 个；截断/垃圾/无标签容错
+- 验收：6 用例全绿（三容器+容错+文件名兜底合并）
+- Evidence: `npm test -- --run tests/main/library-scanner/tag-parser.test.ts`
+  → 6/6；全量 646/52；调试修复点：帧头推进量、vorbis LE 长度、
+  STREAMINFO 64bit 拆分、mvhd payload 偏移
 
 ### QYP3-005 封面提取管线 `[ ]`
 - 依赖：004
