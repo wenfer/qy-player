@@ -20,11 +20,14 @@
 - 验收：classifier 用例（混排/不受 video 行为影响）；入库在 QYP3-008 前由 003 复用
 - Evidence: `npm test -- --run tests/main/library-scanner` → 55 例全绿；全量 640/51
 
-### QYP3-003 WebDAV 音频扫描 `[ ]`
+### QYP3-003 音频扫描入库（本地 + WebDAV）`[x]`
 - 依赖：002
-- 内容：PROPFIND 音频后缀过滤 + 目录域入库；文件名推断 title/artist
-- 验收：webdav fixture 含音频；扫描预算遵守（同 §16.4）
-- Evidence：
+- 内容：local-scanner audio 分支——标签优先（readAudio 钩子，本地挂
+  fs 头部 512KiB；WebDAV 不挂 → 文件名启发式）；目录启发式
+  （父目录=专辑、上上级=歌手）；music_tracks 自持指纹基线（不混
+  catalog_files）；repository.upsertMusicTrack（owner_key 单键 upsert）
+- 验收：本地标签入库（has_cover/has_lyrics/duration）+ 文件名兜底 2 例
+- Evidence: local-scan.test 36 例全绿；全量 648/52
 
 ### QYP3-004 自研标签解析器 `[x]`
 - 依赖：—
