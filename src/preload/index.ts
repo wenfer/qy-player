@@ -156,6 +156,17 @@ const electronAPI = {
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, { key, enabled }),
+  // 剧集自定义片头/片尾（整剧 scope=series）
+  getSkipOverride: (input: { serverType: string; serverId: number; itemId: string; seriesName: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_OVERRIDE, input),
+  setSkipOverride: (input: {
+    serverType: string;
+    serverId: number;
+    itemId: string;
+    seriesName: string;
+    intro?: { start: number; end: number } | null;
+    outro?: { start: number; end: number } | null;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_OVERRIDE, input),
   // Series resume (QYP2-034): pure resolver runs main-side.
   resolveSeriesResume: (episodes: unknown[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes),

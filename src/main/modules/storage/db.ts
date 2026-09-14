@@ -251,6 +251,25 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS idx_plugin_cache_expiry ON plugin_cache(expiry);
   `,
+
+  // Migration 006: 剧集自定义片头/片尾（服务器识别不可用时的人工设定）。
+  // scope=series（同名整部剧生效，v1 默认）或 episode（单集覆盖，预留）；
+  // server_id 精确路由（同名家两台服务器不串）；NULL 秒值 = 该类型未设定。
+  `
+  CREATE TABLE IF NOT EXISTS skip_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_type TEXT NOT NULL,
+    server_id INTEGER NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('series','episode')),
+    key TEXT NOT NULL,
+    intro_start REAL,
+    intro_end REAL,
+    outro_start REAL,
+    outro_end REAL,
+    updated_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(server_type, server_id, scope, key)
+  );
+  `,
 ];
 
 let dbInstance: Database.Database | null = null;
@@ -366,6 +385,25 @@ export interface Storage {
   }>;
   clearWatchHistory(): void;
   deleteWatchHistory(mediaType: string, mediaId: string): void;
+
+  // 剧集自定义片头/片尾（migration 006）。
+  // 查找顺序：单集覆盖（key=itemId）→ 整剧设定（key=seriesName）。
+  getSkipOverride(
+    serverType: 'jellyfin' | 'emby',
+    serverId: number,
+    itemId: string,
+    seriesName?: string | null
+  ): { intro?: { start: number; end: number }; outro?: { start: number; end: number } } | null;
+  setSkipOverride(
+    serverType: 'jellyfin' | 'emby',
+    serverId: number,
+    scope: 'series' | 'episode',
+    key: string,
+    value: {
+      intro?: { start: number; end: number } | null;
+      outro?: { start: number; end: number } | null;
+    }
+  ): void;
 
   // Servers
   saveServer(server: {
@@ -536,6 +574,65 @@ export function createStorage(db: Database.Database): Storage {
       } else {
         db.prepare('DELETE FROM playback_progress WHERE media_type = ? AND server_id = ?').run(mediaType, mediaId);
       }
+    },
+
+    getSkipOverride(serverType, serverId, itemId, seriesName) {
+      // 单集覆盖优先于整剧设定；找单集必须有 key（itemId）。
+      const queries: Array<[string, string]> = [
+        ['episode', itemId],
+      ];
+      if (seriesName) queries.push(['series', seriesName]);
+      for (const [scope, key] of queries) {
+        const row = db
+          .prepare(
+            'SELECT intro_start, intro_end, outro_start, outro_end FROM skip_overrides WHERE server_type = ? AND server_id = ? AND scope = ? AND key = ?'
+          )
+          .get(serverType, serverId, scope, key) as
+          | { intro_start: number | null; intro_end: number | null; outro_start: number | null; outro_end: number | null }
+          | undefined;
+        if (!row) continue;
+        const result: {
+          intro?: { start: number; end: number };
+          outro?: { start: number; end: number };
+        } = {};
+        if (row.intro_start !== null && row.intro_end !== null) {
+          result.intro = { start: row.intro_start, end: row.intro_end };
+        }
+        if (row.outro_start !== null && row.outro_end !== null) {
+          result.outro = { start: row.outro_start, end: row.outro_end };
+        }
+        return Object.keys(result).length > 0 ? result : null;
+      }
+      return null;
+    },
+
+    setSkipOverride(serverType, serverId, scope, key, value) {
+      const clamp = (v: number) => Math.min(Math.max(v, 0), 86400);
+      const iv = value.intro && value.intro.start < value.intro.end
+        ? { a: clamp(value.intro.start), b: clamp(value.intro.end) }
+        : null;
+      const ov = value.outro && value.outro.start < value.outro.end
+        ? { a: clamp(value.outro.start), b: clamp(value.outro.end) }
+        : null;
+      db.prepare(`
+        INSERT INTO skip_overrides (server_type, server_id, scope, key, intro_start, intro_end, outro_start, outro_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(server_type, server_id, scope, key) DO UPDATE SET
+          intro_start = excluded.intro_start,
+          intro_end = excluded.intro_end,
+          outro_start = excluded.outro_start,
+          outro_end = excluded.outro_end,
+          updated_at = unixepoch()
+      `).run(
+        serverType,
+        serverId,
+        scope,
+        key,
+        iv ? iv.a : null,
+        iv ? iv.b : null,
+        ov ? ov.a : null,
+        ov ? ov.b : null
+      );
     },
 
     /**

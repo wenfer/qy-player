@@ -100,7 +100,7 @@ import {
   type OnlineContinueInput,
 } from '../modules/catalog/unified-query';
 import { AutoNextController, pickNextEpisode, wireAutoNext } from '../modules/playback-state/auto-next';
-import { SkipController, parseMediaSegments } from '../modules/playback-state/skip-segments';
+import { SkipController, parseMediaSegments, type SkipSegment } from '../modules/playback-state/skip-segments';
 import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
 import type { ProbeItemInput } from '../../shared/types/media-info';
@@ -317,6 +317,37 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     return ok({ key, enabled });
   });
 
+  // 剧集自定义片头/片尾（migration 006，scope=series 整剧生效）。
+  ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_OVERRIDE, (_event, input: unknown) => {
+    if (!isSkipOverrideRef(input)) return err('VALIDATION_FAILED', '引用不合法');
+    const ref = input as { serverType: 'jellyfin' | 'emby'; serverId: number; itemId: string; seriesName: string };
+    return ok({ override: storage.getSkipOverride(ref.serverType, ref.serverId, ref.itemId, ref.seriesName) });
+  });
+  ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.SET_OVERRIDE, (_event, input: unknown) => {
+    if (!isSkipOverrideRef(input)) return err('VALIDATION_FAILED', '引用不合法');
+    const ref = input as {
+      serverType: 'jellyfin' | 'emby';
+      serverId: number;
+      itemId: string;
+      seriesName: string;
+      intro?: { start?: unknown; end?: unknown } | null;
+      outro?: { start?: unknown; end?: unknown } | null;
+    };
+    const parseRange = (r: { start?: unknown; end?: unknown } | null | undefined) => {
+      if (typeof r !== 'object' || r === null) return null;
+      const start = Number(r.start);
+      const end = Number(r.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < 0 || start >= end) return null;
+      return { start, end };
+    };
+    // 两个类型都未提供/非法 → 整行清除语义（storage 写 null 值）。
+    storage.setSkipOverride(ref.serverType, ref.serverId, 'series', ref.seriesName, {
+      intro: parseRange(ref.intro),
+      outro: parseRange(ref.outro),
+    });
+    return ok({ saved: true });
+  });
+
   // ---- Diagnostics (QYP2-037): redacted, shareable snapshot ----
   const cacheManager = new CacheManager();
   cacheManager.register(
@@ -472,6 +503,18 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     return ok({ enabled });
   });
 
+  // 剧集自定义片头/片尾（migration 006，scope=series 整剧生效）。
+  function isSkipOverrideRef(input: unknown): boolean {
+    if (typeof input !== 'object' || input === null) return false;
+    const ref = input as { serverType?: unknown; serverId?: unknown; itemId?: unknown; seriesName?: unknown };
+    return (
+      (ref.serverType === 'jellyfin' || ref.serverType === 'emby') &&
+      typeof ref.serverId === 'number' && Number.isInteger(ref.serverId) &&
+      typeof ref.itemId === 'string' && ref.itemId.length > 0 && ref.itemId.length <= 128 &&
+      typeof ref.seriesName === 'string' && ref.seriesName.length > 0 && ref.seriesName.length <= 256
+    );
+  }
+
   // Player handlers
   ipcMain.handle(IPC_CHANNELS.PLAYER.LOAD_FILE, async (
     _event,
@@ -624,7 +667,20 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             getResumePosition: (mediaType: string, mediaId: string) =>
               playbackStateManager!.getResumePosition(mediaType, mediaId),
             createOnlineClient: createClient,
-            fetchSkipSegments: (client, itemId) => {
+            fetchSkipSegments: ({ client, serverId, serverType, itemId, seriesName }) => {
+              // 自定义设定优先（migration 006）：有则直接采用，不再询问服务器。
+              const custom = seriesName
+                ? storage.getSkipOverride(serverType, serverId, itemId, seriesName)
+                : null;
+              if (custom) {
+                const customSegments: SkipSegment[] = [];
+                if (custom.intro) customSegments.push({ type: 'intro', start: custom.intro.start, end: custom.intro.end });
+                if (custom.outro) customSegments.push({ type: 'outro', start: custom.outro.start, end: custom.outro.end });
+                if (customSegments.length > 0) {
+                  skipController.setSegments(itemId, customSegments);
+                  return;
+                }
+              }
               void client
                 .getMediaSegments(itemId)
                 .then((raw) => {

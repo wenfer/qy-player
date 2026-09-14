@@ -7,6 +7,7 @@ import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/pla
 import { useAutoNextStore, type NextEpisodeChoice } from '../../stores/auto-next-store';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
 import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
+import SkipOverrideEditor from './SkipOverrideEditor';
 import ProgressSummary from './ProgressSummary';
 import type { MediaProbeOutcome, ProbeItemInput } from '../../../shared/types/media-info';
 import { useToastStore } from '../../stores/toast-store';
@@ -559,6 +560,16 @@ export default function Detail() {
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* 剧集自定义片头/片尾（整剧生效） */}
+            {details.Type === 'Series' && Number.isInteger(serverId) && (
+              <SkipOverrideEditor
+                serverType={serverType}
+                serverId={serverId}
+                itemId={details.Id}
+                seriesName={details.Name}
+              />
             )}
 
             {/* Seasons */}

@@ -54,6 +54,47 @@ function getVersion(db: Database.Database): number {
   return (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number }).version;
 }
 
+describe('skip_overrides (migration 006)', () => {
+  it('applies migration 006 and round-trips series-scope overrides', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    expect(getVersion(db)).toBe(6);
+    const storage = createStorage(db);
+    // 初次无设定
+    expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toBeNull();
+    // 设定整剧片头/片尾
+    storage.setSkipOverride('jellyfin', 7, 'series', '绝命毒师', {
+      intro: { start: 0, end: 95 },
+      outro: { start: 1350, end: 1400 },
+    });
+    expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toEqual({
+      intro: { start: 0, end: 95 },
+      outro: { start: 1350, end: 1400 },
+    });
+    // 单集覆盖优先于整剧
+    storage.setSkipOverride('jellyfin', 7, 'episode', 'ep-1', { intro: { start: 0, end: 40 } });
+    expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toEqual({
+      intro: { start: 0, end: 40 },
+    });
+    // 同名不同服务器不串（server_id 精确隔离）
+    expect(storage.getSkipOverride('jellyfin', 9, 'ep-x', '绝命毒师')).toBeNull();
+    // 全 null 行 = 清除语义；单集覆盖不受整剧清除影响（查另一集验证）。
+    storage.setSkipOverride('jellyfin', 7, 'series', '绝命毒师', { intro: null, outro: null });
+    expect(storage.getSkipOverride('jellyfin', 7, 'ep-other', '绝命毒师')).toBeNull();
+  });
+
+  it('invalid ranges (start>=end) are stored as cleared', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    const storage = createStorage(db);
+    storage.setSkipOverride('emby', 3, 'series', '老剧', {
+      intro: { start: 100, end: 50 }, // 非法 → null
+      outro: { start: 0, end: 30 },
+    });
+    expect(storage.getSkipOverride('emby', 3, 'e', '老剧')).toEqual({
+      outro: { start: 0, end: 30 },
+    });
+  });
+});
+
 describe('getWatchHistory localOnly filter', () => {
   it('returns only local (path-bearing) records when localOnly=true', () => {
     const db = openDatabaseAtPath(makeDbPath());
@@ -71,7 +112,7 @@ describe('getWatchHistory localOnly filter', () => {
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(5);
+    expect(getVersion(db)).toBe(6);
     const tables = tableNames(db);
     for (const table of CATALOG_TABLES) expect(tables).toContain(table);
     for (const table of LEGACY_TABLES) expect(tables).toContain(table);
@@ -98,9 +139,9 @@ describe('catalog migrations (005)', () => {
     ).run('local', '/old/library/movie.mkv', 'Old Movie', 600, null, null, null);
     v4.close();
 
-    // Reopen through the normal path: only migration 005 runs.
+    // Reopen through the normal path: 005 + 006 both apply (append-only chain).
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(5);
+    expect(getVersion(db)).toBe(6);
     expect((db.prepare('SELECT COUNT(*) AS n FROM local_media').get() as { n: number }).n).toBe(1);
     expect((db.prepare('SELECT position FROM playback_progress').get() as { position: number }).position).toBe(600);
 

@@ -108,6 +108,8 @@ export const IPC_CHANNELS = {
   SKIP_SEGMENTS: {
     GET_SETTINGS: 'skip-segments:get-settings',
     SET_SETTING: 'skip-segments:set-setting',
+    GET_OVERRIDE: 'skip-segments:get-override',
+    SET_OVERRIDE: 'skip-segments:set-override',
   },
   SCRAPE: {
     START: 'scrape:start',
