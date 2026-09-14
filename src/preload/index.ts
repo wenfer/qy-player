@@ -152,6 +152,10 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.CANCEL, reason ?? 'user'),
   getAutoNextEnabled: () => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.GET_ENABLED),
   setAutoNextEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.SET_ENABLED, enabled),
+  // Skip intro/outro (剧集；segments 主进程拉取，开关仅控制命中行为)
+  getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
+  setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, { key, enabled }),
   // Series resume (QYP2-034): pure resolver runs main-side.
   resolveSeriesResume: (episodes: unknown[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes),

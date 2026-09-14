@@ -46,6 +46,11 @@ export interface ResolverDeps {
   getResumePosition: (mediaType: string, mediaId: string) => number;
   createOnlineClient: typeof createClient;
   newSessionId?: () => string;
+  /**
+   * 剧集分段获取（跳过片头/片尾）。解析到剧集子项后 fire-and-forget，
+   * 失败永不影响播放；由主进程注入（内部注册 SkipController 存储）。
+   */
+  fetchSkipSegments?: (client: ReturnType<typeof createClient>, itemId: string) => void;
 }
 
 interface OnlineServerBinding {
@@ -433,6 +438,12 @@ export async function resolvePlayback(
   }
   const mediaType = binding.type;
   const startPosition = deps.getResumePosition(mediaType, target.playId);
+  // 仅剧集拉取跳过分段；fire-and-forget，失败/旧版服务器 404 均静默
+  if (target.seriesName && deps.fetchSkipSegments) {
+    void Promise.resolve()
+      .then(() => deps.fetchSkipSegments!(client, target.playId))
+      .catch(() => {}); // 无分段 = 不跳过，永不阻塞播放
+  }
   return {
     kind: mode === 'transcode' ? 'online-transcode' : 'online-direct',
     url,

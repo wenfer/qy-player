@@ -100,6 +100,7 @@ import {
   type OnlineContinueInput,
 } from '../modules/catalog/unified-query';
 import { AutoNextController, pickNextEpisode, wireAutoNext } from '../modules/playback-state/auto-next';
+import { SkipController, parseMediaSegments } from '../modules/playback-state/skip-segments';
 import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
 import type { ProbeItemInput } from '../../shared/types/media-info';
@@ -278,10 +279,42 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   });
   wireAutoNext(player, autoNext);
 
+  // 剧集跳过片头/片尾（segments：Jellyfin MediaSegments；剧集限定，
+  // 片头默认开、片尾默认关；永不阻塞播放——fetch 失败即无分段）。
+  const skipController = new SkipController({
+    isEnabled: (type) =>
+      type === 'intro'
+        ? storage.getConfig('playback.skipIntro') !== 'false'
+        : storage.getConfig('playback.skipOutro') === 'true',
+    onSkip: ({ type, seekTo }) => {
+      void player.seek(seekTo).catch(() => {});
+      void player.showText(type === 'intro' ? '已跳过片头' : '已跳过片尾');
+    },
+  });
+  player.on('time-pos', (pos: number) => {
+    skipController.onTime(pos, player.getState().duration || undefined);
+  });
+
   // Auto-next cancel (user / renderer reports no next episode).
   ipcMain.handle(IPC_CHANNELS.AUTO_NEXT.CANCEL, (_event, reason: unknown) => {
     autoNext.cancel(reason === 'no-next-episode' ? 'no-next-episode' : 'user');
     return ok({ cancelled: true });
+  });
+
+  // Skip intro/outro settings (剧集限定；main 侧每次命中实时读取)。
+  ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
+    return ok({
+      skipIntro: storage.getConfig('playback.skipIntro') !== 'false',
+      skipOutro: storage.getConfig('playback.skipOutro') === 'true',
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, (_event, input: unknown) => {
+    if (typeof input !== 'object' || input === null) return err('VALIDATION_FAILED', '参数不合法');
+    const { key, enabled } = input as { key?: unknown; enabled?: unknown };
+    if (key !== 'skipIntro' && key !== 'skipOutro') return err('VALIDATION_FAILED', '不支持的设置项');
+    if (typeof enabled !== 'boolean') return err('VALIDATION_FAILED', '开关值不合法');
+    storage.setConfig(`playback.${key}`, enabled ? 'true' : 'false');
+    return ok({ key, enabled });
   });
 
   // ---- Diagnostics (QYP2-037): redacted, shareable snapshot ----
@@ -520,6 +553,11 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
         seasonNumber: mediaContext?.seasonNumber ?? null,
         episodeNumber: mediaContext?.episodeNumber ?? null,
       });
+      // 跳过分段：换媒体重置一次性标记与旧集分段（仅剧集有分段）。仅剧集
+      // （带 seriesName）留存；电影/本地/WebDAV 直接清空。
+      skipController.begin(
+        mediaContext?.seriesName ? mediaId : null
+      );
       // QYP2-021: WebDAV streams accept local subtitles too (plan §13);
       // same file-loaded gate as the local branch.
       if (!(await player.waitForFileLoaded(5000))) {
@@ -586,6 +624,15 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             getResumePosition: (mediaType: string, mediaId: string) =>
               playbackStateManager!.getResumePosition(mediaType, mediaId),
             createOnlineClient: createClient,
+            fetchSkipSegments: (client, itemId) => {
+              void client
+                .getMediaSegments(itemId)
+                .then((raw) => {
+                  const segments = parseMediaSegments(raw);
+                  if (segments.length > 0) skipController.setSegments(itemId, segments);
+                })
+                .catch(() => {}); // 旧版服务器/Emby 无端点 → 无分段，静默
+            },
           },
           { ref, mode, ...(mediaSourceId ? { mediaSourceId } : {}) }
         );

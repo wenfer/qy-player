@@ -155,6 +155,18 @@ export class JellyfinClient {
     return response.data.Items || [];
   }
 
+  /**
+   * 剧集跳过片头/片尾的分段（Jellyfin 10.9+ MediaSegments）。
+   * 旧版本服务器/Emby 无此端点会 404/400 —— 调用方 catch 后视为无分段，
+   * 绝不阻塞播放。Emby 暂不支持，自动跳过仅对 Jellyfin 生效。
+   */
+  async getMediaSegments(itemId: string): Promise<unknown> {
+    const response = await this.client.get(`/MediaSegments/${itemId}`, {
+      params: this.userId ? { userId: this.userId } : undefined,
+    });
+    return response.data;
+  }
+
   async getNextUp(seriesId?: string): Promise<JellyfinItem[]> {
     const params: Record<string, unknown> = {
       UserId: this.userId,
