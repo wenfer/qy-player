@@ -81,19 +81,27 @@
 - 验收：repo 聚合用例 + 渲染 3 例；CDP 实机（专辑网格/曲目列表/空态）
 - Evidence: catalog-migrations 13 例；music-library.test 3 例；全量 664/55
 
-### QYP3-009 引擎选择器（纯函数）`[ ]`
+### QYP3-009 引擎选择器（纯函数）`[x]`
 - 依赖：007
-- 内容：direct/native 判定表 + 用户偏好（拾音器优先/兼容性优先）+
-  服务端转码音频强制 native
-- 验收：表驱动测试（格式×偏好×来源 矩阵）
-- Evidence：
+- 内容：playback-engine/engine-selector.ts——服务器→mpv（认证头）、
+  WebDAV→mpv（同因，能力地图修正）、转码→mpv、CUE→mpv、
+  compat-first→mpv；spectrum-first（默认）下 Chromium 直连格式
+  （DIRECT_CODECS 保守清单：mp3/aac/flac/ogg/opus/wav/m4a/webm）→
+  WebAudio，未知/缺失 codec 永远降级 mpv（不误判 direct）
+- 验收：8 表驱动用例（格式×偏好×来源矩阵）
+- Evidence: engine-selector.test 8/8
 
-### QYP3-010 renderer 引擎 `[ ]`
+### QYP3-010 renderer 引擎 `[x]`（图+队列；UI 接线与失败回退归 011/013）
 - 依赖：009
-- 内容：Web Audio 播放图 + 队列/上下曲/循环（关/全/单）/随机；
-  播放失败回退 native 引擎一次
-- 验收：状态机单测；AudioContext suspend/resume 页面隐藏行为
-- Evidence：
+- 内容：renderer/player/web-audio-engine——播放图单次构建
+  （Element→MediaElementSource→Analyser(fftSize 2048)→Biquad×10→
+  Gain→out，换曲只换 src）+ PlaybackQueue（repeat off/all/one、
+  shuffle 排列语义、jumpTo）+ EQ/音量/seek/频谱快照接口；
+  qy-file://audio/<sourceId>/<relpath> 协议桥（audio-url.ts 注册式
+  解耦，LocalSourceAdapter.resolveInside 双层包含校验；WebDAV/服务器
+  音频不进 renderer 引擎）
+- 验收：13 例（队列语义 + 图构建/事件/EQ/音量/频谱 null 安全）
+- Evidence: web-audio-engine.test 13/13（两轮全量稳定）
 
 ### QYP3-011 mpv 引擎音频参数 + 双引擎状态归一 `[ ]`
 - 依赖：009

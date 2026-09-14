@@ -94,6 +94,7 @@ import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import { CacheManager } from '../modules/cache/cache-manager';
+import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { registerCoversPartition } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
@@ -385,6 +386,17 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   });
 
   // ---- Diagnostics (QYP2-037): redacted, shareable snapshot ----
+  // qy-file://audio 协议桥注册（QYP3-010）：local 来源 → resolveInside
+  // 适配器；每次调用即时查表（来源删除即刻失效，无陈旧句柄）。
+  {
+    const { LocalSourceAdapter } = require('../modules/library-sources/local-source');
+    registerAudioSourceProvider((sourceId) => {
+      const source = catalogRepo.getSource(sourceId);
+      if (!source || source.kind !== 'local') return undefined;
+      return LocalSourceAdapter.fromSource(sourceId, source.root);
+    });
+  }
+
   const cacheManager = new CacheManager();
   cacheManager.register(
     { id: 'probe', description: '技术信息探测缓存（内存 LRU+TTL）', rootDir: null, quota: { maxEntries: 256 }, sweepable: false },

@@ -140,18 +140,30 @@ app.whenReady().then(() => {
 
   registerIpcHandlers(player, () => mainWindow);
 
-  // qy-file://covers/<name> → coversDir 内的封面文件（严格限定，防穿越）
-  // Electron 21 API：registerFileProtocol（protocol.handle 是 25+）
+  // qy-file:// 协议（QYP3-005/010，Electron 21 registerFileProtocol）：
+  //   covers/<name> → coversDir 内的封面文件（白名单正则 + 包含校验）
+  //   audio/<sourceId>/<relpath> → 本地媒体来源内的音频（resolveInside
+  //   同级包含校验；WebDAV/服务器音频不走 renderer 引擎，见 ADR-0007）
   {
     const coversRoot = resolve(app.getPath('userData'), 'covers');
     const sep = require('node:path').sep;
+    const { resolveAudioUrlSource } = require('./modules/playback-engine/audio-url');
     protocol.registerFileProtocol('qy-file', (request, callback) => {
       try {
-        const m = new URL(request.url).pathname.match(/^\/covers\/([\w.-]+)$/);
-        if (!m) return callback({ error: -3 }); // ERR_FAILED
-        const target = resolve(coversRoot, m[1]);
-        if (!target.startsWith(coversRoot + sep)) return callback({ error: -3 });
-        callback(target);
+        const pathname = new URL(request.url).pathname;
+        const coversMatch = pathname.match(/^\/covers\/([\w.-]+)$/);
+        if (coversMatch) {
+          const target = resolve(coversRoot, coversMatch[1]);
+          if (!target.startsWith(coversRoot + sep)) return callback({ error: -3 });
+          return callback(target);
+        }
+        const audioMatch = pathname.match(/^\/audio\/(\d+)\/(.+)$/);
+        if (audioMatch) {
+          const target = resolveAudioUrlSource(Number(audioMatch[1]), decodeURIComponent(audioMatch[2]));
+          if (!target) return callback({ error: -3 });
+          return callback(target);
+        }
+        callback({ error: -3 });
       } catch {
         callback({ error: -3 });
       }
