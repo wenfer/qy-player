@@ -160,6 +160,8 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ALBUM_TRACKS, { albumartist, album }),
   getMusicTracks: (offset = 0, limit = 200) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_TRACKS, { offset, limit }),
+  reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, { key, enabled }),

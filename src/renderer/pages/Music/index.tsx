@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Disc3, ListMusic, Music2 } from 'lucide-react';
+import { Disc3, ListMusic, Music2, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicTrackRow } from '../../../shared/types/music';
 
 /**
@@ -21,6 +22,29 @@ function fmtDuration(sec: number | null): string {
 
 export default function MusicPage() {
   const addToast = useToastStore((s) => s.addToast);
+  const playback = useMusicPlaybackStore();
+
+  const playFromList = useCallback(
+    async (list: MusicTrackRow[], trackId: number) => {
+      const startIndex = list.findIndex((t) => t.id === trackId);
+      if (startIndex === -1) return;
+      await playback.playQueue(
+        list.map((t) => ({
+          trackId: t.id,
+          sourceId: t.source_id,
+          title: t.title,
+          artist: t.artist,
+          albumartist: t.albumartist,
+          duration: t.duration,
+          path: t.path,
+          codec: t.codec,
+        })),
+        startIndex
+      );
+      if (playback.errorMessage) addToast(playback.errorMessage, 'error');
+    },
+    [playback, addToast]
+  );
   const [view, setView] = useState<'albums' | 'all'>('albums');
   const [albums, setAlbums] = useState<MusicAlbumRow[] | null>(null);
   const [tracks, setTracks] = useState<MusicTrackRow[] | null>(null);
@@ -83,6 +107,56 @@ export default function MusicPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      {/* 迷你控制条（webaudio 引擎；mpv 引擎由全局 PlayerControls 驱动） */}
+      {playback.engine === 'webaudio' && playback.current && (
+        <div className="sticky top-0 z-10 bg-card/95 border border-border rounded-lg px-3 py-2 mb-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void playback.prev()}
+            aria-label="上一曲"
+            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
+          >
+            <SkipBack size={16} />
+          </button>
+          {playback.isPlaying ? (
+            <button
+              type="button"
+              onClick={() => playback.pause()}
+              aria-label="暂停"
+              className="p-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
+            >
+              <Pause size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => playback.resume()}
+              aria-label="继续播放"
+              className="p-1.5 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
+            >
+              <Play size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void playback.next()}
+            aria-label="下一曲"
+            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
+          >
+            <SkipForward size={16} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs truncate">{playback.current.title}</p>
+            <p className="text-[10px] text-muted-foreground truncate">
+              {playback.current.artist ?? '未知歌手'}
+            </p>
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            {fmtDuration(playback.position) || '0:00'}
+          </span>
+        </div>
+      )}
+
       {/* 视图切换 */}
       <div className="flex items-center gap-2 mb-6">
         <button
@@ -126,9 +200,11 @@ export default function MusicPage() {
           </p>
           <div className="flex flex-col gap-1">
             {(albumTracks ?? []).map((t) => (
-              <div
+              <button
                 key={t.id}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors"
+                type="button"
+                onClick={() => void playFromList(albumTracks ?? [], t.id)}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-left w-full"
               >
                 <span className="text-xs text-muted-foreground w-6 text-right">
                   {t.track_no ?? '–'}
@@ -142,7 +218,7 @@ export default function MusicPage() {
                 </div>
                 <span className="text-[10px] text-muted-foreground">{fmtDuration(t.duration)}</span>
                 {t.has_lyrics ? <span className="text-[10px] text-muted-foreground">词</span> : null}
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -195,9 +271,11 @@ export default function MusicPage() {
         ) : (
           <div className="flex flex-col gap-1">
             {(tracks ?? []).map((t) => (
-              <div
+              <button
                 key={t.id}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors"
+                type="button"
+                onClick={() => void playFromList(tracks ?? [], t.id)}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-left w-full"
               >
                 <Music2 size={14} className="text-muted-foreground" />
                 <div className="flex-1 min-w-0">
@@ -207,7 +285,7 @@ export default function MusicPage() {
                   </p>
                 </div>
                 <span className="text-[10px] text-muted-foreground">{fmtDuration(t.duration)}</span>
-              </div>
+              </button>
             ))}
           </div>
         )

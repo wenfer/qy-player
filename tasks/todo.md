@@ -103,12 +103,20 @@
 - 验收：13 例（队列语义 + 图构建/事件/EQ/音量/频谱 null 安全）
 - Evidence: web-audio-engine.test 13/13（两轮全量稳定）
 
-### QYP3-011 mpv 引擎音频参数 + 双引擎状态归一 `[ ]`
+### QYP3-011 双引擎状态归一 + 回退链 `[x]`（mpv 音频参数 gapless/replaygain 归 013 设置接线）
 - 依赖：009
-- 内容：gapless-audio/replaygain 参数；统一 PlaybackState 单点暴露
-  （renderer/mpv 两引擎同型）
-- 验收：状态归一接口契约测试先行；实机双引擎切换无撕裂
-- Evidence：
+- 内容：resolver music 分支（provider='music'，MediaRef 扩展 + 校验）：
+  引擎判定单源 + engineForce:'mpv'（回退路径）+ music-direct 分支
+  （qy-file://audio URL）；music-playback-store（renderer 侧单点归一：
+  webaudio 本地驱动 / mpv 走 playerLoadFile 管线，重复点击 playToken
+  竞态防护，direct 失败 → fallbackToMpv 一次）；HOME/Search 导航
+  provider 窄化修复
+- 实机验证全链：点击曲目 → resolve（engine=webaudio direct-codec）→
+  qy-file 协议（containment/CSP/手工 URL 解析三处实修）→ WebAudio
+  播放 → 迷你控制条 → 进度上报（≤10s + isFinished）→ playback_progress
+  position/duration 落库 + watch_history 入库
+- 验收：全量 685/57；实机 DB 查证 progress/history 双落
+- Evidence: /tmp/qy-run10 系列日志 + DB 查询记录
 
 ### QYP3-012 均衡器 `[ ]`
 - 依赖：010,011
@@ -123,12 +131,14 @@
 - 验收：快捷键冲突 UI 提示；折叠状态持久化
 - Evidence：
 
-### QYP3-014 音乐续播 `[ ]`
+### QYP3-014 音乐续播 `[x]`（播放计数 catalog_user_state 归 P1，暂用 watch_history）
 - 依赖：011
-- 内容：进度保存链路对音频生效；**无 30s 阈值**（音乐总是续播）；
-  播放计数进 catalog_user_state
-- 验收：resume 规则表驱动用例（音乐分支）
-- Evidence：
+- 内容：resolveMusicResumeTarget 纯函数（无 30s 阈值，>90% 从头重播）；
+  MUSIC.REPORT_PROGRESS 上报通道（validation + upsertLocalMedia +
+  watch_history + saveProgress 双落）；renderer 引擎节流上报；
+  扫描收尾 deleteMusicTracksNotSeen 清理消失音轨（CUE 键保护）
+- 验收：实机 DB progress/history 双落；清理回归（删文件→重扫→行消失）
+- Evidence: resume-resolver 纯函数 + 实机验证记录
 
 ### QYP3-015 歌单 CRUD + UI `[ ]`
 - 依赖：001

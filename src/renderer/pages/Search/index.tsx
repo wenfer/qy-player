@@ -16,7 +16,10 @@ import { mediaRefKey } from '../../../main/modules/catalog/unified-query';
 function unifiedToMediaItem(card: UnifiedCard, serverMap: Awaited<ReturnType<typeof getServerMap>>): MediaItem {
   const isCatalog = card.ref.provider === 'catalog';
   const provider = card.ref.provider;
-  const serverId = card.ref.provider === 'catalog' ? card.ref.sourceId : card.ref.serverId;
+  const serverId =
+  card.ref.provider === 'catalog' || card.ref.provider === 'music'
+    ? card.ref.sourceId
+    : card.ref.serverId;
   const imageUrl =
     !isCatalog && card.poster?.tag
       ? buildImageUrl(serverMap, serverId, provider, card.ref.itemId, 'Primary', card.poster.tag)
@@ -35,7 +38,7 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: Awaited<ReturnType<typ
 }
 
 function navigateForRef(navigate: (path: string) => void, ref: MediaRef): void {
-  if (ref.provider === 'catalog') navigate(`/browse/${ref.sourceId}/item/${ref.itemId}`);
+  if (ref.provider === 'catalog' || ref.provider === 'music') navigate(`/browse/${ref.sourceId}/item/${ref.itemId}`);
   else navigate(`/detail/${ref.provider}/${ref.serverId}/${ref.itemId}`);
 }
 

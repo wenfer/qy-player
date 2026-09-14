@@ -16,6 +16,8 @@
  */
 export type MediaRef =
   | { provider: 'catalog'; sourceId: number; itemId: string }
+  /** 音乐音轨（三期 QYP3-011）：itemId = music_tracks.id（十进制字符串）。 */
+  | { provider: 'music'; sourceId: number; itemId: string }
   | { provider: 'jellyfin' | 'emby'; serverId: number; itemId: string };
 
 /** Runtime guard for MediaRef; used to validate untrusted IPC input. */
@@ -27,6 +29,9 @@ export function isMediaRef(value: unknown): value is MediaRef {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(ref, key);
   if (!hasOwn('itemId') || !isNonEmptyString(ref.itemId)) return false;
   if (!hasOwn('provider')) return false;
+  if (ref.provider === 'music') {
+    return hasOwn('sourceId') && typeof ref.sourceId === 'number' && Number.isInteger(ref.sourceId);
+  }
   if (ref.provider === 'catalog') {
     return hasOwn('sourceId') && isPositiveInt(ref.sourceId);
   }
@@ -299,9 +304,23 @@ export interface ResolvePlaybackInput {
   ref: MediaRef;
   mode?: ResolveMode;
   mediaSourceId?: string;
+  /** 强制引擎（ADR-0007 回退路径：direct 解码失败 → mpv 重试）。 */
+  engineForce?: 'mpv';
 }
 
-export type ResolvedPlaybackKind = 'local-file' | 'webdav-stream' | 'online-direct' | 'online-transcode';
+export type ResolvedPlaybackKind =
+  | 'local-file'
+  | 'webdav-stream'
+  | 'online-direct'
+  | 'online-transcode'
+  /** 音乐 renderer 引擎（Web Audio 直连，ADR-0007）。 */
+  | 'music-direct';
+
+/** 引擎决策（ADR-0007 单源：主进程纯函数计算，renderer 只消费）。 */
+export interface EngineDecisionInfo {
+  engine: 'webaudio' | 'mpv';
+  reason: string;
+}
 
 export interface ResolvedMediaContext {
   mediaType: string;
@@ -317,7 +336,7 @@ export interface ResolvedMediaContext {
 
 export interface PlaybackResolution {
   kind: ResolvedPlaybackKind;
-  /** Ready-to-load path (local file) or stream URL (webdav/online). */
+  /** Ready-to-load path (local file) or stream URL (webdav/online)。 */
   url: string;
   /** Opaque header session; the renderer hands it back, never reads it. */
   streamSessionId?: string;
@@ -325,6 +344,9 @@ export interface PlaybackResolution {
   /** False = seeking unreliable; play/resume keep working (plan §8.1). */
   seekable: boolean;
   mediaContext: ResolvedMediaContext;
+  /** 音乐：引擎决策 + 播放窗口（CUE 分轨秒区间，非 CUE 为空）。 */
+  engine?: EngineDecisionInfo;
+  cue?: { start: number; end: number | null; title: string } | null;
 }
 
 // ---------------------------------------------------------------------------

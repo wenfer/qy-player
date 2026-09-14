@@ -167,3 +167,14 @@ function toTarget(
     ...(episode.title != null ? { title: episode.title } : {}),
   };
 }
+
+/**
+ * 音乐续播（QYP3-014，单一来源）：无 30s 阈值——音乐总是从上次
+ * 位置续播；但听完（>90%）从头重播。任何保存过的真实位置（>0）
+ * 都是有效续播点。
+ */
+export function resolveMusicResumeTarget(saved?: { position: number; duration?: number }): number {
+  if (!saved || !Number.isFinite(saved.position) || saved.position <= 0) return 0;
+  if (saved.duration && saved.duration > 0 && saved.position / saved.duration > 0.9) return 0;
+  return saved.position;
+}

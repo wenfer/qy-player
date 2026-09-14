@@ -7,6 +7,7 @@ import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
 import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
+import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
 
 let mainWindow: BrowserWindow | null = null;
 const player = new PlayerCore();
@@ -147,24 +148,40 @@ app.whenReady().then(() => {
   {
     const coversRoot = resolve(app.getPath('userData'), 'covers');
     const sep = require('node:path').sep;
-    const { resolveAudioUrlSource } = require('./modules/playback-engine/audio-url');
+    void sep;
     protocol.registerFileProtocol('qy-file', (request, callback) => {
       try {
-        const pathname = new URL(request.url).pathname;
-        const coversMatch = pathname.match(/^\/covers\/([\w.-]+)$/);
+        // 手工解析：standard scheme 会把第二段当 host；路径段可能是
+        // 中文/URL 编码，直接对原始 URL 切片最稳。
+        const raw = request.url.replace(/^qy-file:\/\//, '');
+        const coversMatch = raw.match(/^covers\/([\w.-]+)$/);
         if (coversMatch) {
           const target = resolve(coversRoot, coversMatch[1]);
-          if (!target.startsWith(coversRoot + sep)) return callback({ error: -3 });
+          if (!target.startsWith(coversRoot + '/')) return callback({ error: -3 });
           return callback(target);
         }
-        const audioMatch = pathname.match(/^\/audio\/(\d+)\/(.+)$/);
+        const audioMatch = raw.match(/^audio\/(\d+)\/(.+)$/);
         if (audioMatch) {
-          const target = resolveAudioUrlSource(Number(audioMatch[1]), decodeURIComponent(audioMatch[2]));
-          if (!target) return callback({ error: -3 });
+          console.log('[qy-file] audio req', audioMatch[1], decodeURIComponent(audioMatch[2]));
+          const target = resolveAudioUrlSource(
+            Number(audioMatch[1]),
+            decodeURIComponent(audioMatch[2])
+          );
+          if (!target) {
+            console.log('[qy-file] audio rejected');
+            return callback({ error: -3 });
+          }
+          try {
+            const st = require('node:fs').statSync(target);
+            console.log('[qy-file] serving', target, st.size, 'bytes');
+          } catch {
+            console.log('[qy-file] serving (stat failed)', target);
+          }
           return callback(target);
         }
         callback({ error: -3 });
-      } catch {
+      } catch (e) {
+        console.log('[qy-file] exception:', e instanceof Error ? e.message : e);
         callback({ error: -3 });
       }
     });

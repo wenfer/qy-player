@@ -1,12 +1,14 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
+import { selectAudioEngine } from '../playback-engine/engine-selector';
+import { resolveMusicResumeTarget } from '../playback-state/resume-resolver';
+import { getAdapterForSource } from '../catalog/source-service';
 import type {
   PlaybackResolution,
   ResolveMode,
   ResolvePlaybackInput,
 } from '../../../shared/types';
 import { createCatalogQueryService, type PlaybackIntent } from '../catalog/query-service';
-import { getAdapterForSource } from '../catalog/source-service';
 import { LocalSourceAdapter } from '../library-sources/local-source';
 import { loadWebDavSecret, type WebDavSourceAdapter } from '../library-sources/webdav-source';
 import { parseWebDavBaseUrl, relativePathToRequestPath } from '../library-sources/url-guard';
@@ -51,6 +53,8 @@ export interface ResolverDeps {
    * 失败永不影响播放；由主进程注入（内部注册 SkipController 存储）。
    * ctx.serverId/seriesName 用于整剧自定义设定查找（自定义优先于服务器识别）。
    */
+  /** 引擎偏好（QYP3-009：拾音器优先/兼容性优先），缺省拾音器优先。 */
+  getEnginePreference?: () => 'spectrum-first' | 'compat-first';
   fetchSkipSegments?: (ctx: {
     client: ReturnType<typeof createClient>;
     serverId: number;
@@ -288,6 +292,112 @@ export async function resolvePlayback(
 ): Promise<PlaybackResolution> {
   const mode: ResolveMode = input.mode === 'transcode' ? 'transcode' : 'direct';
   const ref = input.ref;
+
+  // -- 音乐（三期 QYP3-011/014）：music_tracks 按 id 解析 -------------------
+  if (ref.provider === 'music') {
+    const sourceId = ref.sourceId;
+    const trackId = Number(ref.itemId);
+    if (!Number.isInteger(sourceId) || !Number.isInteger(trackId) || trackId <= 0) {
+      throw new ResolverError('ITEM_NOT_FOUND', '音轨不存在');
+    }
+    const track = deps.db
+      .prepare('SELECT * FROM music_tracks WHERE id = ? AND source_id = ?')
+      .get(trackId, sourceId) as
+      | {
+          path: string;
+          title: string;
+          artist: string | null;
+          album: string | null;
+          albumartist: string | null;
+          codec: string | null;
+          duration: number | null;
+        }
+      | undefined;
+    if (!track) throw new ResolverError('ITEM_NOT_FOUND', '音轨不存在或已删除');
+    const source = deps.db.prepare('SELECT kind FROM library_sources WHERE id = ?').get(sourceId) as
+      | { kind: 'local' | 'webdav' }
+      | undefined;
+    if (!source) throw new ResolverError('UNAVAILABLE', '来源不存在或已删除');
+
+    const engine =
+      input.engineForce === 'mpv'
+        ? ({ engine: 'mpv', reason: 'compat-first' } as const)
+        : selectAudioEngine({
+            codec: track.codec,
+            sourceKind: source.kind === 'webdav' ? 'webdav' : 'local',
+            preference: deps.getEnginePreference?.() ?? 'spectrum-first',
+          });
+
+    // 音乐续播（QYP3-014）：无 30s 阈值；>90% 从头重播
+    const saved = deps.storage.getProgress('local', track.path);
+    const startPosition = resolveMusicResumeTarget(saved);
+
+    const mediaContext = {
+      mediaType: 'local',
+      mediaId: track.path,
+      title: track.title,
+      seriesName: track.albumartist ?? undefined,
+    };
+
+    if (engine.engine === 'webaudio' && source.kind === 'local') {
+      return {
+        kind: 'music-direct',
+        // renderer 引擎经 qy-file://audio 协议（containment 在协议层）
+        url: `qy-file://audio/${sourceId}/${encodeURIComponent(track.path)}`,
+        seekable: true,
+        startPosition,
+        mediaContext,
+        engine: { engine: engine.engine, reason: engine.reason },
+      };
+    }
+
+    if (source.kind === 'local') {
+      let path: string;
+      try {
+        path = (getAdapterForSource(deps.db, sourceId, deps.secretStore).adapter as LocalSourceAdapter).resolveInside(
+          track.path
+        );
+      } catch (err) {
+        throw new ResolverError('UNAVAILABLE', err instanceof Error ? err.message : '路径不可用');
+      }
+      return {
+        kind: 'local-file',
+        url: path,
+        seekable: true,
+        startPosition,
+        mediaContext,
+        engine: { engine: 'mpv', reason: engine.reason },
+      };
+    }
+
+    // WebDAV 音频：mpv 直链 + 认证头会话（与视频同管线）
+    const { adapter } = getAdapterForSource(deps.db, sourceId, deps.secretStore);
+    const base = parseWebDavBaseUrl(getAdapterForSource(deps.db, sourceId, deps.secretStore).root);
+    const requestPath = relativePathToRequestPath(track.path, base);
+    const url = `${new URL(base.url).origin}${requestPath}`;
+    const secret = loadWebDavSecret(deps.secretStore, sourceId);
+    const newId = deps.newSessionId ?? randomUUID;
+    let streamSessionId: string | undefined;
+    if (secret) {
+      streamSessionId = newId();
+      const token = Buffer.from(`${secret.username}:${secret.password}`).toString('base64');
+      deps.streamHeaders.stash(streamSessionId, `Authorization: Basic ${token}`);
+    }
+    void adapter;
+    return {
+      kind: 'webdav-stream',
+      url,
+      ...(streamSessionId ? { streamSessionId } : {}),
+      seekable: false,
+      startPosition,
+      mediaContext: {
+        ...mediaContext,
+        mediaType: 'webdav',
+        mediaId: `${sourceId}:${track.path}`,
+      },
+      engine: { engine: 'mpv', reason: engine.reason },
+    };
+  }
 
   // -- Local / WebDAV catalog sources ------------------------------------
   if (ref.provider === 'catalog') {

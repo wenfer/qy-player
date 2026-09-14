@@ -452,6 +452,17 @@ export function createLocalScanDriver(deps: {
     finalized = true;
     flushGroup();
     processCueFiles();
+    cleanupMissingMusic();
+  }
+
+  /** 音轨可用性（QYP3-014）：全量扫描收尾清理已消失的音轨。 */
+  function cleanupMissingMusic(): void {
+    const seenMusicKeys = new Set(
+      [...seen].filter((p) => /\.(mp3|flac|m4a|aac|ogg|oga|opus|wav|wma|ape|wv|tta|tak|aiff|aif|alac|dsf|dff|mpc|mka|ac3|dts|amr|au|ra)$/i.test(p.split('/').pop() ?? ''))
+    );
+    // CUE 分轨行以 cue:<cuePath> 为键——CUE 本身仍在批次里就保留
+    for (const cue of cueFiles) seenMusicKeys.add(`cue:${cue.relativePath}`);
+    repo.deleteMusicTracksNotSeen(sourceId, seenMusicKeys);
   }
 
   /**

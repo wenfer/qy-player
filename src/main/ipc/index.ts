@@ -329,6 +329,51 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     }
   );
 
+  // 音乐进度上报（QYP3-014）：renderer 引擎播放不经 mpv，进度由
+  // renderer 节流（≤10s 一次 + 停止/收尾 final）上报主进程落库，
+  // 与 mpv 引擎共用 legacy 表（local 路径键），续播规则同源。
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.REPORT_PROGRESS,
+    (_event, args: {
+      mediaId: string;
+      title?: string;
+      position: number;
+      duration?: number;
+      isFinished?: boolean;
+    }) => {
+      const mediaId =
+        typeof args?.mediaId === 'string' && args.mediaId.length <= 1024 ? args.mediaId : null;
+      if (!mediaId || !Number.isFinite(Number(args?.position)) || Number(args.position) < 0) {
+        return err('VALIDATION_FAILED', '进度参数不合法');
+      }
+      const position = Number(args.position);
+      const duration = Number(args?.duration);
+      const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : undefined;
+      storage.upsertLocalMedia({ path: mediaId, title: args?.title ?? extractTitleFromPath(mediaId) });
+      const localMedia = storage.getLocalMediaByPath(mediaId);
+      const isFinished =
+        args?.isFinished === true ||
+        (safeDuration !== undefined && safeDuration > 0 && position / safeDuration > 0.9);
+      storage.addWatchHistory({
+        mediaType: 'local',
+        mediaId,
+        title: args?.title ?? extractTitleFromPath(mediaId),
+        path: mediaId,
+        position,
+        duration: safeDuration,
+      });
+      storage.saveProgress({
+        mediaType: 'local',
+        mediaId,
+        localMediaId: localMedia?.id,
+        position,
+        duration: safeDuration,
+        isFinished,
+      });
+      return ok({ saved: true });
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_TRACKS, (_event, args: { offset?: number; limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
     const offset = Math.max(Number(args?.offset) || 0, 0);
@@ -389,7 +434,6 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   // qy-file://audio 协议桥注册（QYP3-010）：local 来源 → resolveInside
   // 适配器；每次调用即时查表（来源删除即刻失效，无陈旧句柄）。
   {
-    const { LocalSourceAdapter } = require('../modules/library-sources/local-source');
     registerAudioSourceProvider((sourceId) => {
       const source = catalogRepo.getSource(sourceId);
       if (!source || source.kind !== 'local') return undefined;
@@ -754,6 +798,10 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             getResumePosition: (mediaType: string, mediaId: string) =>
               playbackStateManager!.getResumePosition(mediaType, mediaId),
             createOnlineClient: createClient,
+            getEnginePreference: () =>
+              storage.getConfig('playback.musicEngine') === 'compat-first'
+                ? 'compat-first'
+                : 'spectrum-first',
             fetchSkipSegments: ({ client, serverId, serverType, itemId, seriesName }) => {
               // 自定义设定优先（migration 006）：有则直接采用，不再询问服务器。
               const custom = seriesName
@@ -1477,6 +1525,7 @@ function registerCatalogHandlers(
         : createLocalScanDriver({
             repo,
             sourceId,
+            coversDir: join(app.getPath('userData'), 'covers'), // QYP3-005
             // NFO contents are read through the adapter's containment check,
             // so a stored relative path can never escape the source root.
             readNfo: async (relativePath) =>

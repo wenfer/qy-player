@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
     GET_ALBUMS: 'music:get-albums',
     GET_ALBUM_TRACKS: 'music:get-album-tracks',
     GET_TRACKS: 'music:get-tracks',
+    /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
+    REPORT_PROGRESS: 'music:report-progress',
   },
   UNIFIED: {
     CONTINUE_WATCHING: 'unified:continue-watching',

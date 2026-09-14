@@ -35,7 +35,7 @@ export interface UnifiedCard {
 
 /** 完整 MediaRef 键：provider + owner + itemId（+ mediaSourceId 可选域）。 */
 export function mediaRefKey(ref: MediaRef): string {
-  const owner = ref.provider === 'catalog' ? `s${ref.sourceId}` : `srv${ref.serverId}`;
+  const owner = ref.provider === 'catalog' || ref.provider === 'music' ? `s${ref.sourceId}` : `srv${ref.serverId}`;
   return `${ref.provider}:${owner}:${ref.itemId}`;
 }
 

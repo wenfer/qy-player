@@ -433,6 +433,21 @@ export function createCatalogRepository(db: Database.Database) {
 
     // -- Files --------------------------------------------------------------
 
+    /** QYP3-014：全量扫描后清理已消失的音轨（availability 同纪律）。 */
+    deleteMusicTracksNotSeen(sourceId: number, seenKeys: ReadonlySet<string>): number {
+      const rows = db
+        .prepare('SELECT id, source_key FROM music_tracks WHERE source_id = ?')
+        .all(sourceId) as Array<{ id: number; source_key: string }>;
+      let deleted = 0;
+      for (const row of rows) {
+        if (!seenKeys.has(row.source_key)) {
+          db.prepare('DELETE FROM music_tracks WHERE id = ?').run(row.id);
+          deleted += 1;
+        }
+      }
+      return deleted;
+    },
+
     /** QYP3-006：CUE 分轨整体替换写入（重扫幂等）。 */
     replaceMusicCueEntries(trackId: number, entries: Array<{ position: number; title: string; start: number; end: number | null }>): void {
       const insert = db.prepare(
