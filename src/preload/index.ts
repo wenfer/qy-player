@@ -152,6 +152,7 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.CANCEL, reason ?? 'user'),
   getAutoNextEnabled: () => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.GET_ENABLED),
   setAutoNextEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.SET_ENABLED, enabled),
+  getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP.GET_VERSION),
   // Skip intro/outro (剧集；segments 主进程拉取，开关仅控制命中行为)
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>

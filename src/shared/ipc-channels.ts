@@ -105,6 +105,9 @@ export const IPC_CHANNELS = {
     GET_ENABLED: 'auto-next:get-enabled',
     SET_ENABLED: 'auto-next:set-enabled',
   },
+  APP: {
+    GET_VERSION: 'app:get-version',
+  },
   SKIP_SEGMENTS: {
     GET_SETTINGS: 'skip-segments:get-settings',
     SET_SETTING: 'skip-segments:set-setting',

@@ -302,6 +302,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   });
 
   // Skip intro/outro settings (剧集限定；main 侧每次命中实时读取)。
+  ipcMain.handle(IPC_CHANNELS.APP.GET_VERSION, () => ok({ version: app.getVersion() }));
+
   ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
     return ok({
       skipIntro: storage.getConfig('playback.skipIntro') !== 'false',

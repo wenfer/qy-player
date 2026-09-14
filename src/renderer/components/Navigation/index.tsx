@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Home, FolderOpen, Library, Search, Settings, History, Keyboard, Wand2 } from 'lucide-react';
 
 const navItems = [
@@ -31,6 +31,18 @@ export default function Navigation() {
     const page = pageTitleFor(location.pathname);
     document.title = page === '首页' ? 'QY Player' : `${page} · QY Player`;
   }, [location.pathname]);
+
+  const [appVersion, setAppVersion] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = (await window.electronAPI.getAppVersion()) as { ok: boolean; data?: { version: string } };
+        setAppVersion(res.ok ? res.data?.version ?? '' : '');
+      } catch {
+        // 版本号仅展示用
+      }
+    })();
+  }, []);
 
   return (
     <nav
@@ -76,7 +88,7 @@ export default function Navigation() {
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-border">
-        <p className="text-[11px] text-muted-foreground">v1.0.0</p>
+        <p className="text-[11px] text-muted-foreground">{appVersion ? `v${appVersion}` : ""}</p>
       </div>
     </nav>
   );
