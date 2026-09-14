@@ -245,12 +245,12 @@ export default function Local() {
           <div className="flex flex-col items-center justify-center py-10 bg-card border border-dashed border-border rounded-xl">
             <Library size={28} className="text-muted-foreground/40 mb-2" />
             <p className="text-sm text-muted-foreground">还没有媒体库来源</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-3">在设置中添加本地目录并扫描后，即可在这里浏览</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-3">在媒体库页添加本地目录并扫描后，即可在这里浏览</p>
             <button
-              onClick={() => navigate('/settings')}
+              onClick={() => navigate('/media-sources')}
               className="px-4 py-2 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 focus-ring"
             >
-              前往设置
+              前往媒体库
             </button>
           </div>
         ) : (

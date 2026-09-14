@@ -62,14 +62,16 @@ describe('Local page: 本地媒体库 section', () => {
     expect(screen.getByRole('button', { name: '扫描 电影收藏' })).toBeTruthy();
   });
 
-  it('shows an empty state pointing at settings when no source exists', async () => {
+  it('shows an empty state pointing at media-sources when no source exists', async () => {
     render(
       <MemoryRouter>
         <Local />
       </MemoryRouter>
     );
     await waitFor(() => expect(screen.getByText('还没有媒体库来源')).toBeTruthy());
-    expect(screen.getByRole('button', { name: '前往设置' })).toBeTruthy();
+    // 二期重构后媒体来源在「媒体库」页管理，不再指向设置
+    expect(screen.getByText(/在媒体库页添加本地目录/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '前往媒体库' })).toBeTruthy();
   });
 
   it('keeps single-file playback available', () => {

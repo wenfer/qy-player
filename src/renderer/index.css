@@ -4,23 +4,26 @@
 
 @layer base {
   :root {
-    /* Slate-based dark theme - professional, not AI-generic */
+    /* Slate-based dark theme - professional, not AI-generic.
+       正文文本亮度 88%（标题层 92% 由组件用 font-weight 区分）——
+       98% 近纯白在暗场环境产生眩光（PM 评审 2026-09），勿调回。 */
     --background: 222 47% 3%;
-    --foreground: 210 40% 98%;
+    --foreground: 210 20% 88%;
     --card: 222 47% 6%;
-    --card-foreground: 210 40% 98%;
+    --card-foreground: 210 20% 88%;
     --popover: 222 47% 5%;
-    --popover-foreground: 210 40% 98%;
+    --popover-foreground: 210 20% 88%;
     --primary: 217 91% 60%;
     --primary-foreground: 222 47% 3%;
     --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 210 20% 86%;
     --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 55%;
+    --muted-foreground: 215 16% 62%;
     --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent-foreground: 210 20% 88%;
     --destructive: 0 63% 50%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 210 20% 88%;
+    --foreground-strong: 210 20% 92%;
     --border: 217 33% 14%;
     --input: 217 33% 14%;
     --ring: 217 91% 60%;
@@ -29,6 +32,10 @@
     --radius-md: 0.5rem;
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
+  }
+
+  h1, h2 {
+    color: hsl(var(--foreground-strong));
   }
 
   * {
