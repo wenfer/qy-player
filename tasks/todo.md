@@ -2,7 +2,7 @@
 
 > 设计基线：[`tasks/plan.md`](plan.md)
 >
-> 清单状态：任务均为待评审/待执行；未获得人工批准前，不得开始实现任务
+> 清单状态：任务均为待评审/待执行；未获得人工批准前，不得开始实现任务（该约束适用于新任务；001～038 已按各任务 Evidence 经评审后完成）
 >
 > 使用规则：一次只执行一个任务；先读 `Read first`；先测试后实现；完成后填写 `Evidence`；没有证据不得勾选。
 
@@ -131,36 +131,6 @@ Evidence:
 
 ## Phase B：本地媒体库与 NFO
 
-### QYP2-006 实现 SourceAdapter 与扫描任务状态机
-
-- [x] **依赖：** QYP2-004
-- [ ] **Read first：** 本文第 4、6 节、`src/main/ipc/index.ts`
-- [ ] **允许修改：** `src/main/modules/library-sources/types.ts`、`src/main/modules/library-scanner/job-controller.ts`、`src/main/modules/catalog/repository.ts`、`tests/main/library-scanner/job-controller.test.ts`
-- [ ] **目标：** 定义 local/WebDAV 共用 adapter、异步有界队列、取消、恢复和扫描事件。
-- [ ] **验收：** 状态为 queued/discovering/indexing/enriching/completed/cancelled/failed/interrupted；事件 ≤4Hz；取消/失败不标记 missing。
-- [ ] **验证：** `npm test -- --run tests/main/library-scanner/job-controller.test.ts`、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
-
-### QYP2-007 实现本地 SourceAdapter
-
-- [x] **依赖：** QYP2-006
-- [ ] **Read first：** 本文第 7 节、`src/main/modules/subtitle-engine/scanner.ts`
-- [ ] **允许修改：** `src/main/modules/library-sources/local-source.ts`、`src/main/modules/catalog/source-service.ts`、`tests/main/library-sources/local-source.test.ts`
-- [ ] **目标：** 通过已选择目录创建 source，提供异步 list/stat/open 和 root containment。
-- [ ] **验收：** 只保存可读规范化根目录；默认不跟随 symlink；移除 source 不删除媒体；禁止任意 renderer 路径。
-- [ ] **验证：** `npm test -- --run tests/main/library-sources/local-source.test.ts`、隔离临时目录手工测试。
-- [ ] **Evidence：** 待填写
-
-### QYP2-008 添加本地来源 IPC 与设置 UI
-
-- [x] **依赖：** QYP2-002、QYP2-007
-- [ ] **Read first：** `src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/ServerForm.tsx`、`src/preload/index.ts`
-- [ ] **允许修改：** `src/main/ipc/index.ts`、`src/preload/index.ts`、`src/renderer/pages/Settings/index.tsx`、`src/renderer/pages/Settings/SourceForm.tsx`、`tests/renderer/settings/local-source.test.tsx`
-- [ ] **目标：** 添加/测试/编辑/停用本地来源，启动和取消扫描。
-- [ ] **验收：** 异步操作有 Toast 和持久状态；移除文案明确不删文件；1280×800 无横向滚动；输入由 shared schema 校验。
-- [ ] **验证：** `npm test -- --run tests/renderer/settings/local-source.test.tsx`、`npm run typecheck`、键盘手工验证。
-- [ ] **Evidence：** 待填写
-
 ### QYP2-007 实现本地 SourceAdapter
 
 - [x] **依赖：** QYP2-006
@@ -192,16 +162,6 @@ Evidence:
 ### QYP2-009 实现本地增量扫描与媒体分类
 
 - [x] **依赖：** QYP2-006、QYP2-007
-- [ ] **Read first：** 本文第 6 节、QYP2-006 的 adapter contract
-- [ ] **允许修改：** `src/main/modules/library-scanner/local-scanner.ts`、`src/main/modules/library-scanner/classifier.ts`、`tests/main/library-scanner/local-scan.test.ts`
-- [ ] **目标：** 发现视频/NFO/sidecar，识别电影、series、season、episode、普通 video，并按 path/size/mtime 增量更新。
-- [ ] **验收：** 支持 S01E02/1x02/多集/Season 0；过滤 sample/extras；第二次无变化不重复 enrichment；完整成功扫描后才标 missing。
-- [ ] **验证：** `npm test -- --run tests/main/library-scanner/local-scan.test.ts`；10,000 项 synthetic fixture 记录基线。
-- [ ] **Evidence：** 待填写
-
-### QYP2-009 实现本地增量扫描与媒体分类
-
-- [x] **依赖：** QYP2-006、QYP2-007
 - [x] **Read first：** 计划第 6 节、QYP2-006 的 adapter contract、job-controller.ts、repository.ts
 - [x] **允许修改：** `local-scanner.ts`、`classifier.ts`、`tests/main/library-scanner/local-scan.test.ts`
 - [x] **目标：** 发现视频/NFO/sidecar，识别电影、series、season、episode、普通 video，并按 path/size/mtime 增量更新。
@@ -212,16 +172,6 @@ Evidence:
   - Baseline: 10,000 项 synthetic（200 剧 × 50 集）完整扫描 ~6.8s（门限 <60s，纯同步 SQLite + DFS fake adapter，无网络 I/O）
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes：Critical（walkSourceTree 把 startPath 同时当遍历根与 resume cursor——cursor 为文件时遍历空目录，resume 语义完全失效；已改为恒从根遍历 + 内存态跳过 + cursor 失效回退全量）、availability 批量事务化（repo.setAvailabilityBulk，防崩溃留下混合状态）、测试 tmp 目录泄漏（afterAll→afterEach）、sample/extras 起始锚定（防误伤 The Interview 2014 / The Sample 2023 等真标题——未检出的 extras 仍经主文件大小规则正确挂到电影条目）、YEAR 尾部边界（Movie 2019.mkv）、episodeTitle 剥离 release tag；二轮验收 Approve；② enrich 钩子当前语义 = 幂等收尾（首个调用 flush 尾部电影分组），QYP2-010 换成真实 NFO 解析时已由指纹门禁保证不变文件不重复解析；③ 已知限制（记录）：同名著同年不同目录的电影合并为一个 item（sourceKey 仅 title+year，ADR-0001 语义下合理，人工修正后续可解）；mtime 取整用 Math.floor，适配器精度变化需 bump 指纹格式（已注释）；missing 30 天保留策略清理属后续任务；④ 越界文件（待追认）：ipc/index.ts（SCAN_START 接入递归 wrapper + finalize 钩子，替换 basic driver）、repository.ts（listItemsBySource、setAvailabilityBulk、CatalogItemRow/CatalogFileRow 暴露 updated_at）——均为最小必要增量，验收确认无越界修改；⑤ Season 目录上下文：剧名取自季目录外的最近目录段（绝命毒师/Season 1/01.mkv → 剧名绝命毒师）
-
-### QYP2-010 实现安全 NFO 解析与字段合并
-
-- [x] **依赖：** QYP2-003、QYP2-009
-- [ ] **Read first：** 本文第 9 节、项目依赖清单
-- [ ] **允许修改：** `src/main/modules/metadata/nfo-parser.ts`、`src/main/modules/metadata/metadata-merger.ts`、`src/main/modules/metadata/types.ts`、`tests/main/metadata/nfo-parser.test.ts`、`tests/main/metadata/metadata-merger.test.ts`
-- [ ] **目标：** 读取 movie/tvshow/season/episode NFO、UTF-8/UTF-16、sidecar 图片，并应用来源优先级。
-- [ ] **验收：** 禁 DTD/外部实体；2 MiB/深度/节点有界；解析失败保留旧值；manual > NFO > scraper > filename 且记录 provenance。
-- [ ] **验证：** 两个 metadata 测试文件、恶意 XML fixture、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
 
 ### QYP2-010 实现安全 NFO 解析与字段合并
 
@@ -237,16 +187,6 @@ Evidence:
   - Merge semantics: 稀疏载荷不清空旧值（部分 NFO/解析失败零写入）；manual 锁定字段重扫跳过且 NFO 槽位冻结（解锁即恢复用户所见状态）；expectedRevision 乐观锁冲突抛 MetadataConflictError 携带两侧（无静默 LWW）；键序稳定比较不误 bump；clearManualField 逐字段恢复来源值
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes：<set> 无 <name> 回退文本、根元素后尾部注释/PI 容忍（assertTrailingNoise）、expectedRevision 0 新字段语义、deepEqual 键序、8 个测试覆盖缺口全部补齐；二轮验收 Approve；② mpaa 与 contentrating 并存时 contentrating 胜出（Kodi 主流是 mpaa，但显式 contentrating 更精确，测试已固化）；③ banner/logo sidecar 超出 plan §9.1 列举范围（同机制零成本，QYP2-011 UI 消费，已注释说明）；④ 越界文件（待追认）：无——但 electron-builder.yml（Deepin 托盘 libappindicator3-1 由 recommends 转硬依赖）再次为工作区并行改动被误扫，已拆分为独立提交 e817fca 待追认（改动合理但未经本任务批准）；⑤ ProviderStore 为 JSON 可序列化（field→provider→{value,revision,updatedAt}），与 catalog_metadata_sources (item_id, field, provider, value, revision) 映射直接；注意 updatedAt 为 ms 而表内 updated_at 为 unixepoch 秒（落库时换算）
-
-### QYP2-011 交付本地目录浏览、搜索和旧进度显示
-
-- [x] **依赖：** QYP2-008、QYP2-009、QYP2-010
-- [ ] **Read first：** `src/renderer/pages/Local/index.tsx`、`src/renderer/pages/LibraryBrowse/index.tsx`、`src/renderer/pages/Detail/index.tsx`
-- [ ] **允许修改：** `src/main/modules/catalog/query-service.ts`、`src/renderer/pages/LibraryBrowse/index.tsx`、`src/renderer/pages/Local/index.tsx`、`src/renderer/App.tsx`、`tests/renderer/library/local-library.test.tsx`
-- [ ] **目标：** 将本地 source 接入统一分页目录、详情和搜索；保留单文件打开兼容。
-- [ ] **验收：** 重启后目录和 NFO 保留；旧 local_media 进度正确迁移/显示；加载/空/离线/错误状态清晰；无横向滚动。
-- [ ] **验证：** renderer 测试、`npm run typecheck`、添加目录→扫描→重启→详情手工流程。
-- [ ] **Evidence：** 待填写
 
 ### QYP2-011 交付本地目录浏览、搜索和旧进度显示
 
@@ -274,16 +214,6 @@ Evidence:
 ### QYP2-012 实现 WebDAV 客户端与 URL 安全边界
 
 - [x] **依赖：** QYP2-005、QYP2-006
-- [ ] **Read first：** 本文第 8 节、第 15 节安全表、QYP2-006 contract
-- [ ] **允许修改：** `src/main/modules/library-sources/webdav-client.ts`、`src/main/modules/library-sources/webdav-source.ts`、`src/main/modules/library-sources/url-guard.ts`、`tests/main/webdav/webdav-client.test.ts`
-- [ ] **目标：** 实现 HTTP/HTTPS、无认证/Basic/App Password、PROPFIND Depth 0/1、GET/Range 和安全重定向。
-- [ ] **验收：** href 解码/归一化后仍在 root；拒绝 `..`/双重编码/跨 origin Authorization；响应大小/深度/超时/重试有界；能力明确 canSeek/canDelete/supportsEtag。
-- [ ] **验证：** mock server 覆盖 401、403、redirect、malicious href、Range、超时和取消。
-- [ ] **Evidence：** 待填写
-
-### QYP2-012 实现 WebDAV 客户端与 URL 安全边界
-
-- [x] **依赖：** QYP2-005、QYP2-006
 - [x] **Read first：** 计划第 8 节、§4.2、§16.4、QYP2-006 contract、SecretStore API
 - [x] **允许修改：** `webdav-client.ts`、`webdav-source.ts`、`url-guard.ts`、`tests/main/webdav/webdav-client.test.ts`
 - [x] **目标：** HTTP/HTTPS、无认证/Basic/App Password、PROPFIND Depth 0/1、GET/Range 和安全重定向。
@@ -294,16 +224,6 @@ Evidence:
   - Security matrix: base URL 拒 userinfo/query/fragment/非 http(s)/控制字符；href 拒编码穿越（%2e/%2f/%5c/overlong UTF-8）、双重编码（一次解码后残留 %25 等即拒，%2f 假阳性已文档化为含保严格权衡）、跨源绝对 href、协议相对、坏编码；multistatus 拒 DOCTYPE/非预定义实体；响应 8MiB 上限、条目 1 万上限；超时 15s（请求期 + 流读取期双重 deadline）；重试仅网络错误 + 502/503/504（≤2 次，401/403 永不重试）；重定向仅同源（Authorization 永不跨源）、≤3 跳；AbortSignal 全链路（请求、退避、流读取）
   - Result: 通过
   - Review notes: ① 评审两轮（均在提交前整改完毕）+ 验收 Approve：CRITICAL——open 以 200 冒充 Range 支持会向 UI 隐藏 seek 不可靠（改为仅 206 判定，播放前逐文件探测）；REQUIRED——响应流错误路径 timer/abortListener 泄漏、backoff 监听器全路径移除 + 重试前 abort 检查、adapter signal 全链路传递、%25 残留编码穿透；readText 流阶段无超时保护（补双重 deadline + abort destroy）；② testConnection supportsEtag 诚实化（按 root 条目声明），supportsRange 乐观默认已注释（播放前 206 探测为准，plan §8.1）；③ 凭据仅经 SecretStore namespace 'webdav'（JSON 序列化，损坏按无凭据处理）；Authorization 只在 header 构造处出现，全模块零日志；④ 与其他 SourceAdapter 的隔离：所有 URL 构造经 url-guard，存储的 relativePath 永不直接拼 URL；⑤ 待办留档：getAdapterForSource 接入 WebDAV 在 QYP2-014（webdav-scanner 允许文件清单内做接线）；DELETE 能力按 plan 推迟到 QYP2-024（canDelete 恒 false）；⑥ 越界：无（仅允许清单内文件）
-
-### QYP2-013 添加 WebDAV 来源配置 UI
-
-- [x] **依赖：** QYP2-008、QYP2-012
-- [ ] **Read first：** 本文第 8 节、现有 Settings/ServerForm
-- [ ] **允许修改：** `src/renderer/pages/Settings/SourceForm.tsx`、`src/renderer/pages/Settings/WebDavFields.tsx`、`src/renderer/pages/Settings/SourceList.tsx`、`src/preload/index.ts`、`tests/renderer/settings/webdav-source.test.tsx`
-- [ ] **目标：** 添加地址、根路径、账号、测试连接、只读/删除 capability 与 SecretStore 状态。
-- [ ] **验收：** 禁止 URL userinfo/query token；密码不回显；HTTP 明文有确认；密钥不可用时默认会话保存；显示 Range/ETag/DELETE 能力。
-- [ ] **验证：** renderer 测试、DevTools 状态/日志无秘密、`npm run typecheck`。
-- [ ] **Evidence：** 待填写
 
 ### QYP2-013 添加 WebDAV 来源配置 UI
 
@@ -319,16 +239,6 @@ Evidence:
   - Renderer tests: consent 门禁（未勾选时 confirmHttpPlaintext=false → 勾选后 true）；密码 type=password + autocomplete=new-password + 永不回显；userinfo hint 禁用提交；能力行（拖动/续播、ETag、删除已禁用）；session-only 诚实提示；来源行徽章（WebDAV/http 明文/凭据已保存/能力 chips）；页面保存流
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes：CRITICAL——secret_ref 写入 'webdav:<id>' 不符合 SecretStore 'sec:<ns>:<key>' 契约，parseSecretRef 永远解析失败 → hasCredential 永假（改用 formatSecretRef，测试断言保护修复后的格式）；REQUIRED——测试曾保护错误行为；OPTIONAL——空字符串凭据不视为凭据、persistentSecrets 默认 false（不预先承诺加密）、条件类型清理；NIT——spellCheck、明文检测提取共享 urlLooksPlaintextHttp；二轮验收 Approve（secret_ref 写/读/解析三层链路核验一致）；② SCAN_START 对 webdav 显式拒绝（'WebDAV 扫描即将在后续版本提供'），扫描按钮 disabled + title，QYP2-014 解锁；③ DevTools 无秘密核查角度：password 仅存在于表单 state 与一次 IPC invoke，save 后 reset，renderer 永不收到存储凭据（只有 hasCredential 布尔），main 侧 Authorization 无日志（QYP2-012 已保证）；④ 越界文件（待追认）：shared/types（CreateWebDavSourceInput guard）、ipc-channels（SECRETS_PERSISTENT）、source-service（createWebDavSource/testWebDavConnection/getAdapterForSource webdav 分支/removeSource 清密钥）、ipc/index（SAVE/TEST 分支 + HEALTH 401→AUTH_REQUIRED + SCAN_START 守卫）、Settings/index.tsx（payload 分支 + SourceList 接入 + persistentSecrets）、local-source.test.tsx（适配新 props/payload）——均为最小必要
-
-### QYP2-014 实现 WebDAV 增量扫描与离线状态
-
-- [x] **依赖：** QYP2-009、QYP2-012
-- [ ] **Read first：** 本文第 6、8 节
-- [ ] **允许修改：** `src/main/modules/library-scanner/webdav-scanner.ts`、`src/main/modules/library-sources/webdav-source.ts`、`tests/main/library-scanner/webdav-scan.test.ts`
-- [ ] **目标：** 分层遍历 WebDAV，按 ETag/Last-Modified/size 增量更新，复用本地分类器。
-- [ ] **验收：** 不使用 Depth infinity；并发/取消/重试有界；离线/认证失败/取消不标 missing；健康状态持久化。
-- [ ] **验证：** mock 10,000 项树、峰值内存/并发记录、测试通过。
-- [ ] **Evidence：** 待填写
 
 ### QYP2-014 实现 WebDAV 增量扫描与离线状态
 
@@ -350,16 +260,6 @@ Evidence:
 ### QYP2-015 实现统一 PlaybackResolver 与精确路由
 
 - [x] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
-- [ ] **Read first：** `src/main/ipc/index.ts`、`src/main/modules/player-core/index.ts`、`src/main/modules/playback-state/index.ts`、`src/renderer/hooks/use-play-item.ts`
-- [ ] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/playback/playback-resolver.test.ts`、`tests/main/online/server-routing.test.ts`
-- [ ] **目标：** MediaRef 在主进程解析 locator、headers、resume、subtitle 和 media context；Jellyfin/Emby 严格按 serverId 路由。
-- [ ] **验收：** renderer 不接触凭据；同 id 多服务器测试不串库；旧直连/转码/单文件播放行为不回归；URL 不由 renderer 拼接。
-- [ ] **验证：** 两个测试文件、`npm run typecheck`、现有服务器播放回归。
-- [ ] **Evidence：** 待填写
-
-### QYP2-015 实现统一 PlaybackResolver 与精确路由
-
-- [x] **依赖：** QYP2-002、QYP2-005、QYP2-011、QYP2-012
 - [x] **Read first：** ipc/index.ts、player-core/index.ts、playback-state/index.ts、use-play-item.ts、jellyfin/emby client 签名
 - [x] **允许修改：** `playback-resolver.ts`、`src/main/ipc/index.ts`、`src/preload/index.ts`、`tests/main/playback/playback-resolver.test.ts`、`tests/main/online/server-routing.test.ts`
 - [x] **目标：** MediaRef 在主进程解析 locator、headers、resume、subtitle 和 media context；Jellyfin/Emby 严格按 serverId 路由。
@@ -372,34 +272,6 @@ Evidence:
   - Behavior: Series/Season 强制解析首集；pinned mediaSourceId 优先；transcode/direct 模式白名单；isMediaRef（prototype pollution 守卫沿用）+ mediaSourceId 长度上限；90% 规则仍在 LOAD_FILE（History 本地回放对齐）；单文件打开直通不变
   - Result: 通过
   - Review notes: ① 首轮评审 Request changes：REQUIRED——Detail startPosition 0 被 resume 吞掉（改为 !== undefined 判定）、ServerConfig apiKey 残留（shared 移除 + OnlineClientConfig 独立 + 全调用点更新）；OPTIONAL——provider-array 探测循环改为单次命中、Series/Season 忽略容器级 MediaSources、History 90%/5s 对齐；二轮验收 Approve；② 越界文件（待追认）：renderer 8 文件（App 路由 /detail/:type/:serverId/:id、Detail、use-play-item、Home/Search/LibraryBrowse/History 导航、Settings 保存流）+ shared ServerConfig/ipc-channels PLAYER.RESOLVE——评审确认均为统一解析所必需；③ TEST_SERVER 的 accessToken 透传 Transitional 正式移除（summary 遗留项关闭）
-
-### QYP2-016 交付 WebDAV 播放与 seek 体验
-
-- [x] **依赖：** QYP2-013、QYP2-014、QYP2-015
-- [ ] **Read first：** `src/main/modules/player-core/mpv-process.ts`、`src/main/modules/player-core/index.ts`
-- [ ] **允许修改：** `src/main/modules/player-core/playback-resolver.ts`、`src/main/modules/playback-state/index.ts`、`src/renderer/pages/Detail/index.tsx`、`tests/main/playback/webdav-playback.test.ts`
-- [ ] **目标：** 支持 WebDAV Range 播放/拖动/续播；不支持 seek 时给出明确降级。
-- [ ] **验收：** Authorization 只存在主进程/mpv 参数；断网/过期凭据不清零进度；mpv stdout/stderr drain 和 `--hwdec=no` 保持。
-- [ ] **验证：** mock Range 播放；mpv 0.29/0.32 手工各一次；`npm run typecheck`。
-- [ ] **Evidence：** 待填写
-
-### Checkpoint C
-
-- [ ] QYP2-012～016 全部 `[x]`。
-- [ ] Nextcloud、Apache WebDAV 和目标 NAS/Alist 至少完成兼容矩阵；不兼容项有记录。
-- [ ] 断网、取消、401/403、Range 不支持均有证据。
-
-## 用户追加任务（计划外，待追认）
-
-### U-001 设置页与媒体库页面分离
-
-- [x] **背景：** 用户反馈找不到 WebDAV 配置入口，且要求设置页仅保留软件配置。
-- [x] **改动：** 来源管理（本地+WebDAV 的 SourceForm/SourceList/WebDavFields）从 Settings 整体迁移到新页面 `pages/MediaSources`（路由 `/media-sources`，导航「媒体库」）；Settings 只留媒体服务器等软件配置并加指引文案；AGENTS.md UI 约定补此偏好。
-- [x] **Evidence：** `npm test -- --run`（27 文件 317 测试通过，来源测试迁至 tests/renderer/media-sources/ 并改挂新页面）；`npm run typecheck` 零错误；`git diff --check`
-- [x] **Result:** 通过
-- [x] **Review notes:** 首轮 Approve（0 REQUIRED）；已修：describe 迁移更名、空态/副标题文案改为指向「本地」页；记录待用户定夺：导航项「媒体库」与 Home 页「媒体库」(服务器浏览) 术语撞车，可选改名「来源管理」——因用户原话即「媒体库」而保留
-
-## Phase D：详情、技术信息与媒体操作
 
 ### QYP2-016 交付 WebDAV 播放与 seek 体验
 
