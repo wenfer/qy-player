@@ -168,11 +168,11 @@ describe('resolveSeriesResume (剧集主按钮, §12.2 规则 1–4)', () => {
     });
   });
 
-  it('rule 3: no valid history → first episode (sorted) from 0', () => {
+  it('rule 3: nothing touched at all → first episode (sorted) from 0', () => {
     const episodes = [
       ep(2, 2, 1, null),
-      ep(1, 1, 1, progress({ position: 10, duration: 2400, updatedAt: 50 })), // <30s = no history
-      ep(3, 0, 1, null), // 特别篇
+      ep(1, 1, 1, null),
+      ep(3, 0, 1, null), // 特别篇排最前
     ];
     expect(resolveSeriesResume(episodes)).toEqual({
       itemId: 3,
@@ -180,6 +180,33 @@ describe('resolveSeriesResume (剧集主按钮, §12.2 规则 1–4)', () => {
       reason: 'start',
       seasonNumber: 0,
       episodeNumber: 1,
+    });
+  });
+
+  it('rule 3 (触碰过但 <30s): 最近触碰的那集从 0，而非第一集', () => {
+    const episodes = [
+      ep(2, 2, 1, null),
+      ep(1, 1, 1, progress({ position: 10, duration: 2400, updatedAt: 50 })), // 触碰过 ep1
+      ep(3, 0, 1, null),
+    ];
+    expect(resolveSeriesResume(episodes)).toEqual({
+      itemId: 1,
+      position: 0,
+      reason: 'start',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    });
+  });
+
+  it('rule 3: multiple touched (all <30s) → latest updatedAt wins', () => {
+    const episodes = [
+      ep(1, 1, 1, progress({ position: 10, duration: 2400, updatedAt: 50 })),
+      ep(2, 1, 2, progress({ position: 7, duration: 2400, updatedAt: 900 })),
+    ];
+    expect(resolveSeriesResume(episodes)).toMatchObject({
+      itemId: 2,
+      reason: 'start',
+      position: 0,
     });
   });
 
@@ -248,10 +275,19 @@ describe('resolveSeriesResume (剧集主按钮, §12.2 规则 1–4)', () => {
     expect(result).toMatchObject({ itemId: 2, reason: 'resume' });
   });
 
-  it('null progress entries are treated as unplayed (0/null never fabricates history)', () => {
+  it('position 0 but real LastPlayedDate (updatedAt) counts as touched → that episode from 0', () => {
     const episodes = [
       ep(1, 1, 1, null),
-      ep(2, 1, 2, progress({ position: 0, updatedAt: 999 })), // position 0 = nothing
+      ep(2, 1, 2, progress({ position: 0, updatedAt: 999 })), // 点开过但无进度
+    ];
+    // updatedAt 是真实触碰信号：跟随用户最后打开的集，而不是对齐到第一集。
+    expect(resolveSeriesResume(episodes)).toMatchObject({ itemId: 2, reason: 'start', position: 0 });
+  });
+
+  it('completely unplayed (no updatedAt, no position) → first episode', () => {
+    const episodes = [
+      ep(1, 1, 1, null),
+      ep(2, 1, 2, progress({ position: 0, updatedAt: 0 })), // 0/null 一律非触碰
     ];
     expect(resolveSeriesResume(episodes)).toMatchObject({ itemId: 1, reason: 'start', position: 0 });
   });

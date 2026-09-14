@@ -14,7 +14,8 @@
  * 剧集主按钮算法 = §12.2 的 1–4 规则，纯函数、表驱动可测：
  *   1. 最近播放单集未完成 → 续播该集该位置；
  *   2. 已完成且存在下一集 → 下一集从 0；
- *   3. 无历史 → 排序后第一集（含特别篇 S0 排最前）；
+ *   3. 无有效历史 → 若有「触碰过」的集（任何 >0 进度/播放时间戳，
+ *      即使不足 30s）→ 最近触碰的那集从 0；完全没有 → 第一集；
  *   4. 全部完成 → 重播第一集（reason 'replay'，UI 负责确认文案）。
  */
 
@@ -102,8 +103,23 @@ export function resolveSeriesResume(episodes: ResumeEpisodeInput[]): ResumeTarge
   // 「下一集」推导，§12.2 规则 2）；updatedAt 缺省排最后。
   const watched = sorted.filter((entry) => hasWatchHistory(entry.progress));
   if (watched.length === 0) {
-    // 规则 3：无历史 → 第一集未播放内容。第一集若已看完（如 <30s 的
-    // 脏数据不算看完，真实看完走 watched 分支）从 0 正常覆盖。
+    // 规则 3：无有效历史（全部 <30s 或 0/null）。
+    // 若有任何「触碰过」的集（哪怕只看了 7 秒）→ 从最近触碰的那集
+    // 从 0 开始（按钮文案对应实际集数，绝不对齐到第一集）；
+    // 完全没有 → 第一集。
+    const touched = sorted.filter(
+      (entry) =>
+        (typeof entry.progress?.position === 'number' && entry.progress.position > 0) ||
+        (typeof entry.progress?.updatedAt === 'number' && entry.progress.updatedAt > 0)
+    );
+    if (touched.length > 0) {
+      const lastTouched = touched.reduce((acc, entry) => {
+        const a = acc.progress?.updatedAt ?? -1;
+        const b = entry.progress?.updatedAt ?? -1;
+        return b > a ? entry : acc;
+      }, touched[0]);
+      return toTarget(lastTouched, 0, 'start');
+    }
     const first = sorted[0];
     return toTarget(first, 0, 'start');
   }
