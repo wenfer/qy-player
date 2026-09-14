@@ -42,6 +42,58 @@ afterAll(() => {
   for (const dir of tmpRoots) rmSync(dir, { recursive: true, force: true });
 });
 
+describe('music tables (migration 007)', () => {
+  it('creates music/playlist tables with business-key uniqueness', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    expect(getVersion(db)).toBe(7);
+    const names = tableNames(db);
+    expect(names).toEqual(expect.arrayContaining(['music_tracks', 'music_cue_entries', 'playlists', 'playlist_items']));
+    db.prepare(
+      "INSERT INTO library_sources (kind, name, root) VALUES ('local', '音乐库', '/music')"
+    ).run();
+    const srcId = db.prepare("SELECT id FROM library_sources WHERE name = '音乐库'").get() as { id: number };
+    const ins = db.prepare(
+      "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint) VALUES (?, ?, ?, ?, ?)"
+    );
+    ins.run(srcId.id, 'a.mp3', '/music/a.mp3', '曲一', 'f1');
+    expect(() => ins.run(srcId.id, 'a.mp3', '/music/a.mp3', '重复', 'f2')).toThrow();
+    // 服务器音频业务键独立于本地键
+    db.prepare(
+      "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint) VALUES ('i1', 'jellyfin', 7, '流媒体曲', 'f3')"
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint) VALUES ('i1', 'jellyfin', 7, '重复', 'f4')"
+        )
+        .run()
+    ).toThrow();
+  });
+
+  it('cascades playlist items and cue entries on delete', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    db.prepare(
+      "INSERT INTO music_tracks (source_id, source_key, title, fingerprint) VALUES (NULL, 'x.flac', '外置', 'f5')"
+    ).run();
+    const trackId = (db.prepare('SELECT id FROM music_tracks LIMIT 1').get() as { id: number }).id;
+    db.prepare("INSERT INTO playlists (name) VALUES ('我的最爱')").run();
+    const plId = (db.prepare('SELECT id FROM playlists LIMIT 1').get() as { id: number }).id;
+    db.prepare(
+      "INSERT INTO playlist_items (playlist_id, position, item_ref) VALUES (?, 0, 'music:track:' || ?)"
+    ).run(plId, trackId);
+    db.prepare(
+      "INSERT INTO music_cue_entries (track_id, position, title, start) VALUES (?, 0, '第一轨', 0.0)"
+    ).run(trackId);
+    expect((db.prepare('SELECT COUNT(*) c FROM playlist_items').get() as { c: number }).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM music_cue_entries').get() as { c: number }).c).toBe(1);
+    // 删除歌单 → 项级联；删除音轨 → cue 级联
+    db.prepare('DELETE FROM playlists').run();
+    db.prepare('DELETE FROM music_tracks').run();
+    expect((db.prepare('SELECT COUNT(*) c FROM playlist_items').get() as { c: number }).c).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) c FROM music_cue_entries').get() as { c: number }).c).toBe(0);
+  });
+});
+
 function tableNames(db: Database.Database): string[] {
   return (
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{
@@ -57,7 +109,7 @@ function getVersion(db: Database.Database): number {
 describe('skip_overrides (migration 006)', () => {
   it('applies migration 006 and round-trips series-scope overrides', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(6);
+    expect(getVersion(db)).toBe(7);
     const storage = createStorage(db);
     // 初次无设定
     expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toBeNull();
@@ -112,7 +164,7 @@ describe('getWatchHistory localOnly filter', () => {
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(6);
+    expect(getVersion(db)).toBe(7);
     const tables = tableNames(db);
     for (const table of CATALOG_TABLES) expect(tables).toContain(table);
     for (const table of LEGACY_TABLES) expect(tables).toContain(table);
@@ -141,7 +193,7 @@ describe('catalog migrations (005)', () => {
 
     // Reopen through the normal path: 005 + 006 both apply (append-only chain).
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(6);
+    expect(getVersion(db)).toBe(7);
     expect((db.prepare('SELECT COUNT(*) AS n FROM local_media').get() as { n: number }).n).toBe(1);
     expect((db.prepare('SELECT position FROM playback_progress').get() as { position: number }).position).toBe(600);
 

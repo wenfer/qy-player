@@ -6,18 +6,19 @@
 
 ## 待办
 
-### QYP3-001 迁移 007：音乐目录域与歌单表 `[ ]`
+### QYP3-001 迁移 007：音乐目录域与歌单表 `[x]`
 - 依赖：—
 - 内容：music_tracks / music_cue_entries / playlists / playlist_items；
   追加式 migration；upsert 按 (source, path|itemId)；fingerprint 去重
 - 验收：migration 测试（v6 fixture → v7）；FK 级联与索引用例
-- Evidence：
+- Evidence: `npm test -- --run tests/main/storage/catalog-migrations.test.ts` → 12 用例全绿（新增音乐表唯一键 + FK 级联 2 例）；version v6→v7 三处断言更新
 
-### QYP3-002 音频后缀白名单 + 本地扫描分类扩展 `[ ]`
+### QYP3-002 音频后缀白名单 + 本地扫描分类扩展 `[x]`
 - 依赖：001
-- 内容：classifier 识别音频；扫描入库 music_tracks（含标签占位）
-- 验收：fixture 目录含音频/视频/封面/歌词混排，分类正确
-- Evidence：
+- 内容：classifier 识别音频（AUDIO_EXTENSIONS 23 后缀 + audio 分支 +
+  audioInfoOf 文件名启发式：曲目号/「歌手 - 标题」约定）
+- 验收：classifier 用例（混排/不受 video 行为影响）；入库在 QYP3-008 前由 003 复用
+- Evidence: `npm test -- --run tests/main/library-scanner` → 55 例全绿；全量 640/51
 
 ### QYP3-003 WebDAV 音频扫描 `[ ]`
 - 依赖：002

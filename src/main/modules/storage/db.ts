@@ -270,7 +270,75 @@ const MIGRATIONS = [
     UNIQUE(server_type, server_id, scope, key)
   );
   `,
+
+  // Migration 007: 三期音乐目录域 + 歌单。音频条目独立建表（不进
+  // catalog_items，视频/音频语义差异大：无季集/父子结构）；歌单引用
+  // MediaRef（provider+owner+itemId）或本地路径，缺失项允许占位。
+  `
+  CREATE TABLE IF NOT EXISTS music_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER REFERENCES library_sources(id) ON DELETE CASCADE,
+    -- 本地/WebDAV 条目必填（与 path 关联）；服务器音频条目为 NULL（业务键 = item_id）
+    source_key TEXT,
+    path TEXT,
+    item_id TEXT,
+    server_type TEXT,
+    server_id INTEGER,
+    title TEXT NOT NULL,
+    artist TEXT,
+    album TEXT,
+    albumartist TEXT,
+    track_no INTEGER,
+    disc_no INTEGER,
+    year INTEGER,
+    duration REAL,
+    codec TEXT,
+    bitrate INTEGER,
+    has_cover INTEGER NOT NULL DEFAULT 0,
+    has_lyrics INTEGER NOT NULL DEFAULT 0,
+    fingerprint TEXT NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+  -- 业务键唯一（部分索引）：本地/WebDAV 按 (source_id, source_key)；
+  -- 服务器音频按 (server_type, server_id, item_id)
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_music_local
+    ON music_tracks(source_id, source_key) WHERE source_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_music_remote
+    ON music_tracks(server_type, server_id, item_id) WHERE item_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_music_tracks_album
+    ON music_tracks(albumartist, album, disc_no, track_no);
+  CREATE INDEX IF NOT EXISTS idx_music_tracks_artist ON music_tracks(artist);
+
+  CREATE TABLE IF NOT EXISTS music_cue_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL REFERENCES music_tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    start REAL NOT NULL,
+    end REAL,
+    UNIQUE(track_id, position)
+  );
+
+  CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
+
+  CREATE TABLE IF NOT EXISTS playlist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    item_ref TEXT NOT NULL,
+    added_at INTEGER DEFAULT (unixepoch()),
+    UNIQUE(playlist_id, position)
+  );
+  CREATE INDEX IF NOT EXISTS idx_playlist_items_pos ON playlist_items(playlist_id, position);
+  `,
 ];
+
 
 let dbInstance: Database.Database | null = null;
 

@@ -236,6 +236,35 @@ function makeSource(): number {
   return repo.createSource({ kind: 'local', name: '测试库', root: '/fake-root' });
 }
 
+describe('classifier audio (QYP3-002)', () => {
+  it('classifies audio extensions and parses filename conventions', () => {
+    const c1 = classifyPath('周杰伦 - 晴天.mp3');
+    expect(c1.fileClass).toBe('audio');
+    expect(c1.audio).toEqual({ title: '晴天', artist: '周杰伦' });
+
+    const c2 = classifyPath('01 - 周杰伦 - 晴天.flac');
+    expect(c2.audio).toEqual({ title: '晴天', artist: '周杰伦', trackNo: 1 });
+
+    const c3 = classifyPath('07. 晴天.m4a');
+    expect(c2.fileClass).toBe('audio');
+    expect(c3.audio).toEqual({ title: '晴天', trackNo: 7 });
+
+    const c4 = classifyPath('晴天.flac');
+    expect(c4.audio).toEqual({ title: '晴天' });
+
+    const c5 = classifyPath('专辑/2004 - 七里香/03 - 晴天.ape');
+    expect(c5.fileClass).toBe('audio');
+    expect(c5.audio).toEqual({ title: '晴天', trackNo: 3 });
+  });
+
+  it('ignores sample/extras audio and keeps video behavior unchanged', () => {
+    expect(classifyPath('sample.flac').fileClass).toBe('ignored');
+    expect(classifyPath('trailer - 编外.mp3').fileClass).toBe('ignored');
+    expect(classifyPath('movie.mp4').fileClass).toBe('video');
+    expect(classifyPath('readme.txt').fileClass).toBe('ignored');
+  });
+});
+
 describe('local scan driver', () => {
   it('builds series → season → episode hierarchy', async () => {
     const sourceId = makeSource();

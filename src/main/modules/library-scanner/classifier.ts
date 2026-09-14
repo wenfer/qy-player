@@ -13,13 +13,21 @@ export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set([
   '.divx', '.f4v',
 ]);
 
+// 音频后缀（三期 QYP3-002）：与 mpv/FFmpeg 支持对齐，宁多勿漏；
+// Chromium 直连格式另由 playback-engine 判定（ADR-0007），此处只管入库。
+export const AUDIO_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.wma',
+  '.ape', '.wv', '.tta', '.tak', '.aiff', '.aif', '.alac', '.dsf', '.dff',
+  '.mpc', '.mka', '.ac3', '.dts', '.amr', '.au', '.ra',
+]);
+
 const NFO_EXTENSIONS: ReadonlySet<string> = new Set(['.nfo']);
 const SIDECAR_EXTENSIONS: ReadonlySet<string> = new Set([
   '.jpg', '.jpeg', '.png', '.tbn', // artwork
   '.srt', '.ass', '.ssa', '.sub', '.smi', // subtitles
 ]);
 
-export type MediaFileClass = 'video' | 'nfo' | 'sidecar' | 'ignored';
+export type MediaFileClass = 'video' | 'audio' | 'nfo' | 'sidecar' | 'ignored';
 
 export interface EpisodeInfo {
   season: number;
@@ -40,6 +48,16 @@ export interface Classification {
   videoTitle?: string;
   /** 'high' = trusted movie/episode parse; 'low' = generic video. */
   confidence: 'high' | 'low';
+  /** Audio classification (QYP3-002). Present only for fileClass 'audio'. */
+  audio?: AudioInfo;
+}
+
+export interface AudioInfo {
+  title: string;
+  /** "Artist - Title" convention; absent when no separator found. */
+  artist?: string;
+  /** Leading track number ("01 - Title" / "01. Title" / "01 Title"). */
+  trackNo?: number;
 }
 
 /** Season-directory segment: "Season 01", "S1", "Specials" → 0. */
@@ -100,9 +118,37 @@ function extensionOf(path: string): string {
 
 function fileClassOf(ext: string): MediaFileClass {
   if (VIDEO_EXTENSIONS.has(ext)) return 'video';
+  if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
   if (NFO_EXTENSIONS.has(ext)) return 'nfo';
   if (SIDECAR_EXTENSIONS.has(ext)) return 'sidecar';
   return 'ignored';
+}
+
+/**
+ * Audio filename heuristics (QYP3-002). Supported patterns, in order:
+ *   "01 - Artist - Title.flac"   (track + artist + title)
+ *   "01 - Title.flac"            (track + title)
+ *   "Artist - Title.flac"        (artist + title)
+ *   "Title.flac"                 (title only)
+ * Tags (QYP3-004) always win over these guesses at ingest time.
+ */
+export function audioInfoOf(base: string): AudioInfo {
+  let rest = base;
+  let trackNo: number | undefined;
+  const lead = rest.match(/^(\d{1,3})[\s._-]+(.*)$/);
+  if (lead) {
+    trackNo = Number(lead[1]);
+    rest = lead[2];
+  }
+  const parts = rest.split(/\s+-\s+/);
+  if (parts.length >= 2) {
+    const artist = cleanTitle(parts[0]);
+    const title = cleanTitle(parts.slice(1).join(' - '));
+    if (artist && title) {
+      return { title, artist, ...(trackNo !== undefined ? { trackNo } : {}) };
+    }
+  }
+  return { title: cleanTitle(rest) || base, ...(trackNo !== undefined ? { trackNo } : {}) };
 }
 
 /** Extract year from a title-ish string; returns the cleaned remainder. */
@@ -149,6 +195,18 @@ export function classifyPath(relativePath: string): Classification {
   const dirs = segments.slice(0, -1);
   const ext = extensionOf(fileName);
   const fileClass = fileClassOf(ext);
+
+  // 音频（QYP3-002）：文件名启发式；目录结构仅保留专辑线索给扫描器
+  //（parent 目录名 = 专辑候选，由 ingest 决定，分类器不猜测）。
+  if (fileClass === 'audio') {
+    const base = fileName.slice(0, fileName.length - ext.length);
+    const isSampleAudio = SAMPLE.test(base);
+    if (!isSampleAudio && !EXTRA_MARKERS.some((re) => re.test(base))) {
+      return { fileClass, isSample: false, isExtra: false, confidence: 'low', audio: audioInfoOf(base) };
+    }
+    return { fileClass: 'ignored', isSample: isSampleAudio, isExtra: false, confidence: 'low' };
+  }
+
   const base = fileClass === 'video' ? fileName.slice(0, fileName.length - ext.length) : '';
 
   const isSample = fileClass === 'video' && SAMPLE.test(base);
