@@ -1,8 +1,8 @@
 # ADR-0005: mpv 探测方案（0.29 / 0.32）
 
-- 状态：Proposed（QYP2-017 spike 结论；QYP2-018 落地 MediaProbe 服务后复核）
+- 状态：已落地（MediaProbe 服务随 v1.1.0 发布；spike 结论见下表）
 - 日期：2026-09-11
-- 相关：计划 §10、QYP2-017、QYP2-018、`src/main/modules/media-probe/mpv-probe-spike.ts`
+- 相关：`src/main/modules/media-probe/`（MediaProbe 服务与 spike 脚本）
 
 ## 背景
 
@@ -31,7 +31,7 @@
 | 超时 | 15s 总量（socket 等待 ≤5s，demux settle ≤3s） | 挂起属性用 deadline 竞速打断 |
 | stdout | 64 KiB 上限收集 | 诊断用，不无界 |
 | stderr | 静默 drain | 与播放进程一致 |
-| 并发 | 1（QYP2-018 服务层串行队列） | plan §16.4 probe ≤ 1 |
+| 并发 | 1（MediaProbe 服务层串行队列） | probe ≤ 1 |
 
 ### 版本兼容回退表
 
@@ -49,12 +49,12 @@
 
 `mpv-version` 属性用于记录版本；读不到记 `unknown`，不阻断探测。
 
-## 缓存指纹的已知弱化（QYP2-019 注记）
+## 缓存指纹的已知弱化
 
 在线（Jellyfin/Emby）详情页无本地 size/mtime/ETag，probe 缓存指纹退化为 `RunTimeTicks:Size`（服务器元数据）。文件被原地替换而时长与大小不变时，TTL（6h）内可能读到旧缓存；概率低，接受。transcode 模式的 URL 每次带新 PlaySessionId，缓存对其无效——probe 固定用 direct 模式（HLS 容器信息也有限），缓存语义仅对 direct/本地/WebDAV 成立。
 
 ## 后果
 
-- QYP2-018 的 MediaProbe 服务复用 `spawnProbeProcess` + 回退表 + `assembleProbeResult`，加缓存（size+mtime/ETag 版本）与串行队列。
+- MediaProbe 服务复用 `spawnProbeProcess` + 回退表 + `assembleProbeResult`，加缓存（size+mtime/ETag 版本）与串行队列。
 - 手工验证仍需在两台目标机各跑一次真实 mpv（spike 测试用 socket 级 fake 覆盖逻辑，覆盖不了真实属性名差异）。
 - 若未来 mpv 属性再次改名，只需在回退表追加候选，无需改编排逻辑。

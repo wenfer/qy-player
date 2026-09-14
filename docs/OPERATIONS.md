@@ -1,6 +1,6 @@
-# 二期运维说明（PHASE2-OPERATIONS）
+# 运维说明
 
-面向用户/运维的运行时说明。对应 QYP2-026～037 交付的能力。
+面向用户/运维的运行时说明。
 
 ## 1. 插件与刮削
 
@@ -24,7 +24,7 @@
 | 图片 | `userData/images/` | mtime-LRU，配额清扫 | `CacheManager.sweep` |
 | **人工字幕** | `userData/subtitles/<itemId>/` | — | **受保护，永不清扫** |
 
-## 3. 并发与速率预算（§16.4，常量单源 `cache-manager.ts`）
+## 3. 并发与速率预算（常量单源 `cache-manager.ts`）
 
 | 场景 | 上限 |
 |---|---|

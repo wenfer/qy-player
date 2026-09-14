@@ -1,8 +1,8 @@
 # ADR-0006: 豆瓣数据入口评估与发布门禁
 
-- 状态：Proposed（QYP2-030 门禁产出；**人工产品/法律/技术评审通过前，豆瓣插件保持「已内置但不可启用」**）
+- 状态：Proposed（**人工产品/法律/技术评审通过前，豆瓣插件保持「已内置但不可启用」**）
 - 日期：2026-09-11
-- 相关：计划 §2（红线）、§11.4（豆瓣内置插件）、§16.4（速率预算）、QYP2-030、QYP2-031；ADR-0001（`catalog_external_ids` 表含豆瓣 provider）
+- 相关：`src/main/plugins/douban/`（契约与实现工厂）、`src/main/plugins/tmdb/`（可参考的已启用插件）、ADR-0001（`catalog_external_ids` 表含豆瓣 provider）
 
 ## 背景
 
@@ -51,8 +51,8 @@
 
 1. 插件 manifest 标记实验性，设置页固定显示「实验性」徽标，默认**关闭**；
 2. 上线前置条件：人工产品/法律/技术评审三方签认（本 ADR 状态从 Proposed → Accepted）；
-3. 未签认前：豆瓣插件**不注册进 registry、无任何启用开关**（QYP2-031 落地了实现工厂 `buildDoubanPlugin`，但接线注册仍属签认后的动作；contract test 以源码级静态检查固化「无引用」）；
-4. 实现（QYP2-031）必须满足 §11.4 全部降级条款：结构变化 → `UPSTREAM_CHANGED` 并暂停批量任务，绝不用空结果覆盖目录；限流 → `RATE_LIMITED`（任务级失败隔离、pending 可恢复；重试入口由 QYP2-032 的任务 UI 提供）；任何失败不阻断播放。
+3. 未签认前：豆瓣插件**不注册进 registry、无任何启用开关**（实现工厂 `buildDoubanPlugin` 已就绪，接线注册属签认后的动作；contract test 以源码级静态检查固化「无引用」）；
+4. 实现必须满足全部降级条款：结构变化 → `UPSTREAM_CHANGED` 并暂停批量任务，绝不用空结果覆盖目录；限流 → `RATE_LIMITED`（任务级失败隔离、pending 可恢复，重试入口为刮削任务页）；任何失败不阻断播放。
 
 ## 结构契约（离线可检测）
 
@@ -60,7 +60,7 @@
 
 - 端点常量与 host allowlist：API host 仅 `movie.douban.com`；图片 host
   预留 `*.doubanio.com`（suggest/JSON-LD 的 `img` 字段指向该域，仅限海报
-  URL 读取，QYP2-031 接线时注册进 allowlist）；
+  URL 读取，接线注册时写入 allowlist）；
 - `DoubanSuggestItem` / `DoubanDetailLd` 响应形状类型 + 必需字段锚点常量；
 - 纯函数校验器（`validateDoubanSuggestPayload` / `validateDoubanDetailLd`），偏差即返回 `UPSTREAM_CHANGED` 语义的结构问题列表。
 
@@ -68,6 +68,6 @@
 
 ## 后果
 
-- QYP2-031 在上述契约上实现安全降级路径；实现本身也仅在评审签认后才可注册启用（registry 无 douban 条目是门禁的一部分，contract test 防回归）。
+- 安全降级路径已实现但未注册启用；registry 无 douban 条目是门禁的一部分，contract test 防回归。
 - 若人工评审否决入口 ④：删除 types.ts 中的实验契约与 fixture，ADR 状态改为 Rejected，`catalog_external_ids` 不落 `douban` provider——不留下"看似可用"的死代码。
 - 本 ADR 不引入任何新运行时依赖。

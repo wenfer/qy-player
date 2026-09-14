@@ -113,10 +113,13 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 - CDP 调试：`scripts/dev.js` 可临时加 `--remote-debugging-port=9222`，配 `npm run test:ui`
 - 用户数据库在 `~/.config/qy-player/qy-player.db`，可用 sqlite3 直接查证数据问题
 
-## 二期运维与测试矩阵
+## 文档索引
 
-- 运行时说明（缓存/并发预算/诊断/回滚）：`docs/PHASE2-OPERATIONS.md`
-- 回归与手工矩阵（含目标机必跑清单）：`docs/PHASE2-TEST-MATRIX.md`
+- 运行时说明（缓存/并发预算/诊断/回滚）：`docs/OPERATIONS.md`
+- 发布后待目标机验证清单：`docs/TARGET-VERIFY.md`
+- 架构决策记录：`docs/decisions/`（0001 MediaRef/目录域、0005 mpv probe、
+  0006 豆瓣门禁）
+- mpv 老系统编译：`docs/BUILD-MPV.md`
 - 版本历史：`CHANGELOG.md`
 - 发布流程：tag 由人工批准发布说明后创建；GitHub Actions 全格式打包
   （依赖 `rpm`、`libarchive-tools`）

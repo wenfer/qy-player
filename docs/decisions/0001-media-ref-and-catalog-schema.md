@@ -2,7 +2,7 @@
 
 - 状态: Proposed（人工批准后转 Accepted）
 - 日期: 2025-01（二期 Phase A）
-- 关联: `tasks/plan.md` §4.1、§5、§18；任务 QYP2-002 / QYP2-003 / QYP2-004
+- 关联: `src/shared/types/catalog.ts`（MediaRef 契约）、`src/main/modules/storage/db.ts`（catalog migration）
 
 ## 背景
 
@@ -52,5 +52,5 @@ type MediaRef =
 ## 后果
 
 - 正面：来源可扩展（未来加 provider 只加枚举分支）；进度/历史可跨重命名存活；多来源同 id 不串库。
-- 负面/成本：renderer 与主进程的既有 `mediaType+mediaId` 调用点需在 QYP2-011/015 逐步切换；过渡期两套标识并存，必须由 PlaybackResolver 统一收口（QYP2-015）。
-- 中立：`catalog` 分支的 `sourceId` 对应 `library_sources.id`，来源删除后其 catalog 记录级联失效（FK ON DELETE 策略在 QYP2-003 migration 中落实）。
+- 负面/成本（已解决）：renderer 与主进程的 `mediaType+mediaId` 调用点已由 PlaybackResolver 统一收口。
+- 中立：`catalog` 分支的 `sourceId` 对应 `library_sources.id`，来源删除后其 catalog 记录级联失效（FK ON DELETE 已在 migration 中落实）。
