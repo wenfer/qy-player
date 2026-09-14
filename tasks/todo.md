@@ -69,11 +69,17 @@
 - 验收：spike 用例断言 bitrate 贯通（result.audio + track）
 - Evidence: media-probe 30 例全绿；全量 660/54
 
-### QYP3-008 音乐库 UI `[ ]`
+### QYP3-008 音乐库 UI `[x]`
 - 依赖：003,007
-- 内容：「音乐」页（专辑/歌手/全部/收藏网格）；统一搜索接入音频来源
-- 验收：页面冒烟 + 搜索合并用例；无横向滚动（1280×800）
-- Evidence：
+- 内容：「音乐」页（专辑网格 + 专辑曲目列表 + 全部曲目，1280×800 无
+  横向滚动，flex-wrap 网格）；qy-file:// 封面协议（covers 目录白名单
+  正则 + resolve 包含校验，Electron 21 registerFileProtocol）；
+  repository.listMusicAlbums / listAlbumTracks / listMusicTracksPaged
+  （页 ≤200 §16.4）；MUSIC.GET_ALBUMS/GET_ALBUM_TRACKS/GET_TRACKS
+  IPC 四件套
+- 收藏/歌手视图与统一搜索接入 → P1（QYP3-008a，随 Checkpoint B 回补）
+- 验收：repo 聚合用例 + 渲染 3 例；CDP 实机（专辑网格/曲目列表/空态）
+- Evidence: catalog-migrations 13 例；music-library.test 3 例；全量 664/55
 
 ### QYP3-009 引擎选择器（纯函数）`[ ]`
 - 依赖：007

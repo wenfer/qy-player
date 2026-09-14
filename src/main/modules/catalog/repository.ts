@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { CatalogKind, SourceKind } from '../../../shared/types';
+import type { MusicAlbumRow, MusicTrackRow } from '../../../shared/types/music';
 
 /**
  * Parameterized data access for the phase-2 catalog schema (migration 005).
@@ -441,6 +442,68 @@ export function createCatalogRepository(db: Database.Database) {
         db.prepare('DELETE FROM music_cue_entries WHERE track_id = ?').run(trackId);
         for (const e of entries) insert.run(trackId, e.position, e.title, e.start, e.end);
       })();
+    },
+
+    /**
+     * QYP3-008：专辑聚合（本地 + WebDAV 音频源；页 ≤200，§16.4）。
+     * 排序 albumartist → album；cover_track_id 取专辑内第一条有封面的音轨。
+     */
+    listMusicAlbums(sourceIds: number[], limit = 200): MusicAlbumRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT albumartist, album,
+                  COUNT(*) AS track_count,
+                  SUM(duration) AS total_duration,
+                  MIN(year) AS year,
+                  (SELECT t.id FROM music_tracks t
+                    WHERE t.source_id IN (${placeholders})
+                      AND t.albumartist IS music_tracks.albumartist
+                      AND t.album IS music_tracks.album
+                      AND t.has_cover = 1
+                    ORDER BY t.disc_no, t.track_no, t.id
+                    LIMIT 1) AS cover_track_id
+           FROM music_tracks
+           WHERE source_id IN (${placeholders})
+           GROUP BY albumartist, album
+           ORDER BY albumartist, album
+           LIMIT ?`
+        )
+        .all(...sourceIds, ...sourceIds, limit) as MusicAlbumRow[];
+    },
+
+    /** QYP3-008：单专辑曲目（按碟号/音轨号排序）。 */
+    listAlbumTracks(sourceIds: number[], albumartist: string, album: string): MusicTrackRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                  year, duration, codec, bitrate, has_cover, has_lyrics
+           FROM music_tracks
+           WHERE source_id IN (${placeholders})
+             AND albumartist = ?
+             AND album = ?
+           ORDER BY disc_no, track_no, title`
+        )
+        .all(...sourceIds, albumartist, album) as MusicTrackRow[];
+    },
+
+    /** 全部曲目（分页，页 ≤200，§16.4）。 */
+    listMusicTracksPaged(sourceIds: number[], offset = 0, limit = 200): MusicTrackRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                  year, duration, codec, bitrate, has_cover, has_lyrics
+           FROM music_tracks
+           WHERE source_id IN (${placeholders})
+           ORDER BY albumartist, album, disc_no, track_no
+           LIMIT ? OFFSET ?`
+        )
+        .all(...sourceIds, limit, offset) as MusicTrackRow[];
     },
 
     listMusicTracks(sourceId: number): Array<{ source_key: string; fingerprint: string }> {

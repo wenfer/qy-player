@@ -76,6 +76,35 @@ describe('music tables (migration 007)', () => {
     ).toThrow();
   });
 
+  it('album aggregation and track listing (QYP3-008)', () => {
+    const db2 = openDatabaseAtPath(makeDbPath());
+    const storage2 = createStorage(db2);
+    const repo2 = createCatalogRepository(db2);
+    const srcId2 = repo2.createSource({ kind: 'local', name: '音乐库', root: '/music' });
+    // 三条音轨两张专辑 + 一条有封面
+    repo2.upsertMusicTrack({ sourceId: srcId2, sourceKey: 'a.mp3', path: 'a.mp3', title: '以父之名', artist: '周杰伦', album: '叶惠美', albumartist: '周杰伦', trackNo: 1, duration: 423, hasCover: true, codec: 'mp3', fingerprint: 'f1' });
+    repo2.upsertMusicTrack({ sourceId: srcId2, sourceKey: 'b.mp3', path: 'b.mp3', title: '晴天', artist: '周杰伦', album: '叶惠美', albumartist: '周杰伦', trackNo: 3, duration: 269, codec: 'mp3', fingerprint: 'f2' });
+    repo2.upsertMusicTrack({ sourceId: srcId2, sourceKey: 'c.mp3', path: 'c.mp3', title: '孤曲', album: undefined, albumartist: undefined, codec: 'mp3', fingerprint: 'f3' });
+    void storage2;
+    const albums = repo2.listMusicAlbums([srcId2]);
+    expect(albums).toHaveLength(2);
+    const ye = albums.find((a) => a.album === '叶惠美')!;
+    expect(ye.track_count).toBe(2);
+    expect(ye.cover_track_id).not.toBeNull();
+    const unk = albums.find((a) => a.album === null)!;
+    expect(unk.track_count).toBe(1);
+    expect(unk.cover_track_id).toBeNull();
+    const tracks = repo2.listAlbumTracks([srcId2], '周杰伦', '叶惠美');
+    expect(tracks.map((t2) => t2.title)).toEqual(['以父之名', '晴天']);
+    expect(tracks[0].has_cover).toBe(1);
+    const paged = repo2.listMusicTracksPaged([srcId2], 0, 200);
+    expect(paged).toHaveLength(3);
+    expect(repo2.listMusicTracksPaged([srcId2], 2, 1)).toHaveLength(1);
+    // 跨来源隔离：另一来源无音轨
+    const other = repo2.createSource({ kind: 'local', name: '其他库', root: '/x' });
+    expect(repo2.listMusicAlbums([other])).toEqual([]);
+  });
+
   it('cascades playlist items and cue entries on delete', () => {
     const db = openDatabaseAtPath(makeDbPath());
     db.prepare(

@@ -18,6 +18,11 @@ export const IPC_CHANNELS = {
   DIAGNOSTICS: {
     SUMMARY: 'diagnostics:summary',
   },
+  MUSIC: {
+    GET_ALBUMS: 'music:get-albums',
+    GET_ALBUM_TRACKS: 'music:get-album-tracks',
+    GET_TRACKS: 'music:get-tracks',
+  },
   UNIFIED: {
     CONTINUE_WATCHING: 'unified:continue-watching',
     RECENT: 'unified:recent',

@@ -305,6 +305,39 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   // Skip intro/outro settings (剧集限定；main 侧每次命中实时读取)。
   ipcMain.handle(IPC_CHANNELS.APP.GET_VERSION, () => ok({ version: app.getVersion() }));
 
+  // 音乐库（QYP3-008）：来源限定 local/webdav（服务器音频三期未接查询）
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_ALBUMS, (_event, args: { limit?: number }) => {
+    const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
+    const sourceIds = catalogRepo
+      .listSources()
+      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+      .map((s) => s.id);
+    return ok({ albums: catalogRepo.listMusicAlbums(sourceIds, limit) });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.GET_ALBUM_TRACKS,
+    (_event, args: { albumartist: string; album: string }) => {
+      const sourceIds = catalogRepo
+        .listSources()
+        .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+        .map((s) => s.id);
+      return ok({
+        tracks: catalogRepo.listAlbumTracks(sourceIds, args.albumartist, args.album),
+      });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_TRACKS, (_event, args: { offset?: number; limit?: number }) => {
+    const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
+    const offset = Math.max(Number(args?.offset) || 0, 0);
+    const sourceIds = catalogRepo
+      .listSources()
+      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+      .map((s) => s.id);
+    return ok({ tracks: catalogRepo.listMusicTracksPaged(sourceIds, offset, limit) });
+  });
+
   ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
     return ok({
       skipIntro: storage.getConfig('playback.skipIntro') !== 'false',

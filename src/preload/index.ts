@@ -154,6 +154,12 @@ const electronAPI = {
   setAutoNextEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.SET_ENABLED, enabled),
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP.GET_VERSION),
   // Skip intro/outro (剧集；segments 主进程拉取，开关仅控制命中行为)
+  // 音乐库（QYP3-008）：专辑聚合/专辑曲目/全部曲目（分页 ≤200）
+  getMusicAlbums: (limit = 200) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ALBUMS, { limit }),
+  getAlbumTracks: (albumartist: string, album: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ALBUM_TRACKS, { albumartist, album }),
+  getMusicTracks: (offset = 0, limit = 200) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_TRACKS, { offset, limit }),
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.SET_SETTING, { key, enabled }),

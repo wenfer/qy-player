@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, protocol } from 'electron';
 import { resolve } from 'path';
 import { PlayerCore } from './modules/player-core';
 import { registerIpcHandlers, playbackStateManager } from './ipc';
@@ -114,6 +114,13 @@ function createWindow(): BrowserWindow {
   return mainWindow;
 }
 
+// qy-file 协议（QYP3-008）：只服务 covers 目录（内嵌封面提取结果）。
+// 先注册特权方案（http 源不能加载 file://；自定义协议必须标准/安全），
+// whenReady 后注册处理器，路径严格限定在 coversDir 内（防目录穿越）。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'qy-file', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
 app.whenReady().then(() => {
   // 单实例锁：防止重复启动造成两个同名窗口（GNOME 窗口列表出现
   // 「QY Player<2>」计数、mpv/数据库竞争）。二次启动改为唤起已有窗口。
@@ -132,6 +139,24 @@ app.whenReady().then(() => {
   });
 
   registerIpcHandlers(player, () => mainWindow);
+
+  // qy-file://covers/<name> → coversDir 内的封面文件（严格限定，防穿越）
+  // Electron 21 API：registerFileProtocol（protocol.handle 是 25+）
+  {
+    const coversRoot = resolve(app.getPath('userData'), 'covers');
+    const sep = require('node:path').sep;
+    protocol.registerFileProtocol('qy-file', (request, callback) => {
+      try {
+        const m = new URL(request.url).pathname.match(/^\/covers\/([\w.-]+)$/);
+        if (!m) return callback({ error: -3 }); // ERR_FAILED
+        const target = resolve(coversRoot, m[1]);
+        if (!target.startsWith(coversRoot + sep)) return callback({ error: -3 });
+        callback(target);
+      } catch {
+        callback({ error: -3 });
+      }
+    });
+  }
 
   // Forward renderer console to main stdout
   ipcMain.on('renderer-console', (_event, level: string, message: string) => {
