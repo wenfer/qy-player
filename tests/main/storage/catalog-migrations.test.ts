@@ -55,16 +55,25 @@ describe('music tables (migration 007)', () => {
     const ins = db.prepare(
       "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint) VALUES (?, ?, ?, ?, ?)"
     );
-    ins.run(srcId.id, 'a.mp3', '/music/a.mp3', '曲一', 'f1');
-    expect(() => ins.run(srcId.id, 'a.mp3', '/music/a.mp3', '重复', 'f2')).toThrow();
+    // 业务键：owner_key UNIQUE（repository 计算单一来源）
+    db.prepare(
+      "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint, owner_key) VALUES (?, 'a.mp3', '/music/a.mp3', '曲一', 'f1', 'local:1:a.mp3')"
+    ).run(srcId.id);
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint, owner_key) VALUES (?, 'a.mp3', '/music/a.mp3', '重复', 'f2', 'local:1:a.mp3')"
+        )
+        .run(srcId.id)
+    ).toThrow();
     // 服务器音频业务键独立于本地键
     db.prepare(
-      "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint) VALUES ('i1', 'jellyfin', 7, '流媒体曲', 'f3')"
+      "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint, owner_key) VALUES ('i1', 'jellyfin', 7, '流媒体曲', 'f3', 'srv:jellyfin:7:i1')"
     ).run();
     expect(() =>
       db
         .prepare(
-          "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint) VALUES ('i1', 'jellyfin', 7, '重复', 'f4')"
+          "INSERT INTO music_tracks (item_id, server_type, server_id, title, fingerprint, owner_key) VALUES ('i1', 'jellyfin', 7, '重复', 'f4', 'srv:jellyfin:7:i1')"
         )
         .run()
     ).toThrow();
@@ -73,7 +82,7 @@ describe('music tables (migration 007)', () => {
   it('cascades playlist items and cue entries on delete', () => {
     const db = openDatabaseAtPath(makeDbPath());
     db.prepare(
-      "INSERT INTO music_tracks (source_id, source_key, title, fingerprint) VALUES (NULL, 'x.flac', '外置', 'f5')"
+      "INSERT INTO music_tracks (source_id, source_key, title, fingerprint, owner_key) VALUES (NULL, 'x.flac', '外置', 'f5', 'local:9:x.flac')"
     ).run();
     const trackId = (db.prepare('SELECT id FROM music_tracks LIMIT 1').get() as { id: number }).id;
     db.prepare("INSERT INTO playlists (name) VALUES ('我的最爱')").run();

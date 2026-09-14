@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { readFile } from 'fs/promises';
+import { open as openFile, readFile } from 'node:fs/promises';
 import { randomUUID } from 'crypto';
 import { basename, extname, join } from 'path';
 import { app } from 'electron';
@@ -1433,6 +1433,22 @@ function registerCatalogHandlers(
             // so a stored relative path can never escape the source root.
             readNfo: async (relativePath) =>
               readFile((adapter as LocalSourceAdapter).resolveInside(relativePath)),
+            // QYP3-004：本地音频读标签。只读头部 512 KiB（ID3v2/APIC/
+            // FLAC 元数据块都在头部；完整时长交给播放时 mpv/probe）
+            readAudio: async (entry) => {
+              const fh = (await openFile(
+                (adapter as LocalSourceAdapter).resolveInside(entry.relativePath),
+                'r'
+              )) as import('node:fs/promises').FileHandle;
+              try {
+                const len = Math.min(512 * 1024, (await fh.stat()).size);
+                const buf = Buffer.alloc(len);
+                await fh.read(buf, 0, len, 0);
+                return buf;
+              } finally {
+                await fh.close();
+              }
+            },
           });
     const controller = new ScanJobController({
       repo,

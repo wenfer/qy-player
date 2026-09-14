@@ -1,6 +1,7 @@
 import type { SourceAdapter, SourceEntry, ScanDriver } from '../library-sources/types';
 import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
+import { parseAudioTagsFromBuffer, type ParsedAudioTags } from './tag-parser';
 import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
 import { applyNfoMetadata } from '../metadata/metadata-merger';
 import type { MetadataValue, NfoMetadata, ProviderStore } from '../metadata/types';
@@ -199,12 +200,21 @@ export function createLocalScanDriver(deps: {
    * back to the local size:mtime format. Defaults to local behavior.
    */
   fingerprintOf?: (entry: SourceEntry) => string | undefined;
+  /**
+   * 音频标签读取（QYP3-004）：本地来源挂 fs 读取；WebDAV 不挂 →
+   * 只用文件名启发式（网络读全文件太贵，计划 §6）。
+   */
+  readAudio?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   // Existing files snapshot: cheap in-driver change detection without extra
   // repository queries per entry.
   const filesIndex = new Map<string, Pick<CatalogFileRow, 'fingerprint'>>(
     repo.listFilesBySource(sourceId).map((f) => [f.relative_path, { fingerprint: f.fingerprint }])
+  );
+  // 音频指纹基线（QYP3-003）：music_tracks 自持，与视频 catalog_files 分离。
+  const musicIndex = new Map<string, { fingerprint: string }>(
+    repo.listMusicTracks(sourceId).map((r) => [`audio:${r.source_key}`, r])
   );
   const seen = new Set<string>();
   // NFO enrichment state (per run): "<dir>:<stem>" → itemId (dir-qualified:
@@ -273,6 +283,52 @@ export function createLocalScanDriver(deps: {
       }
       // Other sidecar/ignored files are recognized but not indexed; image
       // sidecar display is a later task.
+      // 音频（QYP3-003）：入库 music_tracks；标签优先，WebDAV 无标签
+      // 读取钩子时回退文件名启发式（classifier audioInfoOf）。
+      if (parsed.fileClass === 'audio') {
+        if (parsed.isSample) return;
+        seen.add(entry.relativePath);
+        const audioFingerprint = fingerprintFor(entry);
+        const audioExisting = musicIndex.get(`audio:${entry.relativePath}`);
+        if (audioExisting && audioFingerprint && audioExisting.fingerprint === audioFingerprint) return;
+
+        let tags: ParsedAudioTags = {
+          hasCover: false,
+          format: 'unknown',
+          ...(parsed.audio ? { title: parsed.audio.title, artist: parsed.audio.artist, trackNo: parsed.audio.trackNo } : {}),
+        };
+        if (deps.readAudio) {
+          try {
+            const buf = await deps.readAudio(entry, signal);
+            if (buf) {
+              tags = parseAudioTagsFromBuffer(buf, parsed.audio);
+            }
+          } catch {
+            // 标签读取失败：文件名启发式结果已就位，扫描不中断。
+          }
+        }
+        const ext = entry.relativePath.split('.').pop()?.toLowerCase() ?? '';
+        const dirs = entry.relativePath.split('/').slice(0, -1);
+        repo.upsertMusicTrack({
+          sourceId,
+          sourceKey: entry.relativePath,
+          path: entry.relativePath,
+          title: tags.title ?? parsed.audio?.title ?? entry.relativePath.split('/').pop() ?? '未知曲目',
+          // 目录启发式：歌手 = 上上级目录、专辑 = 父目录（标签缺失时）
+          artist: tags.artist ?? parsed.audio?.artist ?? (dirs.length >= 2 ? dirs[dirs.length - 2] : undefined),
+          album: tags.album ?? (dirs.length >= 1 ? dirs[dirs.length - 1] : undefined),
+          albumartist: tags.albumartist,
+          trackNo: tags.trackNo ?? parsed.audio?.trackNo,
+          discNo: tags.discNo,
+          year: tags.year,
+          duration: tags.duration,
+          codec: ext || undefined,
+          hasCover: tags.hasCover,
+          hasLyrics: tags.lyrics !== undefined,
+          fingerprint: audioFingerprint,
+        });
+        return;
+      }
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
 
       seen.add(entry.relativePath);

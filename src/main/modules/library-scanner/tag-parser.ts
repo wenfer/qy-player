@@ -390,6 +390,14 @@ export async function parseAudioTags(
   } catch {
     return mergeFilenameFallback({ hasCover: false, format: 'unknown' }, fallback);
   }
+  return parseAudioTagsFromBuffer(buf, fallback);
+}
+
+/** 缓冲区入口：扫描器已经把字节读在手里时避免二次 IO。 */
+export function parseAudioTagsFromBuffer(
+  buf: Buffer,
+  fallback?: { title?: string; artist?: string; trackNo?: number }
+): ParsedAudioTags {
   try {
     const parsed =
       parseId3(buf) ??

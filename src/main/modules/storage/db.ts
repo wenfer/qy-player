@@ -297,15 +297,12 @@ const MIGRATIONS = [
     has_cover INTEGER NOT NULL DEFAULT 0,
     has_lyrics INTEGER NOT NULL DEFAULT 0,
     fingerprint TEXT NOT NULL,
+    -- 业务键（ADR-0001 同纪律：键是数据）：本地/WebDAV = local:<sourceId>:<sourceKey>；
+    -- 服务器音频 = srv:<serverType>:<serverId>:<itemId>。由 repository 计算，单一来源。
+    owner_key TEXT NOT NULL UNIQUE,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
-  -- 业务键唯一（部分索引）：本地/WebDAV 按 (source_id, source_key)；
-  -- 服务器音频按 (server_type, server_id, item_id)
-  CREATE UNIQUE INDEX IF NOT EXISTS uq_music_local
-    ON music_tracks(source_id, source_key) WHERE source_id IS NOT NULL;
-  CREATE UNIQUE INDEX IF NOT EXISTS uq_music_remote
-    ON music_tracks(server_type, server_id, item_id) WHERE item_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_music_tracks_album
     ON music_tracks(albumartist, album, disc_no, track_no);
   CREATE INDEX IF NOT EXISTS idx_music_tracks_artist ON music_tracks(artist);

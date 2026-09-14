@@ -76,6 +76,30 @@ export interface CreateSourceInput {
   options?: Record<string, string | number | boolean>;
 }
 
+/** QYP3-003/014：音乐条目 upsert。本地/WebDAV 用 sourceId+sourceKey；
+ * 服务器音频用 serverType/serverId/itemId（source_key 存 itemId 兜底键）。 */
+export interface UpsertMusicTrackInput {
+  sourceId?: number;
+  sourceKey: string;
+  path?: string;
+  itemId?: string;
+  serverType?: string;
+  serverId?: number;
+  title?: string;
+  artist?: string;
+  album?: string;
+  albumartist?: string;
+  trackNo?: number;
+  discNo?: number;
+  year?: number;
+  duration?: number;
+  codec?: string;
+  bitrate?: number;
+  hasCover?: boolean;
+  hasLyrics?: boolean;
+  fingerprint?: string;
+}
+
 export interface UpsertItemInput {
   sourceId: number;
   sourceKey: string;
@@ -407,6 +431,66 @@ export function createCatalogRepository(db: Database.Database) {
     },
 
     // -- Files --------------------------------------------------------------
+
+    listMusicTracks(sourceId: number): Array<{ source_key: string; fingerprint: string }> {
+      return db
+        .prepare('SELECT source_key, fingerprint FROM music_tracks WHERE source_id = ?')
+        .all(sourceId) as Array<{ source_key: string; fingerprint: string }>;
+    },
+
+    upsertMusicTrack(input: UpsertMusicTrackInput): number {
+      const ownerKey =
+        input.sourceId !== undefined && input.sourceId !== null
+          ? `local:${input.sourceId}:${input.sourceKey}`
+          : `srv:${input.serverType}:${input.serverId}:${input.itemId}`;
+      db.prepare(
+        `INSERT INTO music_tracks (source_id, source_key, path, server_type, server_id, item_id,
+             title, artist, album, albumartist, track_no, disc_no, year, duration, codec, bitrate,
+             has_cover, has_lyrics, fingerprint, owner_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(owner_key) DO UPDATE SET
+           path = COALESCE(excluded.path, path),
+           title = COALESCE(excluded.title, title),
+           artist = COALESCE(excluded.artist, artist),
+           album = COALESCE(excluded.album, album),
+           albumartist = COALESCE(excluded.albumartist, albumartist),
+           track_no = COALESCE(excluded.track_no, track_no),
+           disc_no = COALESCE(excluded.disc_no, disc_no),
+           year = COALESCE(excluded.year, year),
+           duration = COALESCE(excluded.duration, duration),
+           codec = COALESCE(excluded.codec, codec),
+           bitrate = COALESCE(excluded.bitrate, bitrate),
+           has_cover = excluded.has_cover,
+           has_lyrics = excluded.has_lyrics,
+           fingerprint = COALESCE(excluded.fingerprint, fingerprint),
+           updated_at = unixepoch()`
+      ).run(
+        input.sourceId ?? null,
+        input.sourceKey,
+        input.path ?? null,
+        input.serverType ?? null,
+        input.serverId ?? null,
+        input.itemId ?? null,
+        input.title ?? null,
+        input.artist ?? null,
+        input.album ?? null,
+        input.albumartist ?? null,
+        input.trackNo ?? null,
+        input.discNo ?? null,
+        input.year ?? null,
+        input.duration ?? null,
+        input.codec ?? null,
+        input.bitrate ?? null,
+        input.hasCover === true ? 1 : 0,
+        input.hasLyrics === true ? 1 : 0,
+        input.fingerprint ?? null,
+        ownerKey
+      );
+      const row = db.prepare('SELECT id FROM music_tracks WHERE owner_key = ?').get(ownerKey) as {
+        id: number;
+      };
+      return row.id;
+    },
 
     upsertFile(input: UpsertFileInput): number {
       db.prepare(

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository, type CatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { ScanJobController } from '../../../src/main/modules/library-scanner/job-controller';
@@ -262,6 +263,77 @@ describe('classifier audio (QYP3-002)', () => {
     expect(classifyPath('trailer - 编外.mp3').fileClass).toBe('ignored');
     expect(classifyPath('movie.mp4').fileClass).toBe('video');
     expect(classifyPath('readme.txt').fileClass).toBe('ignored');
+  });
+});
+
+describe('music ingest (QYP3-003)', () => {
+  it('ingests audio with tags into music_tracks (local driver, readAudio hook)', async () => {
+    const sourceId = makeSource();
+    const adapter = makeTreeAdapter({
+      '周杰伦/叶惠美/03 - 晴天.mp3': { size: 4000, mtime: 1 },
+      '周杰伦/叶惠美/04 - 懦夫.flac': { size: 4000, mtime: 2 },
+      'sample.flac': { size: 10, mtime: 3 }, // sample 排除
+    });
+    const driver = createLocalScanDriver({
+      repo,
+      sourceId,
+      readAudio: async (entry) => {
+        // 用真实 fixture 字节走完整解析链
+        const { readFile } = await import('node:fs/promises');
+        if (entry.relativePath.endsWith('03 - 晴天.mp3')) {
+          const buf = await readFile(join(process.cwd(), 'tests/fixtures/audio/sample-id3v23.mp3'));
+          return buf;
+        }
+        if (entry.relativePath.endsWith('04 - 懦夫.flac')) {
+          const buf = await readFile(join(process.cwd(), 'tests/fixtures/audio/sample.flac'));
+          return buf;
+        }
+        return null;
+      },
+    });
+    const runId = await runScan(scanningAdapterOf(adapter), driver, sourceId);
+    console.log('SCAN RUN:', JSON.stringify(repo.getScanRun(runId)));
+    const db = new Database(dbPath, { readonly: true });
+    const rows = db
+      .prepare('SELECT * FROM music_tracks WHERE source_id = ? ORDER BY source_key')
+      .all(sourceId) as Array<{
+      title: string;
+      artist: string | null;
+      album: string | null;
+      track_no: number | null;
+      duration: number | null;
+      has_cover: number;
+      has_lyrics: number;
+      codec: string;
+    }>;
+    expect(rows).toHaveLength(2);
+    const mp3 = rows.find((r) => r.title === '晴天')!;
+    expect(mp3.artist).toBe('周杰伦');
+    expect(mp3.album).toBe('叶惠美');
+    expect(mp3.track_no).toBe(3);
+    expect(mp3.has_cover).toBe(1);
+    expect(mp3.has_lyrics).toBe(1);
+    expect(mp3.codec).toBe('mp3');
+    const flac = rows.find((r) => r.title === '晴天2' || r.codec === 'flac')!;
+    expect(flac.title).toBe('晴天');
+    expect(flac.duration).toBeCloseTo(20, 1);
+  });
+
+  it('falls back to filename heuristics when readAudio is absent (WebDAV 模式)', async () => {
+    const sourceId = makeSource();
+    const adapter = makeTreeAdapter({
+      '周杰伦/叶惠美/07 - 退后.mp3': { size: 100, mtime: 1 },
+    });
+    const driver = createLocalScanDriver({ repo, sourceId });
+    await runScan(scanningAdapterOf(adapter), driver, sourceId);
+    const db = new Database(dbPath, { readonly: true });
+    const rows = db
+      .prepare('SELECT * FROM music_tracks WHERE source_id = ?')
+      .all(sourceId) as Array<{ title: string; artist: string | null; track_no: number | null }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe('退后');
+    expect(rows[0].artist).toBe('周杰伦');
+    expect(rows[0].track_no).toBe(7);
   });
 });
 
