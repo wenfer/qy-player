@@ -7,7 +7,7 @@ import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/pla
 import { useAutoNextStore, type NextEpisodeChoice } from '../../stores/auto-next-store';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
 import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
-import SkipOverrideEditor from './SkipOverrideEditor';
+import SkipOverrideDialog, { SkipOverrideTrigger } from './SkipOverrideDialog';
 import ProgressSummary from './ProgressSummary';
 import type { MediaProbeOutcome, ProbeItemInput } from '../../../shared/types/media-info';
 import { useToastStore } from '../../stores/toast-store';
@@ -314,6 +314,8 @@ export default function Detail() {
   // from the server (UserData preferred, §12.1); the DECISION runs
   // main-side via the pure resolver — the renderer never copies the
   // algorithm. Re-resolution happens on window focus (play-back/eof).
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false);
+  const skipTriggerRef = useRef<HTMLButtonElement | null>(null);
   const resolveResumeTarget = useCallback(async (): Promise<ResumeTarget | null> => {
     if (!details || details.Type !== 'Series' || !Number.isInteger(serverId)) return null;
     try {
@@ -481,6 +483,10 @@ export default function Detail() {
             <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
               默认客户端直连解码，画质无损；如遇卡顿可选择服务端转码。
             </p>
+            {/* 剧集自定义片头/片尾：弹窗配置，不占详情页版面 */}
+            {details.Type === 'Series' && Number.isInteger(serverId) && (
+              <SkipOverrideTrigger onClick={() => setSkipDialogOpen(true)} returnFocusRef={skipTriggerRef} />
+            )}
           </div>
 
           {/* Info */}
@@ -563,16 +569,6 @@ export default function Detail() {
               </div>
             )}
 
-            {/* 剧集自定义片头/片尾（整剧生效） */}
-            {details.Type === 'Series' && Number.isInteger(serverId) && (
-              <SkipOverrideEditor
-                serverType={serverType}
-                serverId={serverId}
-                itemId={details.Id}
-                seriesName={details.Name}
-              />
-            )}
-
             {/* Seasons */}
             {details.Type === 'Series' && seasons.length > 0 && (
               <div className="mt-8">
@@ -611,6 +607,19 @@ export default function Detail() {
           </div>
         </div>
       </div>
+
+      {/* 剧集自定义片头/片尾弹窗 */}
+      {details.Type === 'Series' && Number.isInteger(serverId) && (
+        <SkipOverrideDialog
+          open={skipDialogOpen}
+          onClose={() => setSkipDialogOpen(false)}
+          serverType={serverType}
+          serverId={serverId}
+          itemId={details.Id}
+          seriesName={details.Name}
+          returnFocusRef={skipTriggerRef}
+        />
+      )}
     </div>
   );
 }
