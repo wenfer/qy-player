@@ -52,9 +52,6 @@ describe('music tables (migration 007)', () => {
       "INSERT INTO library_sources (kind, name, root) VALUES ('local', '音乐库', '/music')"
     ).run();
     const srcId = db.prepare("SELECT id FROM library_sources WHERE name = '音乐库'").get() as { id: number };
-    const ins = db.prepare(
-      "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint) VALUES (?, ?, ?, ?, ?)"
-    );
     // 业务键：owner_key UNIQUE（repository 计算单一来源）
     db.prepare(
       "INSERT INTO music_tracks (source_id, source_key, path, title, fingerprint, owner_key) VALUES (?, 'a.mp3', '/music/a.mp3', '曲一', 'f1', 'local:1:a.mp3')"

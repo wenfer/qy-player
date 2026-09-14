@@ -94,6 +94,7 @@ import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import { CacheManager } from '../modules/cache/cache-manager';
+import { registerCoversPartition } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
   createUnifiedQueryService,
@@ -376,6 +377,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     },
     []
   );
+  // QYP3-005：音乐封面（派生缓存，可清扫后按需再生成）
+  registerCoversPartition(cacheManager, join(app.getPath('userData'), 'covers'));
 
   ipcMain.handle(IPC_CHANNELS.DIAGNOSTICS.SUMMARY, () => {
     return ok(

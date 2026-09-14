@@ -2,6 +2,7 @@ import type { SourceAdapter, SourceEntry, ScanDriver } from '../library-sources/
 import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
 import { parseAudioTagsFromBuffer, type ParsedAudioTags } from './tag-parser';
+import { saveCoverFromTags } from './cover-service';
 import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
 import { applyNfoMetadata } from '../metadata/metadata-merger';
 import type { MetadataValue, NfoMetadata, ProviderStore } from '../metadata/types';
@@ -205,6 +206,8 @@ export function createLocalScanDriver(deps: {
    * 只用文件名启发式（网络读全文件太贵，计划 §6）。
    */
   readAudio?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
+  /** 封面落盘目录（QYP3-005）；缺省则不落盘（has_cover 仍入行）。 */
+  coversDir?: string;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   // Existing files snapshot: cheap in-driver change detection without extra
@@ -297,11 +300,12 @@ export function createLocalScanDriver(deps: {
           format: 'unknown',
           ...(parsed.audio ? { title: parsed.audio.title, artist: parsed.audio.artist, trackNo: parsed.audio.trackNo } : {}),
         };
+        let headBuf: Buffer | null = null;
         if (deps.readAudio) {
           try {
-            const buf = await deps.readAudio(entry, signal);
-            if (buf) {
-              tags = parseAudioTagsFromBuffer(buf, parsed.audio);
+            headBuf = await deps.readAudio(entry, signal);
+            if (headBuf) {
+              tags = parseAudioTagsFromBuffer(headBuf, parsed.audio);
             }
           } catch {
             // 标签读取失败：文件名启发式结果已就位，扫描不中断。
@@ -309,7 +313,7 @@ export function createLocalScanDriver(deps: {
         }
         const ext = entry.relativePath.split('.').pop()?.toLowerCase() ?? '';
         const dirs = entry.relativePath.split('/').slice(0, -1);
-        repo.upsertMusicTrack({
+        const trackId = repo.upsertMusicTrack({
           sourceId,
           sourceKey: entry.relativePath,
           path: entry.relativePath,
@@ -327,6 +331,14 @@ export function createLocalScanDriver(deps: {
           hasLyrics: tags.lyrics !== undefined,
           fingerprint: audioFingerprint,
         });
+        // 封面落盘（QYP3-005）：内嵌 picture 优先；失败静默（占位图兜底）
+        if (deps.coversDir && headBuf && tags.hasCover) {
+          try {
+            await saveCoverFromTags(trackId, headBuf, deps.coversDir);
+          } catch {
+            // 落盘失败不影响入库
+          }
+        }
         return;
       }
       if (parsed.fileClass !== 'video' || parsed.isSample) return;

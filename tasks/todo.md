@@ -39,12 +39,16 @@
   → 6/6；全量 646/52；调试修复点：帧头推进量、vorbis LE 长度、
   STREAMINFO 64bit 拆分、mvhd payload 偏移
 
-### QYP3-005 封面提取管线 `[ ]`
+### QYP3-005 封面提取管线 `[x]`
 - 依赖：004
-- 内容：内嵌 picture 优先 → covers/ 缓存分区；mpv 单帧导出兜底 spike
-  （0.29/0.32 一致性）；失败占位图
-- 验收：spike 记录三格式实机结果；缓存分区注册进 cache-manager
-- Evidence：
+- 内容：cover-service——extractCoverBytes（ID3 APIC/PIC/FLAC PICTURE/
+  m4a covr 三容器头部缓冲解析）+ saveCoverFromTags（落
+  <coversDir>/<trackId>.<ext>）+ registerCoversPartition（64MiB 可清扫，
+  派生数据可再生成）+ exportCoverWithMpv（懒执行兜底，15s 硬顶超时）
+- 接线：扫描 readAudio 后顺手落盘（失败静默）；covers 分区注册
+- 验收：5 用例（三容器提取/容错/落盘+分区/无图 null）全绿
+- Evidence: cover-service.test 5/5；全量 653/53；mpv 导出 0.29/0.32
+  一致性属实机 spike 项（TARGET-VERIFY 补记）
 
 ### QYP3-006 CUE 分轨 `[ ]`
 - 依赖：004
