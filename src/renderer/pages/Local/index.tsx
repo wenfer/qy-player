@@ -94,7 +94,8 @@ export default function Local() {
 
   const loadHistory = useCallback(async () => {
     try {
-      const history = await window.electronAPI.getRecentlyPlayed(20);
+      // 只取本地文件播放记录（path 非空），不混入在线服务器记录
+      const history = await window.electronAPI.getRecentlyPlayed(20, { localOnly: true });
       setRecentFiles(history as HistoryItem[]);
     } catch {
       // Ignore

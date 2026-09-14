@@ -774,8 +774,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     return scanDir(result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC_CHANNELS.LIBRARY.GET_RECENTLY_PLAYED, (_event, limit?: number) => {
-    return storage.getWatchHistory(limit);
+  ipcMain.handle(IPC_CHANNELS.LIBRARY.GET_RECENTLY_PLAYED, (_event, limit?: number, opts?: { localOnly?: boolean }) => {
+    return storage.getWatchHistory(limit, opts);
   });
 
   ipcMain.handle(IPC_CHANNELS.LIBRARY.CLEAR_HISTORY, () => {

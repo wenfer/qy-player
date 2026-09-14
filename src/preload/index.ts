@@ -96,8 +96,8 @@ const electronAPI = {
       }
     };
   },
-  getRecentlyPlayed: (limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.GET_RECENTLY_PLAYED, limit),
+  getRecentlyPlayed: (limit?: number, opts?: { localOnly?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.GET_RECENTLY_PLAYED, limit, opts),
   clearHistory: () => ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.CLEAR_HISTORY),
   deleteHistoryItem: (mediaType: string, mediaId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.DELETE_HISTORY, mediaType, mediaId),

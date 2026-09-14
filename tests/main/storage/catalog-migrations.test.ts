@@ -12,7 +12,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { openDatabaseAtPath, runMigrations } from '../../../src/main/modules/storage/db';
+import { openDatabaseAtPath, runMigrations, createStorage } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository } from '../../../src/main/modules/catalog/repository';
 
 const CATALOG_TABLES = [
@@ -53,6 +53,20 @@ function tableNames(db: Database.Database): string[] {
 function getVersion(db: Database.Database): number {
   return (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number }).version;
 }
+
+describe('getWatchHistory localOnly filter', () => {
+  it('returns only local (path-bearing) records when localOnly=true', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    const storage = createStorage(db);
+    storage.addWatchHistory({ mediaType: 'local', mediaId: '/movies/a.mkv', title: '本地片', path: '/movies/a.mkv', position: 60 });
+    storage.addWatchHistory({ mediaType: 'movie', mediaId: '56', title: '在线片', position: 30 });
+    const all = storage.getWatchHistory(20);
+    expect([...all.map((r) => r.title)].sort((a, b) => a.localeCompare(b, 'zh'))).toEqual(['本地片', '在线片']);
+    const localOnly = storage.getWatchHistory(20, { localOnly: true });
+    expect(localOnly.map((r) => r.title)).toEqual(['本地片']);
+    expect(localOnly[0].path).toBe('/movies/a.mkv');
+  });
+});
 
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {

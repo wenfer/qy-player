@@ -75,7 +75,9 @@ function createWindow(): BrowserWindow {
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(resolve(__dirname, '../renderer/index.html'));
+    // out/main.cjs 与 out/renderer/ 同级；此前 '../renderer' 解析到仓库根
+    // 的不存在路径（dev 恒有 VITE_DEV_SERVER_URL 所以从未暴露）
+    mainWindow.loadFile(resolve(__dirname, 'renderer/index.html'));
   }
 
   // Auto-open DevTools for debugging (only in dev)

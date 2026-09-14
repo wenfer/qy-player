@@ -351,7 +351,7 @@ export interface Storage {
     seasonNumber?: number;
     episodeNumber?: number;
   }): void;
-  getWatchHistory(limit?: number): Array<{
+  getWatchHistory(limit?: number, opts?: { localOnly?: boolean }): Array<{
     media_type: string;
     media_id: string;
     title: string;
@@ -538,10 +538,17 @@ export function createStorage(db: Database.Database): Storage {
       }
     },
 
-    getWatchHistory(limit = 20) {
+    /**
+     * 观看历史查询。opts.localOnly=true 时仅返回本地文件记录
+     * （watch_history.path 非空——本地播放才写 path，在线条目不带），
+     * 供本地页「最近播放」使用，不混入 Jellyfin/Emby 记录。
+     */
+    getWatchHistory(limit = 20, opts?: { localOnly?: boolean }) {
+      const localFilter = opts?.localOnly ? 'WHERE path IS NOT NULL' : '';
       return db.prepare(`
         SELECT media_type, media_id, title, poster_url, path, position, duration, watched_at, series_name, season_number, episode_number
         FROM watch_history
+        ${localFilter}
         ORDER BY watched_at DESC
         LIMIT ?
       `).all(limit) as Array<{
