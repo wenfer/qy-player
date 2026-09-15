@@ -1,11 +1,12 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { Home, FolderOpen, Library, Search, Settings, History, Keyboard, Wand2 , Music } from 'lucide-react';
+import { Home, FolderOpen, Library, Search, Settings, History, Keyboard, Wand2 , Music , ListMusic } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: '首页', icon: Home },
   { path: '/local', label: '本地', icon: FolderOpen },
   { path: '/music', label: '音乐', icon: Music },
+  { path: '/playlists', label: '歌单', icon: ListMusic },
   { path: '/media-sources', label: '媒体库', icon: Library },
   { path: '/scrape-jobs', label: '刮削任务', icon: Wand2 },
   { path: '/history', label: '历史', icon: History },

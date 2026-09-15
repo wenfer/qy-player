@@ -521,6 +521,123 @@ export function createCatalogRepository(db: Database.Database) {
         .all(...sourceIds, limit, offset) as MusicTrackRow[];
     },
 
+    // ------------------------------------------------------------------
+    // 歌单（QYP3-015）
+    // ------------------------------------------------------------------
+
+    listPlaylists(): Array<{ id: number; name: string; track_count: number; created_at: number; updated_at: number }> {
+      return db
+        .prepare(
+          `SELECT p.id, p.name, p.created_at, p.updated_at, COUNT(i.id) AS track_count
+           FROM playlists p LEFT JOIN playlist_items i ON i.playlist_id = p.id
+           GROUP BY p.id ORDER BY p.created_at`
+        )
+        .all() as Array<{ id: number; name: string; track_count: number; created_at: number; updated_at: number }>;
+    },
+
+    createPlaylist(name: string): number {
+      db
+        .prepare(
+          `INSERT INTO playlists (name, created_at, updated_at) VALUES (?, unixepoch(), unixepoch())
+           ON CONFLICT(name) DO UPDATE SET updated_at = unixepoch()`
+        )
+        .run(name);
+      const row = db.prepare('SELECT id FROM playlists WHERE name = ?').get(name) as { id: number };
+      return row.id;
+    },
+
+    renamePlaylist(id: number, name: string): boolean {
+      const res = db
+        .prepare('UPDATE playlists SET name = ?, updated_at = unixepoch() WHERE id = ?')
+        .run(name, id);
+      return res.changes > 0;
+    },
+
+    deletePlaylist(id: number): void {
+      db.prepare('DELETE FROM playlists WHERE id = ?').run(id); // items 级联
+    },
+
+    /** 歌单内条目（按 position 排序；联 music_tracks 供 UI 直接渲染）。 */
+    listPlaylistItems(
+      playlistId: number
+    ): Array<{
+      id: number;
+      position: number;
+      item_ref: string;
+      track: MusicTrackRow | null;
+    }> {
+      const rows = db
+        .prepare('SELECT id, position, item_ref FROM playlist_items WHERE playlist_id = ? ORDER BY position')
+        .all(playlistId) as Array<{ id: number; position: number; item_ref: string }>;
+      // item_ref: music:<sourceId>:<trackId>（QYP3-015 契约）
+      const trackStmt = db.prepare(
+        `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                year, duration, codec, bitrate, has_cover, has_lyrics
+         FROM music_tracks WHERE id = ? AND source_id = ?`
+      );
+      return rows.map((row) => {
+        const m = row.item_ref.match(/^music:(\d+):(\d+)$/);
+        let track: MusicTrackRow | null = null;
+        if (m) {
+          track = (trackStmt.get(Number(m[2]), Number(m[1])) as MusicTrackRow) ?? null;
+        }
+        return { id: row.id, position: row.position, item_ref: row.item_ref, track };
+      });
+    },
+
+    /** 追加到歌单末尾（重复项允许——歌单语义）。 */
+    addToPlaylist(playlistId: number, itemRef: string): number {
+      const maxRow = db
+        .prepare('SELECT COALESCE(MAX(position), -1) AS maxPos FROM playlist_items WHERE playlist_id = ?')
+        .get(playlistId) as { maxPos: number };
+      const inserted = db
+        .prepare(
+          `INSERT INTO playlist_items (playlist_id, position, item_ref, added_at)
+           VALUES (?, ?, ?, unixepoch())`
+        )
+        .run(playlistId, maxRow.maxPos + 1, itemRef);
+      db.prepare('UPDATE playlists SET updated_at = unixepoch() WHERE id = ?').run(playlistId);
+      return Number(inserted.lastInsertRowid);
+    },
+
+    removeFromPlaylist(playlistId: number, position: number): boolean {
+      // 删除后重排（position 连续性契约）
+      const del = db
+        .prepare('DELETE FROM playlist_items WHERE playlist_id = ? AND position = ?')
+        .run(playlistId, position);
+      if (del.changes === 0) return false;
+      const rest = db
+        .prepare('SELECT id FROM playlist_items WHERE playlist_id = ? AND position > ? ORDER BY position')
+        .all(playlistId, position) as Array<{ id: number }>;
+      let pos = position;
+      for (const r of rest) {
+        db.prepare('UPDATE playlist_items SET position = ? WHERE id = ?').run(pos++, r.id);
+      }
+      return true;
+    },
+
+    /** 重排：把 position=from 的项移动到 to（其余顺移）。 */
+    reorderPlaylistItem(playlistId: number, from: number, to: number): boolean {
+      if (from === to || from < 0 || to < 0) return false;
+      const row = db
+        .prepare('SELECT id FROM playlist_items WHERE playlist_id = ? AND position = ?')
+        .get(playlistId, from) as { id: number } | undefined;
+      if (!row) return false;
+      const count = (db.prepare('SELECT COUNT(*) c FROM playlist_items WHERE playlist_id = ?').get(playlistId) as { c: number }).c;
+      if (to >= count) return false;
+      db.transaction(() => {
+        db.prepare('UPDATE playlist_items SET position = -1 WHERE id = ?').run(row.id);
+        if (from < to) {
+          db.prepare('UPDATE playlist_items SET position = position - 1 WHERE playlist_id = ? AND position > ? AND position <= ?').run(playlistId, from, to);
+        } else {
+          db.prepare('UPDATE playlist_items SET position = position + 1 WHERE playlist_id = ? AND position >= ? AND position < ?').run(playlistId, to, from);
+        }
+        db.prepare('UPDATE playlist_items SET position = ? WHERE id = ?').run(to, row.id);
+        db.prepare('UPDATE playlists SET updated_at = unixepoch() WHERE id = ?').run(playlistId);
+      })();
+      return true;
+    },
+
     listMusicTracks(sourceId: number): Array<{ source_key: string; fingerprint: string }> {
       return db
         .prepare('SELECT source_key, fingerprint FROM music_tracks WHERE source_id = ?')

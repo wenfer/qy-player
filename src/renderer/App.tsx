@@ -7,6 +7,7 @@ import MediaSources from './pages/MediaSources';
 import Search from './pages/Search';
 import Local from './pages/Local';
 import MusicPage from './pages/Music';
+import PlaylistsPage from './pages/Playlists';
 import LibraryBrowse from './pages/LibraryBrowse';
 import History from './pages/History';
 import Shortcuts from './pages/Shortcuts';
@@ -81,6 +82,7 @@ function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />
             <Route path="/music" element={<MusicPage />} />
+            <Route path="/playlists" element={<PlaylistsPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/shortcuts" element={<Shortcuts />} />
           </Routes>

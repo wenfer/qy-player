@@ -29,6 +29,19 @@ export const IPC_CHANNELS = {
     /** 全局媒体键转发（renderer 引擎激活时 main → renderer）。 */
     ON_COMMAND: 'music:on-command',
   },
+  PLAYLIST: {
+    LIST: 'playlist:list',
+    CREATE: 'playlist:create',
+    RENAME: 'playlist:rename',
+    DELETE: 'playlist:delete',
+    GET_ITEMS: 'playlist:get-items',
+    ADD_ITEMS: 'playlist:add-items',
+    REMOVE_ITEM: 'playlist:remove-item',
+    REORDER: 'playlist:reorder',
+    IMPORT_M3U: 'playlist:import-playlist',
+    EXPORT_M3U8: 'playlist:export-list',
+    EXPORT_XSPF: 'playlist:export-xspf',
+  },
   UNIFIED: {
     CONTINUE_WATCHING: 'unified:continue-watching',
     RECENT: 'unified:recent',

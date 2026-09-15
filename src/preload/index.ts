@@ -164,6 +164,22 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_TRACKS, { offset, limit }),
   reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
+  // 歌单（QYP3-015/016/017）
+  listPlaylists: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.LIST),
+  createPlaylist: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.CREATE, { name }),
+  renamePlaylist: (id: number, name: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.RENAME, { id, name }),
+  deletePlaylist: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.DELETE, { id }),
+  getPlaylistItems: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.GET_ITEMS, { id }),
+  addToPlaylist: (id: number, refs: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.ADD_ITEMS, { id, refs }),
+  removeFromPlaylist: (id: number, position: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.REMOVE_ITEM, { id, position }),
+  reorderPlaylistItem: (id: number, from: number, to: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.REORDER, { id, from, to }),
+  importPlaylistFile: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.IMPORT_M3U),
+  exportPlaylistM3u8: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.EXPORT_M3U8, { id }),
+  exportPlaylistXspf: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.EXPORT_XSPF, { id }),
   setMusicEngineActive: (value: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, value),
   onMusicCommand: (cb: (command: string) => void) => {

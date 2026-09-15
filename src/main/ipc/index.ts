@@ -97,6 +97,7 @@ import { CacheManager } from '../modules/cache/cache-manager';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
 import { setMusicEngineActive } from '../modules/playback-engine/music-active';
+import { importM3u, listTrackCatalog, exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
 import { registerCoversPartition } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
@@ -115,6 +116,11 @@ import {
 import type { CatalogBrowseQuery, CatalogSearchQuery } from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
+
+/** 歌单条目引用校验（QYP3-015 契约）：music:<sourceId>:<trackId>。 */
+function isPlaylistItemRef(value: unknown): value is string {
+  return typeof value === 'string' && /^music:\d+:\d+$/.test(value);
+}
 
 function isLocalFilePath(path: string): boolean {
   return path.startsWith('/') || /^[a-zA-Z]:\\/.test(path) || path.startsWith('file://');
@@ -376,8 +382,126 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     }
   );
 
-  // 引擎激活态（QYP3-013）：媒体键双用途路由依据；renderer 引擎停止
-  // 时必须置 false，否则媒体键失联。
+  // ------------------------------------------------------------------
+  // 歌单（QYP3-015/016/017）
+  // ------------------------------------------------------------------
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.LIST, () => ok({ playlists: catalogRepo.listPlaylists() }));
+
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.CREATE, (_event, args: { name: string }) => {
+    const name = typeof args?.name === 'string' ? args.name.trim().slice(0, 128) : '';
+    if (!name) return err('VALIDATION_FAILED', '歌单名不能为空');
+    return ok({ id: catalogRepo.createPlaylist(name) });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.RENAME, (_event, args: { id: number; name: string }) => {
+    const id = Number(args?.id);
+    const name = typeof args?.name === 'string' ? args.name.trim().slice(0, 128) : '';
+    if (!Number.isInteger(id) || id <= 0 || !name) {
+      return err('VALIDATION_FAILED', '参数不合法');
+    }
+    return ok({ updated: catalogRepo.renamePlaylist(id, name) });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.DELETE, (_event, args: { id: number }) => {
+    const id = Number(args?.id);
+    if (!Number.isInteger(id) || id <= 0) return err('VALIDATION_FAILED', '参数不合法');
+    catalogRepo.deletePlaylist(id);
+    return ok({ deleted: true });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.GET_ITEMS, (_event, args: { id: number }) => {
+    const id = Number(args?.id);
+    if (!Number.isInteger(id) || id <= 0) return err('VALIDATION_FAILED', '参数不合法');
+    return ok({ items: catalogRepo.listPlaylistItems(id) });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYLIST.ADD_ITEMS,
+    (_event, args: { id: number; refs: string[] }) => {
+      const id = Number(args?.id);
+      const refs = Array.isArray(args?.refs)
+        ? args.refs.filter((r): r is string => isPlaylistItemRef(r))
+        : [];
+      if (!Number.isInteger(id) || id <= 0 || refs.length === 0) {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      for (const ref of refs) catalogRepo.addToPlaylist(id, ref);
+      return ok({ added: refs.length });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYLIST.REMOVE_ITEM,
+    (_event, args: { id: number; position: number }) => {
+      const id = Number(args?.id);
+      const position = Number(args?.position);
+      if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(position) || position < 0) {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      return ok({ removed: catalogRepo.removeFromPlaylist(id, position) });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYLIST.REORDER,
+    (_event, args: { id: number; from: number; to: number }) => {
+      const id = Number(args?.id);
+      const from = Number(args?.from);
+      const to = Number(args?.to);
+      if (!Number.isInteger(id) || id <= 0) return err('VALIDATION_FAILED', '参数不合法');
+      return ok({ reordered: catalogRepo.reorderPlaylistItem(id, from, to) });
+    }
+  );
+
+  // 导入 m3u/m3u8（QYP3-016）：打开文件对话框 → 解析匹配 → 建歌单。
+  // 未定位行计数报告（Toast 展示），绝不静默丢失。
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.IMPORT_M3U, async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: '播放列表', extensions: ['m3u', 'm3u8'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return ok({ imported: null });
+    }
+    const filePath = result.filePaths[0];
+    const basename = filePath.split(/[\\/]/).pop() ?? '导入歌单';
+    let content: Buffer;
+    try {
+      content = await import('fs/promises').then((fs) => fs.readFile(filePath));
+    } catch {
+      return err('INTERNAL', '读取播放列表文件失败');
+    }
+    const dir = filePath.includes('/') || filePath.includes('\\') ? filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))) : null;
+    const { refs, unmatched } = importM3u(content.toString('utf8'), dir, listTrackCatalog(db));
+    if (refs.length === 0) {
+      return ok({ imported: null, unmatched: unmatched.length, report: '没有可定位的音轨（音乐库中找不到对应文件）' });
+    }
+    const playlistId = catalogRepo.createPlaylist(basename.replace(/\.(m3u8?|m3u)$/i, '') || '导入歌单');
+    for (const ref of refs) catalogRepo.addToPlaylist(playlistId, ref.ref);
+    return ok({
+      imported: { playlistId, name: basename.replace(/\.(m3u8?|m3u)$/i, ''), matched: refs.length },
+      unmatched: unmatched.length,
+    });
+  });
+
+  // 导出（QYP3-016/017）：保存对话框 → 生成内容 → 写盘。凭据永不内嵌。
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.EXPORT_M3U8, async (_event, args: { id: number }) => {
+    const id = Number(args?.id);
+    if (!Number.isInteger(id) || id <= 0) return err('VALIDATION_FAILED', '参数不合法');
+    return exportPlaylistFile(id, 'm3u8', catalogRepo);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLAYLIST.EXPORT_XSPF, async (_event, args: { id: number }) => {
+    const id = Number(args?.id);
+    if (!Number.isInteger(id) || id <= 0) return err('VALIDATION_FAILED', '参数不合法');
+    return ok(await exportPlaylistXspf(id, catalogRepo, catalogRepo.listPlaylists().find((p) => p.id === id)?.name ?? 'playlist'));
+  });
+
+
   ipcMain.handle(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, (_event, value: unknown) => {
     setMusicEngineActive(value === true);
     return ok({ value: Boolean(value) });
@@ -2001,4 +2125,73 @@ function registerCatalogHandlers(
       scanEventSenders.delete(event.sender.id);
     });
   });
+}
+
+/** 歌单导出编排（QYP3-016/017）：保存对话框 → 组装 → 写盘。 */
+async function exportPlaylistFile(
+  playlistId: number,
+  format: 'm3u8',
+  catalogRepo: ReturnType<typeof createCatalogRepository>
+): Promise<{ ok: true; data: { canceled?: boolean; saved?: string; count?: number } }> {
+  const { dialog } = await import('electron');
+  const { writeFile } = await import('fs/promises');
+  const result = await dialog.showSaveDialog({
+    defaultPath: `playlist.${format}`,
+    filters: [{ name: '播放列表', extensions: [format] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: true, data: { canceled: true } };
+  }
+  const tracks = await gatherExportTracks(playlistId, catalogRepo);
+  const baseDir = result.filePath.split(/[\\/]/).slice(0, -1).join('/');
+  const content = exportM3u8(tracks, baseDir);
+  await writeFile(result.filePath, content, 'utf8');
+  return { ok: true, data: { saved: result.filePath, count: tracks.length } };
+}
+
+async function exportPlaylistXspf(
+  playlistId: number,
+  catalogRepo: ReturnType<typeof createCatalogRepository>,
+  playlistName: string
+): Promise<{ canceled?: boolean; saved?: string; count?: number }> {
+  const { dialog } = await import('electron');
+  const { writeFile } = await import('fs/promises');
+  const playlist = playlistName;
+  const result = await dialog.showSaveDialog({
+    defaultPath: `${playlist}.xspf`,
+    filters: [{ name: 'XSPF 播放列表', extensions: ['xspf'] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+  const tracks = await gatherExportTracks(playlistId, catalogRepo);
+  await writeFile(result.filePath, exportXspf(tracks, playlist), 'utf8');
+  return { saved: result.filePath, count: tracks.length };
+}
+
+/** 组装导出行：歌单条目 → 联表 → location（本地绝对/WebDAV URL）。 */
+async function gatherExportTracks(
+  playlistId: number,
+  catalogRepo: ReturnType<typeof createCatalogRepository>
+): Promise<PlaylistTrackInfo[]> {
+  const items = catalogRepo.listPlaylistItems(playlistId);
+  const rows: PlaylistTrackInfo[] = [];
+  for (const item of items) {
+    if (!item.track) continue; // 失效引用（音轨已删除）：导出时跳过
+    const source = catalogRepo.getSource(item.track.source_id);
+    if (!source) continue;
+    rows.push(
+      toExportInfo({
+        trackId: item.track.id,
+        sourceId: item.track.source_id,
+        sourceKind: source.kind,
+        sourceRoot: source.root,
+        title: item.track.title,
+        artist: item.track.artist,
+        duration: item.track.duration,
+        path: item.track.path,
+      })
+    );
+  }
+  return rows;
 }

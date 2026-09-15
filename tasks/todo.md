@@ -150,23 +150,34 @@
 - 验收：实机 DB progress/history 双落；清理回归（删文件→重扫→行消失）
 - Evidence: resume-resolver 纯函数 + 实机验证记录
 
-### QYP3-015 歌单 CRUD + UI `[ ]`
+### QYP3-015 歌单 CRUD + UI `[x]`（拖拽排序 → P1，先上/下移按钮）
 - 依赖：001
-- 内容：playlists/playlist_items IPC；歌单页（列表/详情/增删/拖拽排序）
-- 验收：IPC 契约测试；乐观更新失败回滚用例
-- Evidence：
+- 内容：repository CRUD（create/rename/delete/list/listItems/add/
+  remove/reorder——remove 后 position 重排，reorder 事务整移）；
+  item_ref 契约 music:<sourceId>:<trackId> + isPlaylistItemRef 校验；
+  PLAYLIST.* 11 通道 + preload；/playlists 页（列表卡片 + 详情列表 +
+  新建/重命名/删除 + 上/下移乐观更新失败回滚 + 点行播放进队列）
+- 实机修复：COALESCE 别名错（NaN→NOT NULL）、res 未定义、
+  channel 命名契约（无数字段）
+- 验收：CDP 实机（建/加/排序/移除往返全通）；698/59 全绿
+- Evidence: /tmp/pm/playlists_ui.png + pl2 日志
 
-### QYP3-016 m3u/m3u8 导入导出 `[ ]`
+### QYP3-016 m3u/m3u8 导入导出 `[x]`
 - 依赖：015
-- 内容：相对路径解析（基准=文件目录）；缺失项占位+导入报告；导出
-  m3u8
-- 验收：往返一致性 fixture；编码（UTF-8 BOM 兼容）用例
-- Evidence：
+- 内容：playlist-io.ts 纯函数——parseM3u（BOM 容错/EXTINF 标题）+
+  resolveM3uLocation（基准=文件目录）+ matchM3uLocationToTrack
+  （精确→basename 唯一→后缀唯一，歧义不猜）+ importM3u（未定位行
+  计入报告绝不静默丢失）；导出相对化（导出目录基准）+ WebDAV URL
+  （凭据不内嵌）；导入走文件对话框，导出走保存对话框
+- 验收：8 用例（解析/基准/匹配/报告/往返）
+- Evidence: playlist-io.test 8/8
 
-### QYP3-017 XSPF 导出 `[ ]`
+### QYP3-017 XSPF 导出 `[x]`
 - 依赖：016
-- 内容：全来源 URL 化导出；往返测试
-- Evidence：
+- 内容：exportXspf（1.0 规范最小集：title/creator/location/meta
+  qy:trackId + XML 转义）；本地项 file:// URL-encode；WebDAV URL
+- 验收：转义/编码用例（含 evil 字符）
+- Evidence: playlist-io.test 覆盖
 
 ### QYP3-018 LRC 解析器 `[ ]`
 - 依赖：—
