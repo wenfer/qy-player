@@ -98,7 +98,7 @@ import { registerAudioSourceProvider } from '../modules/playback-engine/audio-ur
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
 import { setMusicEngineActive } from '../modules/playback-engine/music-active';
 import { importM3u, listTrackCatalog, exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
-import { registerCoversPartition, registerLyricsPartition, readLyricsCache } from '../modules/library-scanner/cover-service';
+import { registerCoversPartition, registerLyricsPartition, readLyricsCache, saveLyricsFromTags } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
   createUnifiedQueryService,
@@ -513,6 +513,41 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     }
     const content = await readLyricsCache(trackId, lyricsDir);
     return ok({ hasLyrics: content !== null, content });
+  });
+
+  // 手动导入歌词（QYP3-021）：.lrc 文本 → <lyricsDir>/<trackId>.lrc。
+  // 歌词属人工编辑资产（受保护分区），导入即覆盖，返回内容供面板立即显示。
+  ipcMain.handle(IPC_CHANNELS.MUSIC.IMPORT_LYRICS, async (_event, args: { trackId: number }) => {
+    const trackId = Number(args?.trackId);
+    if (!Number.isInteger(trackId) || trackId <= 0) {
+      return err('VALIDATION_FAILED', '参数不合法');
+    }
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: '歌词', extensions: ['lrc', 'txt'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return ok({ imported: false, content: null });
+    }
+    const { readFile } = await import('node:fs/promises');
+    let content: string;
+    try {
+      content = await readFile(result.filePaths[0], 'utf8');
+    } catch {
+      return err('INTERNAL', '读取歌词文件失败');
+    }
+    if (content.trim().length === 0) {
+      return err('VALIDATION_FAILED', '歌词文件为空');
+    }
+    const saved = await saveLyricsFromTags(trackId, lyricsDir, content);
+    if (!saved) {
+      return err('INTERNAL', '保存歌词失败');
+    }
+    return ok({ imported: true, content });
   });
 
   ipcMain.handle(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, (_event, value: unknown) => {

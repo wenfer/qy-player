@@ -1,4 +1,10 @@
-import { JellyfinClient, JellyfinServerInfo, JellyfinLibrary, JellyfinItem } from './jellyfin-client';
+import {
+  JellyfinClient,
+  JellyfinServerInfo,
+  JellyfinLibrary,
+  JellyfinItem,
+  JellyfinLyrics,
+} from './jellyfin-client';
 
 export class EmbyClient extends JellyfinClient {
   async discover(): Promise<JellyfinServerInfo> {
@@ -108,6 +114,14 @@ export class EmbyClient extends JellyfinClient {
       Static: 'true',
     });
     return `${this.baseUrl}/emby/Videos/${itemId}/stream?${params.toString()}`;
+  }
+
+  /**
+   * 歌词（QYP3-020）：Emby 无 /Audio/{id}/Lyrics 端点（服务端也不存歌词），
+   * 静默降级为无词——不发请求，调用方按无词处理。
+   */
+  async getLyrics(_itemId?: string): Promise<JellyfinLyrics | null> {
+    return null;
   }
 
   async reportPlayingStart(

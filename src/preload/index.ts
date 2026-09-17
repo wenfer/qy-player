@@ -182,6 +182,10 @@ const electronAPI = {
   exportPlaylistXspf: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.EXPORT_XSPF, { id }),
   setMusicEngineActive: (value: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, value),
+  // 歌词（QYP3-021）：扫描期内嵌歌词读缓存；手动导入走文件对话框
+  getMusicLyrics: (trackId: number) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_LYRICS, { trackId }),
+  importMusicLyrics: (trackId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.IMPORT_LYRICS, { trackId }),
   onMusicCommand: (cb: (command: string) => void) => {
     const listener = (_event: unknown, command: string): void => cb(command);
     ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);

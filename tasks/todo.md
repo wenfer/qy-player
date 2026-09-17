@@ -179,30 +179,42 @@
 - 验收：转义/编码用例（含 evil 字符）
 - Evidence: playlist-io.test 覆盖
 
-### QYP3-018 LRC 解析器 `[ ]`
+### QYP3-018 LRC 解析器 `[x]`
 - 依赖：—
 - 内容：标准/增强（逐字）/多时间标签/偏移量；容错（乱序行、空行）
 - 验收：解析用例≥15；纯函数无 IO
-- Evidence：
+- Evidence: `lrc-parser.test` 19/19（标准/增强逐字/多标签/offset/
+  容错/排序 + findCurrentLine 同步纯函数）；typecheck 双配置绿
 
-### QYP3-019 内嵌歌词提取 + 歌词缓存分区 `[ ]`
+### QYP3-019 内嵌歌词提取 + 歌词缓存分区 `[x]`
 - 依赖：004
-- 内容：ID3 USLT/FLAC/m4a 歌词帧；lyrics 分区（受保护，不参与清扫）
+- 内容：ID3 USLT/FLAC/m4a 歌词帧（004 已解析）；lyrics 分区（受保护，
+  不参与清扫）；`saveLyricsFromTags`/`readLyricsCache`/`registerLyricsPartition`；
+  扫描 readAudio 后透传落盘 `<lyricsDir>/<trackId>.lrc`；MUSIC.GET_LYRICS
 - 验收：三容器 fixture；分区注册用例
-- Evidence：
+- Evidence: cover-service.test 6/6（落盘 + 受保护分区清扫 0 删）；
+  local-scan.test 39/39（扫描期歌词落盘内容断言）；全量绿
+- 遗留：WebDAV 源无 readAudio 钩子 → 歌词仍待"下载后"方案（P2）
 
-### QYP3-020 Jellyfin Lyrics 接入 `[ ]`
+### QYP3-020 Jellyfin Lyrics 接入 `[x]`（客户端契约；UI 接线待服务器音乐浏览）
 - 依赖：019
-- 内容：Jellyfin 10.9+ /Audio/{id}/Lyrics；Emby 静默降级；严格 serverId
-  路由
+- 内容：Jellyfin 10.9+ `/Audio/{id}/Lyrics`（ticks 起点）；Emby 无端点
+  → 覆盖返回 null（不发请求）；404/空数组 → null（无词，桌面歌词隐藏）
 - 验收：客户端契约测试；无词→桌面歌词自动隐藏
-- Evidence：
+- Evidence: `tests/main/online/lyrics.test.ts` 4/4（端点/空词/404/Emby
+  静默降级）
+- 阻塞：服务器音频库浏览/播放未实现（music 目录域目前只有本地+WebDAV），
+  端点暂未接线到 UI——待服务器音乐浏览任务
 
-### QYP3-021 歌词面板 `[ ]`
+### QYP3-021 歌词面板 `[x]`
 - 依赖：018
-- 内容：详情页歌词展示（滚动+点击跳转）+ 手动导入 .lrc
+- 内容：迷你条「词」开合 LyricsPanel——GET_LYRICS 读词 + parseLrc +
+  findCurrentLine 同步高亮 + 自动滚到当前行 + 点击行 seek + 手动导入
+  .lrc（MUSIC.IMPORT_LYRICS：文件对话框 → lyrics 分区，成功 Toast）
 - 验收：同步高亮纯函数单测；导入容错 Toast
-- Evidence：
+- Evidence: `tests/renderer/music/lyrics-panel.test.tsx` 4/4（高亮/跳转/
+  空态/导入成功与失败不替换）；typecheck 绿
+- 范围：面板在 webaudio 引擎激活时可用（迷你条同源）
 
 ### QYP3-022 桌面歌词窗口 `[ ]`
 - 依赖：021

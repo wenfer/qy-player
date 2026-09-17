@@ -5,8 +5,11 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   extractCoverBytes,
+  readLyricsCache,
   registerCoversPartition,
+  registerLyricsPartition,
   saveCoverFromTags,
+  saveLyricsFromTags,
 } from '../../../src/main/modules/library-scanner/cover-service';
 import { CacheManager } from '../../../src/main/modules/cache/cache-manager';
 
@@ -64,5 +67,24 @@ describe('cover service (QYP3-005)', () => {
     tmpRoots.push(coversDir);
     const saved = await saveCoverFromTags(1, readFileSync(join(dir, 'notags.mp3')), coversDir);
     expect(saved).toBeNull();
+  });
+
+  it('saves tag lyrics and registers the protected lyrics partition', async () => {
+    const lyricsDir = mkdtempSync(join(tmpdir(), 'qy-lyrics-'));
+    tmpRoots.push(lyricsDir);
+    expect(await saveLyricsFromTags(9, lyricsDir, '[00:01.00]第一行')).toBe(true);
+    expect(readdirSync(lyricsDir)).toEqual(['9.lrc']);
+    expect(await readLyricsCache(9, lyricsDir)).toBe('[00:01.00]第一行');
+    expect(await readLyricsCache(404, lyricsDir)).toBeNull();
+    // 空歌词不落盘（has_lyrics 仍由标签决定）
+    expect(await saveLyricsFromTags(9, lyricsDir, '   ')).toBe(false);
+
+    const cm = new CacheManager();
+    registerLyricsPartition(cm, lyricsDir);
+    const partition = cm.list().find((p) => p.id === 'lyrics')!;
+    expect(partition.sweepable).toBe(false);
+    // 受保护：即使清扫也不删（人工可编辑资产）
+    expect(cm.sweep('lyrics', 0).deletedFiles).toBe(0);
+    expect(readdirSync(lyricsDir)).toEqual(['9.lrc']);
   });
 });

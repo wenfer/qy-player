@@ -44,6 +44,17 @@ export interface JellyfinItem {
   DateCreated?: string;
 }
 
+export interface JellyfinLyricsLine {
+  Text: string;
+  /** 起始时间（ticks，1 tick = 100ns）。 */
+  Start?: number;
+}
+
+export interface JellyfinLyrics {
+  Lyrics: JellyfinLyricsLine[];
+  Metadata?: unknown;
+}
+
 export class JellyfinClient {
   protected client: AxiosInstance;
   protected baseUrl: string;
@@ -165,6 +176,24 @@ export class JellyfinClient {
       params: this.userId ? { userId: this.userId } : undefined,
     });
     return response.data;
+  }
+
+  /**
+   * 歌词（QYP3-020，Jellyfin 10.9+）：GET /Audio/{itemId}/Lyrics。
+   * 歌词不是播放关键路径——旧服务器 404、条目无词、网络异常一律返回
+   * null（调用方按"无词"处理，桌面歌词自动隐藏），绝不阻塞播放。
+   */
+  async getLyrics(itemId: string): Promise<JellyfinLyrics | null> {
+    try {
+      const response = await this.client.get(`/Audio/${itemId}/Lyrics`);
+      const lines = response.data?.Lyrics;
+      if (!Array.isArray(lines) || lines.length === 0) return null;
+      return response.data as JellyfinLyrics;
+    } catch (e) {
+      if (axios.isAxiosError(e) && e.response?.status === 404) return null;
+      console.error('[LYRICS] 服务器歌词获取失败:', e instanceof Error ? e.message : e);
+      return null;
+    }
   }
 
   async getNextUp(seriesId?: string): Promise<JellyfinItem[]> {
