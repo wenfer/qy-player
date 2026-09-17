@@ -354,9 +354,10 @@
 - 验收：同二期 Checkpoint F 标准
 - Evidence（已完成部分）：
   - 门禁：`npx tsc --noEmit -p tsconfig.json` + `-p tsconfig.node.json` 全绿；
-    全量 vitest **790/790（76 文件）**；`build:main` / `build:preload` /
+    全量 vitest **825/825（83 文件）**；`build:main` / `build:preload` /
     `build:renderer` 三个产物均构建成功
-  - 文档：CHANGELOG 已定稿 `1.2.0（三期：音乐播放）`（含 025/026/020b）；
+  - 文档：CHANGELOG 已定稿 `1.2.0（三期：音乐播放）`（含 025/026/020b 与
+    全部 P2 项）；
     README 音乐条目与模块树更新；AGENTS 三期状态行 + 音乐/服务器音乐/
     音乐会话/歌词/拾音器数据流条目更新
   - TARGET-VERIFY：新增「音乐（三期，v1.2.0 增补）」清单（含服务器音乐、
@@ -364,8 +365,8 @@
   - **遗留（需人工决定）**：`package.json` 仍为 `1.1.0`，与 CHANGELOG 的
     1.2.0 不一致；按项目规范发版 = 推 tag（`git tag v1.2.0 && git push
     origin v1.2.0`），该动作需人工批准后执行，本次不动版本号、不打 tag
-- 范围外（计划 §9 的 P2）：服务器歌单只读、睡眠定时、ReplayGain 高级设置、
-  网络收音机流（需先 spike）——见下方 P2 小节
+- 原范围外（计划 §9 的 P2）：服务器歌单只读、睡眠定时、ReplayGain 高级设置、
+  网络收音机流（需先 spike）——**六项 P2 已全部收口**，见下方 P2 小节
 
 ---
 
