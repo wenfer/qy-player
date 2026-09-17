@@ -40,6 +40,11 @@ Deepin 20.9、Debian 10 (buster) 这类老系统的 glibc 只有 **2.28**：
   搜索合并去重（按完整来源身份，不错归属）
 - **系统托盘**：运行中可从托盘快速显示/隐藏窗口；关闭窗口即退出应用
 - **全局快捷键**：多媒体键控制播放
+- **音乐播放（三期）**：本地 / WebDAV 音频扫描入库（自研标签解析、
+  内嵌封面、CUE 分轨）；双播放引擎（常见格式走内置引擎拿实时频谱，
+  冷门格式走 mpv 保证兼容）；歌单（含 m3u/m3u8 导入、XSPF 导出）；
+  桌面歌词浮窗（透明置顶、鼠标穿透、逐字高亮）；歌词面板与 .lrc 导入；
+  均衡器 / ReplayGain / 拾音器
 
 > 注：默认使用**软件解码**（`--hwdec=no`）。老机器的 VA-API/VDPAU 驱动播放在线流不稳定（典型表现为播放约 30 秒后画面冻结），软解更可靠；CPU 较强时画质与稳定性兼得。
 
@@ -102,9 +107,10 @@ src/
       playback-state/    # 进度保存、续播、服务器同步
       subtitle-engine/   # 字幕扫描与语言识别
       online-connector/  # Jellyfin/Emby REST 客户端
-      ui-shell/          # 托盘 / 全局快捷键
+      playback-engine/   # 音乐引擎选择 / Web Audio 图 / 歌单 / 歌词解析
+      ui-shell/          # 托盘 / 全局快捷键 / 桌面歌词窗口
   preload/        # contextBridge 安全桥梁
-  renderer/       # React 前端（Home / Detail / Library / Search / Local / History / Settings）
+  renderer/       # React 前端（Home / Detail / Library / Search / Local / Music / Playlists / DeskLyrics / Settings）
   shared/         # IPC 通道常量 + 类型定义
 ```
 

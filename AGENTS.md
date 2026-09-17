@@ -42,7 +42,8 @@
 │     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
-│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成
+│     playback-engine/          音乐：引擎选择/audio-url 协议桥/歌单 IO/LRC 解析/均衡器（ADR-0007）
+│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词窗口（ADR-0008）
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
 └─ mpv 0.32 子进程               ~/.local/bin/mpv 优先，系统 mpv 兜底；通信走 Unix Socket JSON IPC
@@ -56,6 +57,9 @@
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
+- **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（服务器/WebDAV/转码/CUE/兼容性优先 → mpv；spectrum-first 且直连格式 → renderer 引擎）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 本地驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次）
+- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发
+- **拾音器**：频谱来自 renderer 引擎 AnalyserNode（fftSize 2048、≤30fps）；mpv 引擎退化为按 时长+进度 绘制的播放波形（无缓存、无外部依赖）
 
 ## 已知机制与陷阱（改相关代码前必读）
 
@@ -115,7 +119,8 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 
 ## 文档索引
 
-- 三期规划（音乐播放，未动工）：`docs/PHASE3-PLAN.md` + `tasks/todo.md`
+- 三期规划（音乐播放，001～023 已完成，024 发布门禁待人工批准）：
+  `docs/PHASE3-PLAN.md` + `tasks/todo.md`
   + ADR-0007（音乐引擎）/ADR-0008（桌面歌词）
 
 - 运行时说明（缓存/并发预算/诊断/回滚）：`docs/OPERATIONS.md`
