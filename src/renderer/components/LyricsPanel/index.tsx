@@ -5,35 +5,46 @@ import {
   parseLrc,
 } from '../../../main/modules/playback-engine/lrc-parser';
 import { useToastStore } from '../../stores/toast-store';
+import type { MusicSourceRef } from '../../stores/music-playback-store';
 
 /**
  * 歌词面板（QYP3-021）：当前曲目的歌词，随播放位置同步高亮，
  * 点击行跳转；无词时可手动导入 .lrc（落盘到受保护的 lyrics 分区）。
  * 高亮行号由 lrc-parser 的纯函数决定，UI 不复制算法。
+ *
+ * QYP3-020b：歌词按来源路由——本地音轨读 lyrics 缓存分区；服务器曲目
+ * 走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点 → 无词）。导入只对
+ * 本地音轨开放（服务器歌词是只读的，缓存按 trackId 落盘）。
  */
 interface LyricsPanelProps {
-  trackId: number;
+  source: MusicSourceRef;
   title: string;
   position: number;
   onSeek: (time: number) => void;
   onClose: () => void;
 }
 
-export default function LyricsPanel({ trackId, title, position, onSeek, onClose }: LyricsPanelProps) {
+export default function LyricsPanel({ source, title, position, onSeek, onClose }: LyricsPanelProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const addToast = useToastStore((s) => s.addToast);
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  const { trackId, serverId, itemId } = source;
+  const isServer = Boolean(serverId && itemId);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = (await window.electronAPI.getMusicLyrics(trackId)) as {
+    const request =
+      serverId && itemId
+        ? window.electronAPI.getServerLyrics(serverId, itemId)
+        : window.electronAPI.getMusicLyrics(trackId);
+    const res = (await request) as {
       ok?: boolean;
       data?: { hasLyrics: boolean; content: string | null };
     };
     setContent(res?.data?.content ?? null);
     setLoading(false);
-  }, [trackId]);
+  }, [trackId, serverId, itemId]);
 
   useEffect(() => {
     void load();
@@ -74,14 +85,16 @@ export default function LyricsPanel({ trackId, title, position, onSeek, onClose 
           </p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => void importLyrics()}
-            className="px-2 py-1 rounded-lg text-xs hover:bg-accent text-muted-foreground hover:text-foreground focus-ring flex items-center gap-1"
-          >
-            <Upload size={12} />
-            导入歌词
-          </button>
+          {!isServer && (
+            <button
+              type="button"
+              onClick={() => void importLyrics()}
+              className="px-2 py-1 rounded-lg text-xs hover:bg-accent text-muted-foreground hover:text-foreground focus-ring flex items-center gap-1"
+            >
+              <Upload size={12} />
+              导入歌词
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -97,7 +110,9 @@ export default function LyricsPanel({ trackId, title, position, onSeek, onClose 
         {loading ? (
           <p className="text-xs text-muted-foreground">加载中…</p>
         ) : !content ? (
-          <p className="text-xs text-muted-foreground">这首曲目还没有歌词，可导入 .lrc 文件。</p>
+          <p className="text-xs text-muted-foreground">
+            {isServer ? '服务器上没有这首曲目的歌词。' : '这首曲目还没有歌词，可导入 .lrc 文件。'}
+          </p>
         ) : !hasTimedLines ? (
           <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-sans">
             {content}

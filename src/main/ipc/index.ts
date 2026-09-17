@@ -8,6 +8,7 @@ import { PlayerCore } from '../modules/player-core';
 import { getDatabase, createStorage, closeDatabase } from '../modules/storage/db';
 import { PlaybackStateManager } from '../modules/playback-state';
 import { createClient } from '../modules/online-connector';
+import { lyricsToLrc } from '../modules/online-connector/lyrics';
 import {
   MEDIA_SERVER_NAMESPACE,
   assertNotSecretConfigKey,
@@ -528,6 +529,35 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     const content = await readLyricsCache(trackId, lyricsDir);
     return ok({ hasLyrics: content !== null, content });
   });
+
+  // 服务器曲目歌词（QYP3-020b）：Jellyfin 10.9+ `/Audio/{id}/Lyrics` →
+  // 归一成 LRC 文本（面板/桌面歌词与本地歌词共用同一份解析）。
+  // 无词/端点不存在（Emby）/网络失败一律 hasLyrics=false，绝不阻塞播放。
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.GET_SERVER_LYRICS,
+    async (_event, args: { serverId: number; itemId: string }) => {
+      const serverId = Number(args?.serverId);
+      const itemId = typeof args?.itemId === 'string' ? args.itemId.trim() : '';
+      if (!Number.isInteger(serverId) || serverId <= 0 || !itemId) {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      try {
+        const binding = bindServerById(storage, secretStore, serverId);
+        const client = createClient({
+          type: binding.type,
+          baseUrl: binding.baseUrl,
+          apiKey: binding.apiKey,
+          userId: binding.userId,
+        });
+        const lyrics = await client.getLyrics(itemId);
+        const content = lyricsToLrc(lyrics);
+        return ok({ hasLyrics: content !== null, content });
+      } catch (e) {
+        console.error('[LYRICS] 服务器歌词获取失败:', e instanceof Error ? e.message : e);
+        return ok({ hasLyrics: false, content: null });
+      }
+    }
+  );
 
   // 手动导入歌词（QYP3-021）：.lrc 文本 → <lyricsDir>/<trackId>.lrc。
   // 歌词属人工编辑资产（受保护分区），导入即覆盖，返回内容供面板立即显示。

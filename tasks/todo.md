@@ -237,16 +237,30 @@
   local-scan.test 39/39（扫描期歌词落盘内容断言）；全量绿
 - 遗留：WebDAV 源无 readAudio 钩子 → 歌词仍待"下载后"方案（P2）
 
-### QYP3-020 Jellyfin Lyrics 接入 `[x]`（客户端契约；UI 接线待服务器音乐浏览）
+### QYP3-020 Jellyfin Lyrics 接入 `[x]`
 - 依赖：019
 - 内容：Jellyfin 10.9+ `/Audio/{id}/Lyrics`（ticks 起点）；Emby 无端点
   → 覆盖返回 null（不发请求）；404/空数组 → null（无词，桌面歌词隐藏）
 - 验收：客户端契约测试；无词→桌面歌词自动隐藏
 - Evidence: `tests/main/online/lyrics.test.ts` 4/4（端点/空词/404/Emby
   静默降级）
-- 阻塞：UI 接线待 020b——歌词面板/桌面歌词目前按本地 trackId 读歌词缓存，
-  服务器曲目需 `{serverId, itemId}` 路由的新 IPC（025 已铺好服务器曲目队列，
-  端点本身可用）
+- 接线见 020b（025 铺好服务器曲目队列后才能落地）
+
+### QYP3-020b 服务器歌词接线 `[x]`
+- 依赖：020, 026
+- 内容：`online-connector/lyrics.ts` 纯函数把结构化行（Text + Start ticks）
+  归一成 LRC（下游只有一套解析）；`MUSIC.GET_SERVER_LYRICS`（按 serverId
+  严格绑定服务器，失败/无词一律 hasLyrics=false）；store 增 `currentSource`
+  并在每次起播/换曲按来源路由歌词（本地 trackId / 服务器 {serverId,itemId}）
+  并推送桌面歌词；歌词面板按来源二选一，服务器曲目隐藏「导入歌词」
+  （服务器歌词只读）并给出对应空态文案
+- 验收：服务器曲目读服务器端点且不碰本地缓存；Emby 无词不报错；
+  歌词拉取不得影响已发生的 loadfile
+- Evidence: `tests/main/online/lyrics-lrc.test.ts` 5/5（ticks 换算/空行/
+  缺 Start/无词→null）；`tests/renderer/music/lyrics-panel.test.tsx` 6/6
+  （本地路由/服务器路由 + 隐藏导入 + 无词文案）；server-music-browser
+  4/4 增断言（起播后按 serverId+itemId 取词，不读本地缓存）；
+  typecheck 双配置 + 全量绿
 
 ### QYP3-021 歌词面板 `[x]`
 - 依赖：018

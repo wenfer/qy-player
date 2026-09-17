@@ -34,6 +34,9 @@ const api = {
   resolvePlayback: vi.fn(),
   getSettings: vi.fn(() => Promise.resolve({ ok: true, data: null })),
   getMusicLyrics: vi.fn(() => Promise.resolve({ ok: true, data: { hasLyrics: false, content: null } })),
+  getServerLyrics: vi.fn(() =>
+    Promise.resolve({ ok: true, data: { hasLyrics: false, content: null } })
+  ),
 };
 
 vi.stubGlobal('electronAPI', api);

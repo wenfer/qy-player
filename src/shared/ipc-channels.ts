@@ -31,6 +31,8 @@ export const IPC_CHANNELS = {
     /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
     REPORT_PROGRESS: 'music:report-progress',
     GET_LYRICS: 'music:get-lyrics',
+    /** 服务器曲目歌词（QYP3-020b）：Jellyfin 端点，Emby 无词。 */
+    GET_SERVER_LYRICS: 'music:get-server-lyrics',
     /** 手动导入 .lrc（QYP3-021）：文件对话框 → 落盘到 lyrics 分区。 */
     IMPORT_LYRICS: 'music:import-lyrics',
     /** webaudio 起播/停止时上报激活态（媒体键双用途路由）。 */

@@ -199,6 +199,9 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, value),
   // 歌词（QYP3-021）：扫描期内嵌歌词读缓存；手动导入走文件对话框
   getMusicLyrics: (trackId: number) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_LYRICS, { trackId }),
+  /** 服务器曲目歌词（QYP3-020b）：Jellyfin 端点；Emby / 无词返回 hasLyrics=false。 */
+  getServerLyrics: (serverId: number, itemId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_SERVER_LYRICS, { serverId, itemId }),
   importMusicLyrics: (trackId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.IMPORT_LYRICS, { trackId }),
   onMusicCommand: (cb: (command: string) => void) => {

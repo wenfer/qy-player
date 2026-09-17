@@ -16,6 +16,8 @@ type EngineExtTrack = QueueTrack & { trackId: number; sourceId: number; mediaId:
 export interface MusicPlayingState {
   engine: 'webaudio' | 'mpv' | null;
   current: QueueTrack | null;
+  /** 当前曲目来源（QYP3-020b：歌词按来源路由——本地 trackId / 服务器 {serverId,itemId}）。 */
+  currentSource: MusicSourceRef | null;
   position: number;
   duration: number;
   isPlaying: boolean;
@@ -29,6 +31,13 @@ export interface MusicPlayingState {
   /** 服务器音乐队列（QYP3-025）：mpv 引擎下靠它推进上下曲。 */
   serverQueue: MusicTrackInput[];
   serverIndex: number;
+}
+
+/** 歌词/进度的来源标识（本地音轨或服务器条目）。 */
+export interface MusicSourceRef {
+  trackId: number;
+  serverId?: number;
+  itemId?: string;
 }
 
 export interface MusicPlaybackStore extends MusicPlayingState {
@@ -79,11 +88,22 @@ export function refOfTrack(t: MusicTrackInput): MediaRef {
   return { provider: 'music', sourceId: t.sourceId, itemId: String(t.trackId) };
 }
 
-/** 换曲时重新拉取歌词（缓存读取，失败静默=无词）。 */
-function loadLyricsFor(trackId: number): void {
+/** 歌词来源标识（QYP3-020b）：本地音轨 / 服务器条目二选一。 */
+export function sourceOfTrack(t: MusicTrackInput): MusicSourceRef {
+  return t.serverId && t.itemId
+    ? { trackId: 0, serverId: t.serverId, itemId: t.itemId }
+    : { trackId: t.trackId };
+}
+
+/** 换曲时重新拉取歌词（本地读缓存 / 服务器走端点，失败静默=无词）。 */
+function loadLyricsFor(source: MusicSourceRef | null): void {
   currentLyrics = null;
-  void window.electronAPI
-    .getMusicLyrics(trackId)
+  if (!source) return;
+  const request =
+    source.serverId && source.itemId
+      ? window.electronAPI.getServerLyrics(source.serverId, source.itemId)
+      : window.electronAPI.getMusicLyrics(source.trackId);
+  void request
     .then((res) => {
       const data = (res as { data?: { content?: string | null } })?.data;
       currentLyrics = typeof data?.content === 'string' ? data.content : null;
@@ -273,6 +293,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   queueSnapshot: [],
   serverQueue: [],
   serverIndex: -1,
+  currentSource: null,
 
   playQueue: async (tracks, startIndex) => {
     const start = tracks[startIndex];
@@ -332,6 +353,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         set({
           engine: 'webaudio',
           current: engineSnapshotCurrent(queue, st.currentTrackId),
+          currentSource: sourceOfTrack(start),
           position: 0,
           duration: queue[idx]?.duration ?? 0,
           isPlaying: true,
@@ -340,7 +362,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           queueSnapshot: queue,
           errorMessage: null,
         });
-        loadLyricsFor(queue[idx]?.trackId ?? start.trackId);
+        loadLyricsFor(sourceOfTrack(start));
       } else {
         // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
         // QYP3-026：媒体键仍按音乐语义路由到 renderer（"下一曲"要走音乐
@@ -361,6 +383,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           duration: start.duration ?? 0,
           isPlaying: true,
           errorMessage: null,
+          currentSource: sourceOfTrack(start),
           // 服务器队列（本地冷门格式时为单曲，上下曲无队列可走）
           serverQueue: start.serverId ? tracks : [],
           serverIndex: start.serverId ? startIndex : -1,
@@ -375,10 +398,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           undefined,
           { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
         );
-        // 服务器曲目无本地歌词缓存（QYP3-020b 接服务器歌词前先清空，
-        // 否则桌面歌词会残留上一首的原文）
-        if (start.serverId) currentLyrics = null;
-        else loadLyricsFor(start.trackId);
+        // 服务器曲目走服务器歌词端点（QYP3-020b），本地读缓存分区
+        loadLyricsFor(sourceOfTrack(start));
       }
     } catch (e) {
       set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
@@ -493,8 +514,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         duration: track.duration ?? 0,
         isPlaying: true,
         errorMessage: null,
+        currentSource: sourceOfTrack(track),
       });
-      currentLyrics = null; // 服务器曲目：本地无歌词缓存
       const [eqGains, replaygain] = await readAudioChainSettings();
       await window.electronAPI.playerLoadFile(
         res.data.url,
@@ -504,6 +525,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         undefined,
         { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
       );
+      // 歌词在起播之后拉取（QYP3-020b）：歌词是非关键路径，任何失败
+      // 都不允许影响已经发生的 loadfile
+      loadLyricsFor(sourceOfTrack(track));
     } catch (e) {
       set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
     }
@@ -519,6 +543,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     set({
       engine: null,
       current: null,
+      currentSource: null,
       position: 0,
       duration: 0,
       isPlaying: false,
@@ -552,8 +577,9 @@ function syncFromEngine(
     queueLength: st.length,
     queueIndex: st.index,
     current,
+    currentSource: current ? { trackId: current.id } : null,
     position: 0,
     isPlaying: st.currentTrackId !== null,
   });
-  if (current) loadLyricsFor(current.id);
+  if (current) loadLyricsFor({ trackId: current.id });
 }

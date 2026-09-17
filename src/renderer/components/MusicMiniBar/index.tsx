@@ -147,9 +147,9 @@ export default function MusicMiniBar() {
 
   return (
     <>
-      {showLyrics && playback.current && (
+      {showLyrics && playback.current && playback.currentSource && (
         <LyricsPanel
-          trackId={playback.current.id}
+          source={playback.currentSource}
           title={playback.current.title}
           position={playback.position}
           onSeek={playback.seek}

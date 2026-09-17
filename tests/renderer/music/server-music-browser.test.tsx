@@ -13,6 +13,9 @@ const api = {
   playerControl: vi.fn(),
   setMusicEngineActive: vi.fn(),
   getSettings: vi.fn(),
+  // 服务器曲目歌词在起播后拉取（QYP3-020b）
+  getServerLyrics: vi.fn(),
+  getMusicLyrics: vi.fn(),
   getMusicAlbums: vi.fn(),
   getMusicArtists: vi.fn(),
   getMusicTracks: vi.fn(),
@@ -74,6 +77,8 @@ beforeEach(() => {
   );
   api.playerLoadFile.mockResolvedValue(undefined);
   api.getSettings.mockResolvedValue({ ok: true, data: null });
+  api.getServerLyrics.mockResolvedValue({ ok: true, data: { hasLyrics: true, content: '[00:01.00]词' } });
+  api.getMusicLyrics.mockResolvedValue({ ok: true, data: { hasLyrics: false, content: null } });
   api.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });
   api.getMusicArtists.mockResolvedValue({ ok: true, data: { artists: [] } });
   api.getMusicTracks.mockResolvedValue({ ok: true, data: { tracks: [] } });
@@ -117,6 +122,9 @@ describe('server music browsing (QYP3-025)', () => {
     expect(state.engine).toBe('mpv');
     expect(state.serverQueue.map((t) => t.itemId)).toEqual(['t1', 't2']);
     expect(state.serverIndex).toBe(1);
+    // 服务器歌词按 serverId + itemId 路由（QYP3-020b），不读本地缓存
+    await waitFor(() => expect(api.getServerLyrics).toHaveBeenCalledWith(1, 't2'));
+    expect(api.getMusicLyrics).not.toHaveBeenCalled();
   });
 
   it('advances and rewinds inside the server queue', async () => {

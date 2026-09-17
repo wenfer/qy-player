@@ -60,7 +60,7 @@
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（服务器/WebDAV/转码/CUE/兼容性优先 → mpv；spectrum-first 且直连格式 → renderer 引擎）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 本地驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次）
 - **服务器音乐**：音乐页「来源」切换见 `pages/Music/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）
 - **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）
-- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**服务器曲目无本地歌词缓存**（切曲须清空，否则桌面歌词残留上一首）；服务器歌词端点已实现但未接线
+- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默
 - **拾音器**：频谱来自 renderer 引擎 AnalyserNode（fftSize 2048、≤30fps）；mpv 引擎退化为按 时长+进度 绘制的播放波形（无缓存、无外部依赖）
 
 ## 已知机制与陷阱（改相关代码前必读）
@@ -121,7 +121,7 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 
 ## 文档索引
 
-- 三期规划（音乐播放，001～023、025、026 已完成，024 发布门禁待人工批准）：
+- 三期规划（音乐播放，001～023、025、026 及 020b 已完成，024 发布门禁待人工批准）：
   `docs/PHASE3-PLAN.md` + `tasks/todo.md`
   + ADR-0007（音乐引擎）/ADR-0008（桌面歌词）
 
