@@ -37,6 +37,8 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   setRepeat: (mode: RepeatMode) => void;
   toggleShuffle: () => void;
   clearError: () => void;
+  /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
+  getSpectrum: () => Uint8Array | null;
 }
 
 let engineSingleton: WebAudioEngine | null = null;
@@ -368,6 +370,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   },
 
   clearError: () => set({ errorMessage: null }),
+
+  getSpectrum: () => engineSingleton?.getSpectrum() ?? null,
 }));
 
 function engineSnapshotCurrent(

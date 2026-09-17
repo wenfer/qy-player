@@ -3,16 +3,39 @@ import { Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import LyricsPanel from '../LyricsPanel';
 
+import Visualizer, { type VisualizerMode } from '../Visualizer';
+
 /**
  * 音乐迷你控制条（QYP3-013）：webaudio 引擎激活时全局常驻（可折叠）。
  * mpv 引擎的音视频控制由全局 PlayerControls 驱动，不在此重复。
- * 歌词面板（QYP3-021）由本条的「词」按钮开合。
+ * 歌词面板（QYP3-021）由本条的「词」按钮开合；拾音器（QYP3-023）
+ * 按设置模式显示迷你条。
  */
+
+/** 拾音器模式：off=关闭；auto 在 renderer 引擎下按频谱、否则波形。 */
+function resolveMode(setting: string, engine: string | null): VisualizerMode | null {
+  if (setting === 'off') return null;
+  if (setting === 'waveform') return 'waveform';
+  if (setting === 'spectrum') return 'spectrum';
+  return engine === 'webaudio' ? 'spectrum' : 'waveform';
+}
 export default function MusicMiniBar() {
   const playback = useMusicPlaybackStore();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
+  const [visualizer, setVisualizer] = useState<string>('auto');
+
+  useEffect(() => {
+    // 拾音器设置（QYP3-023）：默认 auto（renderer 引擎→频谱，否则波形）
+    void window.electronAPI
+      .getSettings('playback.visualizer')
+      .then((res) => {
+        const value = (res as { data?: unknown })?.data;
+        if (typeof value === 'string') setVisualizer(value);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -69,7 +92,21 @@ export default function MusicMiniBar() {
           onClose={() => setShowLyrics(false)}
         />
       )}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-2rem))] bg-card/95 backdrop-blur border border-border rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-2rem))] bg-card/95 backdrop-blur border border-border rounded-xl px-4 py-3 flex flex-col gap-2 shadow-lg">
+        {(() => {
+          const mode = resolveMode(visualizer, playback.engine);
+          return mode ? (
+            <Visualizer
+              mode={mode}
+              getSpectrum={playback.getSpectrum}
+              isPlaying={playback.isPlaying}
+              position={playback.position}
+              duration={playback.duration}
+              height={24}
+            />
+          ) : null;
+        })()}
+        <div className="flex items-center gap-3">
       <button
         type="button"
         onClick={() => void playback.prev()}
@@ -141,6 +178,7 @@ export default function MusicMiniBar() {
       >
         <X size={14} />
       </button>
+        </div>
     </div>
     </>
   );

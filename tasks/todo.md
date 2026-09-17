@@ -232,12 +232,17 @@
   拖动与穿透矩阵（GNOME/KDE/Xfce）——已列入 TARGET-VERIFY
 - 范围：由 webaudio 引擎驱动（与歌词面板同源）；mpv 引擎曲目暂无位置源
 
-### QYP3-023 拾音器双模式 `[ ]`
+### QYP3-023 拾音器双模式 `[x]`（帧率/CPU 与渐变实机待验证）
 - 依赖：010,011
-- 内容：实时频谱（AnalyserNode，fftSize≤2048、≤30fps）+ mpv 引擎播放
-  波形 + 模式自动/手动切换 + 设置页
+- 内容：renderer 引擎 AnalyserNode 实时频谱（fftSize 2048、30fps 上限、
+  48 柱峰值抽样）+ mpv 引擎播放波形（waveformAmplitude 确定性包络，
+  按 时长+进度 上色，无缓存无外部依赖）+ 模式切换（auto/spectrum/
+  waveform/off，存 `playback.visualizer`）+ 设置页 + 迷你条内嵌
 - 验收：帧率与 CPU 采样记录（老机预算）；双引擎切换无缝
-- Evidence：
+- Evidence: `tests/renderer/music/visualizer.test.tsx` 2/2（包络纯函数
+  有界/确定性/中间高 + 无 2D 上下文静默降级）；typecheck 绿
+- 待实机：30fps 下的 CPU 占用采样（老机）、mpv 引擎切波形是否跳变——
+  已列入 TARGET-VERIFY
 
 ### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`
 - 依赖：全部

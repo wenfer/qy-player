@@ -29,6 +29,8 @@ export default function MusicSettings() {
   const [deskOpen, setDeskOpen] = useState(false);
   const [deskFontSize, setDeskFontSize] = useState(28);
   const [deskLocked, setDeskLocked] = useState(true);
+  // 拾音器（QYP3-023）
+  const [visualizer, setVisualizer] = useState<string>('auto');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -53,6 +55,8 @@ export default function MusicSettings() {
         if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
         const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
         setDeskLocked(l?.data !== 'false');
+        const v = (await window.electronAPI.getSettings('playback.visualizer')) as { data?: unknown };
+        if (typeof v?.data === 'string') setVisualizer(v.data);
       } catch {
         // 默认值
       } finally {
@@ -133,6 +137,14 @@ export default function MusicSettings() {
     addToast(next ? '桌面歌词已锁定（鼠标穿透）' : '已解锁：可拖动窗口调整位置', 'success');
   }, [deskLocked, addToast]);
 
+  const changeVisualizer = useCallback(
+    async (value: string): Promise<void> => {
+      setVisualizer(value);
+      await save('playback.visualizer', value, '拾音器设置已保存');
+    },
+    [save]
+  );
+
   const adjustBand = useCallback(
     (index: number, value: number): void => {
       setEqGains((prev) => {
@@ -179,6 +191,23 @@ export default function MusicSettings() {
           </select>
           <span className="text-xs text-muted-foreground w-full">
             依标签里的增益信息拉平音量差异；无标签的曲目不受影响。
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">
+          <span className="text-sm">拾音器</span>
+          <select
+            value={visualizer}
+            onChange={(e) => void changeVisualizer(e.target.value)}
+            className="ml-auto bg-input border border-border rounded-lg px-2 py-1.5 text-xs focus-ring"
+          >
+            <option value="auto">自动（有实时频谱就用频谱）</option>
+            <option value="spectrum">实时频谱</option>
+            <option value="waveform">播放波形</option>
+            <option value="off">关闭</option>
+          </select>
+          <span className="text-xs text-muted-foreground w-full">
+            显示在底部音乐控制条上，最高 30 帧/秒。冷门格式走 mpv 引擎时只有播放波形。
           </span>
         </div>
 
