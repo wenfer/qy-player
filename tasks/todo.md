@@ -347,7 +347,7 @@
   收藏按钮禁用与启用/无会话不渲染）；typecheck 双配置 + 全量绿
 - 待实机：mpv 音乐与视频切换时迷你条的显隐时机——已列入 TARGET-VERIFY
 
-### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`（仅剩版本号 + tag 待人工批准）
+### QYP3-024 Checkpoint F：全量回归/文档/发布 `[x]`
 - 依赖：全部
 - 内容：门禁全绿；TARGET-VERIFY 增补音乐项；CHANGELOG 1.2.0；README/
   AGENTS 同步；人工批准后 tag
@@ -362,9 +362,11 @@
     音乐会话/歌词/拾音器数据流条目更新
   - TARGET-VERIFY：新增「音乐（三期，v1.2.0 增补）」清单（含服务器音乐、
     引擎互斥、服务器歌词、桌面歌词 ARGB、拾音器 CPU、Wayland 降级）
-  - **遗留（需人工决定）**：`package.json` 仍为 `1.1.0`，与 CHANGELOG 的
-    1.2.0 不一致；按项目规范发版 = 推 tag（`git tag v1.2.0 && git push
-    origin v1.2.0`），该动作需人工批准后执行，本次不动版本号、不打 tag
+  - 发版：人工批准后 `package.json` / `package-lock.json` 均升到 `1.2.0`
+    （lockfile 之前两次发版都停在 1.0.0，本次一并同步）；已建 annotated
+    tag `v1.2.0`（tag 内容是本次发布说明）。**push tag 待人工确认**——
+    推上去 GitHub Actions 才会打包发布（`.github/workflows/release.yml`
+    监听 `v*` tag）
 - 原范围外（计划 §9 的 P2）：服务器歌单只读、睡眠定时、ReplayGain 高级设置、
   网络收音机流（需先 spike）——**六项 P2 已全部收口**，见下方 P2 小节
 
