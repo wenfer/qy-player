@@ -43,6 +43,38 @@ let engineSingleton: WebAudioEngine | null = null;
 let lastReportAt = 0;
 /** 播放令牌：新 playQueue 使旧 playCurrent 竞态失效（重复点击防护）。 */
 let playToken = 0;
+/** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
+let currentLyrics: string | null = null;
+let lastDeskPushAt = 0;
+
+/** 桌面歌词推送（≤10Hz；窗口未开时 main 侧直接丢弃）。 */
+function pushDeskLyrics(position: number, isPlaying: boolean): void {
+  const now = Date.now();
+  if (now - lastDeskPushAt < 100) return;
+  lastDeskPushAt = now;
+  const s = useMusicPlaybackStore.getState();
+  void window.electronAPI.pushDeskLyricsState({
+    title: s.current?.title ?? '',
+    content: currentLyrics,
+    position,
+    isPlaying,
+  });
+}
+
+/** 换曲时重新拉取歌词（缓存读取，失败静默=无词）。 */
+function loadLyricsFor(trackId: number): void {
+  currentLyrics = null;
+  void window.electronAPI
+    .getMusicLyrics(trackId)
+    .then((res) => {
+      const data = (res as { data?: { content?: string | null } })?.data;
+      currentLyrics = typeof data?.content === 'string' ? data.content : null;
+      pushDeskLyrics(0, true);
+    })
+    .catch(() => {
+      currentLyrics = null;
+    });
+}
 
 function getEngine(): WebAudioEngine {
   if (!engineSingleton) {
@@ -51,6 +83,7 @@ function getEngine(): WebAudioEngine {
       const s = useMusicPlaybackStore.getState();
       if (s.engine === 'mpv') return; // mpv 引擎状态由主进程事件驱动
       useMusicPlaybackStore.setState({ position, duration: duration || s.duration });
+      pushDeskLyrics(position, true);
       const now = Date.now();
       if (now - lastReportAt >= 10_000) {
         lastReportAt = now;
@@ -232,6 +265,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           queueSnapshot: queue,
           errorMessage: null,
         });
+        loadLyricsFor(queue[idx]?.trackId ?? start.trackId);
       } else {
         // mpv 引擎接管：音乐激活态解除（媒体键回到视频语义）
         void window.electronAPI.setMusicEngineActive(false);
@@ -272,6 +306,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     if (s.engine === 'webaudio') {
       engineSingleton?.pause();
       reportProgress(false);
+      pushDeskLyrics(get().position, false);
       set({ isPlaying: false });
       void window.electronAPI.setMusicEngineActive(false); // 暂停时媒体键还给视频（若无视频则无操作）
     } else if (s.engine === 'mpv') {
@@ -350,11 +385,13 @@ function syncFromEngine(
 ): void {
   const st = engineInstance.queueState;
   const snapshot = useMusicPlaybackStore.getState().queueSnapshot;
+  const current = engineSnapshotCurrent(snapshot, st.currentTrackId);
   set({
     queueLength: st.length,
     queueIndex: st.index,
-    current: engineSnapshotCurrent(snapshot, st.currentTrackId),
+    current,
     position: 0,
     isPlaying: st.currentTrackId !== null,
   });
+  if (current) loadLyricsFor(current.id);
 }

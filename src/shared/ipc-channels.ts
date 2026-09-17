@@ -32,6 +32,17 @@ export const IPC_CHANNELS = {
     /** 全局媒体键转发（renderer 引擎激活时 main → renderer）。 */
     ON_COMMAND: 'music:on-command',
   },
+  DESKLYRICS: {
+    /** 打开桌面歌词窗口（ADR-0008）。 */
+    SHOW: 'desklyrics:show',
+    HIDE: 'desklyrics:hide',
+    /** renderer → main：当前曲目 + 歌词 + 播放位置（节流 ≤10Hz）。 */
+    STATE: 'desklyrics:state',
+    /** main → 桌面歌词窗口：状态/样式推送。 */
+    EVENT: 'desklyrics:event',
+    /** 样式设置（字号/锁定）→ 应用并持久化。 */
+    SET_STYLE: 'desklyrics:set-style',
+  },
   PLAYLIST: {
     LIST: 'playlist:list',
     CREATE: 'playlist:create',

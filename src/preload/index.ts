@@ -2,6 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import type { MediaContext } from '../shared/types';
 
+/** 桌面歌词窗口事件（main → 歌词窗口）。 */
+export interface DeskLyricsEvent {
+  type: 'state' | 'style';
+  state?: { title: string; content: string | null; position: number; isPlaying: boolean };
+  style?: { fontSize: number; locked: boolean };
+}
+
 // Subscribers for the catalog scan progress push channel (see onScanProgress).
 const scanProgressCallbacks = new Set<(event: unknown) => void>();
 let scanProgressHandler: ((_event: unknown, payload: unknown) => void) | null = null;
@@ -190,6 +197,22 @@ const electronAPI = {
     const listener = (_event: unknown, command: string): void => cb(command);
     ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
+  },
+  // 桌面歌词（QYP3-022）：主窗口推状态；歌词窗口收事件
+  showDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.SHOW),
+  hideDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.HIDE),
+  pushDeskLyricsState: (args: {
+    title: string;
+    content: string | null;
+    position: number;
+    isPlaying: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.STATE, args),
+  setDeskLyricsStyle: (args: { fontSize?: number; locked?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.SET_STYLE, args),
+  onDeskLyricsEvent: (cb: (payload: DeskLyricsEvent) => void) => {
+    const listener = (_event: unknown, payload: DeskLyricsEvent): void => cb(payload);
+    ipcRenderer.on(IPC_CHANNELS.DESKLYRICS.EVENT, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DESKLYRICS.EVENT, listener);
   },
   getSkipSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS),
   setSkipSetting: (key: 'skipIntro' | 'skipOutro', enabled: boolean) =>

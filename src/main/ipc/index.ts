@@ -97,6 +97,15 @@ import { CacheManager } from '../modules/cache/cache-manager';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
 import { setMusicEngineActive } from '../modules/playback-engine/music-active';
+import {
+  closeDeskLyrics,
+  isDesktopLyricsSupported,
+  isDeskLyricsOpen,
+  openDeskLyrics,
+  pushDeskLyricsState,
+  setDeskLyricsPersistence,
+  setDeskLyricsStyle,
+} from '../modules/ui-shell/desk-lyrics';
 import { importM3u, listTrackCatalog, exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
 import { registerCoversPartition, registerLyricsPartition, readLyricsCache, saveLyricsFromTags } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
@@ -548,6 +557,88 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       return err('INTERNAL', '保存歌词失败');
     }
     return ok({ imported: true, content });
+  });
+
+  // ---- 桌面歌词（ADR-0008 / QYP3-022）------------------------------------
+  // 样式与位置持久化在 app_config：deskLyrics.fontSize / .locked / .pos
+  const DESKLYRICS_KEY = {
+    fontSize: 'deskLyrics.fontSize',
+    locked: 'deskLyrics.locked',
+    pos: 'deskLyrics.pos',
+  };
+  function readDeskLyricsConfig(): { fontSize: number; locked: boolean; pos: { x: number; y: number } | null } {
+    let pos: { x: number; y: number } | null = null;
+    try {
+      const raw = storage.getConfig(DESKLYRICS_KEY.pos);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { x?: number; y?: number };
+        if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+          pos = { x: Number(parsed.x), y: Number(parsed.y) };
+        }
+      }
+    } catch {
+      pos = null;
+    }
+    const fontSize = Number(storage.getConfig(DESKLYRICS_KEY.fontSize));
+    return {
+      fontSize: Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 28,
+      locked: storage.getConfig(DESKLYRICS_KEY.locked) !== 'false',
+      pos,
+    };
+  }
+  setDeskLyricsPersistence({
+    onMove: (pos) => {
+      try {
+        storage.setConfig(DESKLYRICS_KEY.pos, JSON.stringify(pos));
+      } catch {
+        // 位置丢失不影响功能
+      }
+    },
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DESKLYRICS.SHOW, () => {
+    if (!isDesktopLyricsSupported()) {
+      return err('UNAVAILABLE', '当前会话不支持透明置顶窗口（Wayland 会话下不可用）');
+    }
+    const cfg = readDeskLyricsConfig();
+    openDeskLyrics({ ...(cfg.pos ?? {}), style: { fontSize: cfg.fontSize, locked: cfg.locked } });
+    setDeskLyricsStyle({ fontSize: cfg.fontSize, locked: cfg.locked });
+    return ok({ open: true, ...cfg });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DESKLYRICS.HIDE, () => {
+    closeDeskLyrics();
+    return ok({ open: false });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.DESKLYRICS.STATE,
+    (_event, args: { title?: string; content?: string | null; position?: number; isPlaying?: boolean }) => {
+      pushDeskLyricsState({
+        title: typeof args?.title === 'string' ? args.title : '',
+        content: typeof args?.content === 'string' ? args.content : null,
+        position: Number(args?.position) || 0,
+        isPlaying: args?.isPlaying === true,
+      });
+      return ok({ delivered: isDeskLyricsOpen() });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.DESKLYRICS.SET_STYLE, (_event, args: { fontSize?: number; locked?: boolean }) => {
+    const current = readDeskLyricsConfig();
+    const fontSize = Number(args?.fontSize);
+    const next = {
+      fontSize: Number.isFinite(fontSize) && fontSize > 0 ? Math.round(fontSize) : current.fontSize,
+      locked: typeof args?.locked === 'boolean' ? args.locked : current.locked,
+    };
+    try {
+      storage.setConfig(DESKLYRICS_KEY.fontSize, String(next.fontSize));
+      storage.setConfig(DESKLYRICS_KEY.locked, next.locked ? 'true' : 'false');
+    } catch {
+      // 持久化失败不阻断当次生效
+    }
+    setDeskLyricsStyle(next);
+    return ok(next);
   });
 
   ipcMain.handle(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, (_event, value: unknown) => {

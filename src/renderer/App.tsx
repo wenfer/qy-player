@@ -11,6 +11,7 @@ import PlaylistsPage from './pages/Playlists';
 import LibraryBrowse from './pages/LibraryBrowse';
 import History from './pages/History';
 import Shortcuts from './pages/Shortcuts';
+import DeskLyrics from './pages/DeskLyrics';
 import Navigation from './components/Navigation';
 import PlayerControls from './components/PlayerControls';
 import MusicMiniBar from './components/MusicMiniBar';
@@ -62,14 +63,18 @@ function AutoNextHost() {
   return <NextEpisodeCountdown onPlayNext={handlePlayNext} />;
 }
 
-function App() {
+/**
+ * 桌面歌词窗口（ADR-0008）复用同一个 renderer 打包产物，但独立成一个
+ * BrowserWindow：不带导航栏/播放器外壳，只渲染歌词。
+ */
+function Shell() {
+  const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
+  if (isDeskLyrics) return <DeskLyrics />;
+
   return (
-    <HashRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true } as object}
-    >
-      <div className="min-h-screen bg-background text-foreground flex">
-        <Navigation />
-        <main className="flex-1 ml-60 min-h-screen">
+    <div className="min-h-screen bg-background text-foreground flex">
+      <Navigation />
+      <main className="flex-1 ml-60 min-h-screen">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/detail/:type/:serverId/:id" element={<Detail />} />
@@ -85,6 +90,7 @@ function App() {
             <Route path="/playlists" element={<PlaylistsPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/shortcuts" element={<Shortcuts />} />
+            <Route path="/desk-lyrics" element={<DeskLyrics />} />
           </Routes>
         </main>
         <PlayerControls />
@@ -92,6 +98,15 @@ function App() {
         <ToastContainer />
         <AutoNextHost />
       </div>
+  );
+}
+
+function App() {
+  return (
+    <HashRouter
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true } as object}
+    >
+      <Shell />
     </HashRouter>
   );
 }

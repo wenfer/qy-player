@@ -4,6 +4,7 @@ import { PlayerCore } from './modules/player-core';
 import { registerIpcHandlers, playbackStateManager } from './ipc';
 import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
 import { createTray, destroyTray } from './modules/ui-shell/tray';
+import { closeDeskLyrics } from './modules/ui-shell/desk-lyrics';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
 import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
@@ -269,6 +270,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', async () => {
   unregisterGlobalShortcuts();
   destroyTray();
+  closeDeskLyrics(); // 桌面歌词窗口（QYP3-022）：随应用退出
   // Final progress save before exit
   if (playbackStateManager) {
     playbackStateManager.destroy();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Sliders } from 'lucide-react';
+import { MonitorUp, Sliders } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { EQ_BANDS } from '../../player/web-audio-engine';
 
@@ -25,6 +25,10 @@ export default function MusicSettings() {
   const [engine, setEngine] = useState<string>('spectrum-first');
   const [replaygain, setReplaygain] = useState<string>('off');
   const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
+  // 桌面歌词（QYP3-022）
+  const [deskOpen, setDeskOpen] = useState(false);
+  const [deskFontSize, setDeskFontSize] = useState(28);
+  const [deskLocked, setDeskLocked] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -45,6 +49,10 @@ export default function MusicSettings() {
         if (Array.isArray(q?.data) && q.data.length === 10) {
           setEqGains(q.data.map((v) => Number(v) || 0));
         }
+        const f = (await window.electronAPI.getSettings('deskLyrics.fontSize')) as { data?: unknown };
+        if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
+        const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
+        setDeskLocked(l?.data !== 'false');
       } catch {
         // 默认值
       } finally {
@@ -96,6 +104,34 @@ export default function MusicSettings() {
     },
     [save]
   );
+
+  const toggleDeskLyrics = useCallback(async (): Promise<void> => {
+    const next = !deskOpen;
+    const res = (await (next
+      ? window.electronAPI.showDeskLyrics()
+      : window.electronAPI.hideDeskLyrics())) as { ok?: boolean; error?: { message: string } };
+    if (res?.ok === false) {
+      addToast(res.error?.message ?? '桌面歌词不可用', 'error');
+      return;
+    }
+    setDeskOpen(next);
+    addToast(next ? '桌面歌词已开启' : '桌面歌词已关闭', 'success');
+  }, [deskOpen, addToast]);
+
+  const changeDeskFontSize = useCallback(
+    async (value: number): Promise<void> => {
+      setDeskFontSize(value);
+      await window.electronAPI.setDeskLyricsStyle({ fontSize: value });
+    },
+    []
+  );
+
+  const toggleDeskLocked = useCallback(async (): Promise<void> => {
+    const next = !deskLocked;
+    setDeskLocked(next);
+    await window.electronAPI.setDeskLyricsStyle({ locked: next });
+    addToast(next ? '桌面歌词已锁定（鼠标穿透）' : '已解锁：可拖动窗口调整位置', 'success');
+  }, [deskLocked, addToast]);
 
   const adjustBand = useCallback(
     (index: number, value: number): void => {
@@ -189,6 +225,50 @@ export default function MusicSettings() {
           </div>
           <p className="text-[11px] text-muted-foreground mt-2">
             实时生效于音乐播放；视频播放不受均衡器影响。
+          </p>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm flex items-center gap-1.5">
+              <MonitorUp size={14} className="text-muted-foreground" />
+              桌面歌词
+            </span>
+            <button
+              type="button"
+              onClick={() => void toggleDeskLyrics()}
+              className={`ml-auto px-3 py-1.5 text-xs rounded-lg border focus-ring ${
+                deskOpen
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border hover:bg-accent'
+              }`}
+            >
+              {deskOpen ? '已开启' : '已关闭'}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-3">
+            <span className="text-xs text-muted-foreground">字号</span>
+            <input
+              type="range"
+              min={18}
+              max={48}
+              step={1}
+              value={deskFontSize}
+              onChange={(e) => void changeDeskFontSize(Number(e.target.value))}
+              className="w-40 accent-primary"
+              aria-label="桌面歌词字号"
+            />
+            <span className="text-xs text-muted-foreground w-8">{deskFontSize}</span>
+            <button
+              type="button"
+              onClick={() => void toggleDeskLocked()}
+              className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-accent focus-ring"
+            >
+              {deskLocked ? '锁定位置（鼠标穿透）' : '解锁：可拖动'}
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            置顶浮窗显示当前歌词；无歌词或暂停时自动隐藏。解锁后可拖动窗口，位置会被记住。
           </p>
         </div>
       </div>

@@ -216,12 +216,21 @@
   空态/导入成功与失败不替换）；typecheck 绿
 - 范围：面板在 webaudio 引擎激活时可用（迷你条同源）
 
-### QYP3-022 桌面歌词窗口 `[ ]`
+### QYP3-022 桌面歌词窗口 `[x]`（实机 ARGB 验证待 TARGET-VERIFY）
 - 依赖：021
-- 内容：ADR-0008 全量（窗口/穿透/拖动把手/样式/持久化/ARGB 降级/
-  Wayland 隐藏入口）
+- 内容：ADR-0008——独立 BrowserWindow（透明/无框/置顶/不进任务栏/不可缩放）；
+  锁定=鼠标穿透 `setIgnoreMouseEvents(true,{forward:true})`，解锁才可拖动
+  （穿透窗口收不到 mousedown，故"拖动=临时关穿透"）；两行式渲染 + 逐字
+  渐变填充；无词/暂停自动 hide；位置/字号/锁定存 app_config
+  （deskLyrics.pos/.fontSize/.locked）；Wayland 会话直接不支持并 Toast 提示；
+  状态推送 ≤10Hz（music-playback-store onTime 节流 100ms，main 转发）
 - 验收：CDP 截图（主屏显示/穿透/拖动/字号）；设置持久化重启恢复
-- Evidence：
+- Evidence: `tests/main/ui-shell/desk-lyrics.test.ts` 6/6（窗口形态/穿透切换/
+  显隐/位置回调/单窗口复用/Wayland 不支持）；`tests/renderer/music/
+  desk-lyrics.test.tsx` 3/3（当前行+下一行/暂停无词空渲染/字号）
+- 待实机：GNOME 下 ARGB 透明是否生效（黑底则走不透明降级 + 设置页提示）、
+  拖动与穿透矩阵（GNOME/KDE/Xfce）——已列入 TARGET-VERIFY
+- 范围：由 webaudio 引擎驱动（与歌词面板同源）；mpv 引擎曲目暂无位置源
 
 ### QYP3-023 拾音器双模式 `[ ]`
 - 依赖：010,011
