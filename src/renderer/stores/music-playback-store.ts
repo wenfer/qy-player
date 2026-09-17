@@ -299,7 +299,11 @@ async function fallbackToMpv(): Promise<void> {
   const resolution = (await window.electronAPI.resolvePlayback(
     { provider: 'music', sourceId: cur.sourceId, itemId: String(cur.trackId) },
     { engineForce: 'mpv' }
-  )) as { ok: boolean; data?: { url: string; startPosition: number; mediaContext?: unknown }; error?: { message: string } };
+  )) as {
+    ok: boolean;
+    data?: { url: string; startPosition: number; mediaContext?: unknown; streamSessionId?: string };
+    error?: { message: string };
+  };
   if (!resolution.ok || !resolution.data) {
     useMusicPlaybackStore.setState({
       engine: null,
@@ -316,7 +320,9 @@ async function fallbackToMpv(): Promise<void> {
     resolution.data.startPosition > 0 ? resolution.data.startPosition : undefined,
     undefined,
     resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
-    undefined,
+    // 认证头会话必须回传（WebDAV Basic / 转码 token）：主进程凭它 take()
+    // 出 headers 交给 mpv，缺了就是静默 401
+    resolution.data.streamSessionId,
     audioChainPayload(chain)
   );
 }
@@ -352,6 +358,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           startPosition: number;
           engine?: { engine: 'webaudio' | 'mpv'; reason: string };
           mediaContext?: unknown;
+          streamSessionId?: string;
         };
         error?: { message: string };
       };
@@ -360,7 +367,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         return;
       }
       if (token !== playToken) return; // 期间又点了新曲目：让位
-      const { url, startPosition, engine, mediaContext } = resolution.data;
+      const { url, startPosition, engine, mediaContext, streamSessionId } = resolution.data;
 
       if (engine?.engine === 'webaudio') {
         // 整队逐曲解析（webaudio 判定单源在主进程）；解析失败的曲跳过
@@ -437,7 +444,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           startPosition > 0 ? startPosition : undefined,
           undefined,
           mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
-          undefined,
+          // WebDAV 音频的实际路径：直链不带凭据，认证头只能靠这个不透明
+          // 会话 id 回传（QYP3-027）
+          streamSessionId,
           audioChainPayload(chain),
         );
         // 服务器曲目走服务器歌词端点（QYP3-020b），本地读缓存分区
@@ -534,7 +543,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     try {
       const res = (await window.electronAPI.resolvePlayback(refOfTrack(track))) as {
         ok: boolean;
-        data?: { url: string; startPosition: number; mediaContext?: unknown };
+        data?: { url: string; startPosition: number; mediaContext?: unknown; streamSessionId?: string };
         error?: { message: string };
       };
       if (!res.ok || !res.data) {
@@ -564,7 +573,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         res.data.startPosition > 0 ? res.data.startPosition : undefined,
         undefined,
         res.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
-        undefined,
+        res.data.streamSessionId,
         audioChainPayload(chain),
       );
       // 歌词在起播之后拉取（QYP3-020b）：歌词是非关键路径，任何失败
