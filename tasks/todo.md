@@ -347,12 +347,25 @@
   收藏按钮禁用与启用/无会话不渲染）；typecheck 双配置 + 全量绿
 - 待实机：mpv 音乐与视频切换时迷你条的显隐时机——已列入 TARGET-VERIFY
 
-### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`
+### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`（仅剩版本号 + tag 待人工批准）
 - 依赖：全部
 - 内容：门禁全绿；TARGET-VERIFY 增补音乐项；CHANGELOG 1.2.0；README/
   AGENTS 同步；人工批准后 tag
 - 验收：同二期 Checkpoint F 标准
-- Evidence：
+- Evidence（已完成部分）：
+  - 门禁：`npx tsc --noEmit -p tsconfig.json` + `-p tsconfig.node.json` 全绿；
+    全量 vitest **790/790（76 文件）**；`build:main` / `build:preload` /
+    `build:renderer` 三个产物均构建成功
+  - 文档：CHANGELOG 已定稿 `1.2.0（三期：音乐播放）`（含 025/026/020b）；
+    README 音乐条目与模块树更新；AGENTS 三期状态行 + 音乐/服务器音乐/
+    音乐会话/歌词/拾音器数据流条目更新
+  - TARGET-VERIFY：新增「音乐（三期，v1.2.0 增补）」清单（含服务器音乐、
+    引擎互斥、服务器歌词、桌面歌词 ARGB、拾音器 CPU、Wayland 降级）
+  - **遗留（需人工决定）**：`package.json` 仍为 `1.1.0`，与 CHANGELOG 的
+    1.2.0 不一致；按项目规范发版 = 推 tag（`git tag v1.2.0 && git push
+    origin v1.2.0`），该动作需人工批准后执行，本次不动版本号、不打 tag
+- 范围外（计划 §9 的 P2，未纳入本次）：服务器歌单只读、睡眠定时、
+  ReplayGain 高级设置、网络收音机流（需先 spike）
 
 ---
 
