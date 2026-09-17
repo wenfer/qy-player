@@ -1,5 +1,19 @@
 # Changelog
 
+## 未发布
+
+### 修复
+- **内嵌封面为 JPEG 时专辑/歌手网格只显示占位图**：渲染层按
+  `<trackId>.png` 请求封面，而落盘名按内嵌图片的真实格式（JPEG 占真实
+  世界绝大多数）是 `<trackId>.jpg`，协议层精确匹配 → 请求落空。现按
+  「原名 → 同名其他已知扩展名」解析（`resolveCoverFileName`），目录包含
+  校验仍在协议层。此前测试夹具三张封面全是 PNG，恰好只覆盖了唯一能命中的
+  分支，故一并补上 JPEG 用例。
+- **需认证的 WebDAV 音频静默播不出**：音乐 loadfile 漏传认证头会话 id
+  （`streamSessionId`），WebDAV 直链不带凭据，mpv 因此拿不到 Basic 认证头
+  且失败不上报。`playQueue` / `playServerAt` / 内置引擎回退三处全部补上
+  透传。
+
 ## 1.2.0（三期：音乐播放）
 
 ### 新增

@@ -478,6 +478,60 @@
   （local-library / unified-sources / metadata-editor）；修完后连续两轮
   全量只剩 plugin-registry 偶发，再修该用例的默认超时后复跑全绿
 
+## 1.2.0 之后：入库链路审查（本地 A + WebDAV B）
+
+用户要求把两条入库链路完整走一遍（扫描 → 入库 → 音乐页 → 播放 →
+封面/歌词），列出断点。结论：本地链路基本通、WebDAV 有两处断点，
+其中一处是认证丢失的真 bug。
+
+### QYP3-027 WebDAV 音频播放丢认证头 `[x]`
+- 现象：需认证的 WebDAV 音频**静默播不出**（mpv 失败不上报，连 toast
+  都没有）；匿名 WebDAV 与本地音频不受影响
+- 根因：解析器对 WebDAV 音频返回 `kind:'webdav-stream'` + 不透明的
+  `streamSessionId`（Basic 认证头 stash 在主进程，直链**不带凭据**，
+  `playback-resolver.ts:373-399`），但渲染层三处音乐 loadfile 的第 5 参
+  全部传 `undefined` → 主进程 `streamHeaders.take()` 取不到头
+  （`ipc/index.ts:1051`）→ mpv 拿到无凭据 URL
+- 影响面：`playQueue` 的 mpv 分支是 WebDAV 音频的实际路径；`playServerAt`
+  是服务器曲目（直链带 api_key，只在转码时才有会话）；`fallbackToMpv`
+  仅本地。视频侧三条链路（LibraryBrowse/Detail/App）本来就传对了
+- 修法：三处全部透传 `resolution.streamSessionId`，并在 inline 类型上补
+  该字段（原来类型里没有，所以漏传不会报错——这也是它能活下来的原因）
+- Evidence: 新增 `tests/renderer/music/stream-session.test.ts` 3/3；
+  把源码 stash 回退后该文件 2 条失败、修复后全过（证明用例非空转）；
+  typecheck 双配置 + 全量 833/833
+
+### QYP3-028 封面扩展名硬编码 `.png` `[x]`
+- 现象：内嵌封面是 JPEG 的专辑/歌手网格**只显示占位图**（无 onError
+  兜底，静默空白）。真实 MP3 的 ID3 APIC MIME 绝大多数是 image/jpeg
+- 根因：渲染层按 `<trackId>.png` 请求（`pages/Music/index.tsx:19`），而
+  落盘名按内嵌图片的真实格式生成 `<trackId>.<jpg|png>`
+  （`cover-service.ts` 的 `extOf`/`saveCoverFromTags`），协议处理器又是
+  精确文件名匹配 → `qy-file://covers/12.png` 命中不到 `12.jpg`
+- 为什么测试没抓到：`tests/fixtures/audio/` 三张封面夹具**全是 PNG**，
+  断言写死 `12.png`——测试只覆盖了唯一能命中的那条分支
+- 修法：`cover-service.ts` 新增 `resolveCoverFileName(requested, isServed)`
+  ——扩展名只当提示，先精确命中、未命中再按已知扩展名探测；只接受纯
+  文件名（拒绝分隔符与 `..`），是否可服务由调用方的 `isServed` 判定，
+  目录包含校验仍留在协议层（`main/index.ts`）
+- Evidence: `tests/main/library-scanner/cover-service.test.ts` 11/11
+  （新增"JPEG 内嵌图落盘为 .jpg"合成夹具用例 + 4 条名字解析用例）；
+  typecheck 双配置 + 全量 833/833
+- 残留（未修，已知）：内嵌图格式变化时（先 PNG 后 JPEG）旧扩展名文件
+  会留在 coversDir，精确命中会拿到旧图；covers 是"可清扫的派生缓存"，
+  触发条件罕见，未纳入本次范围
+
+### 本轮记录在案但未修的缺口
+- WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
+  （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法
+  是把 `WebDavSourceAdapter.open(locator, signal, 'bytes=0-524287')` 接到
+  `readAudio`（播放解析已用同款 range 探针），增量跳过在 `readAudio`
+  之前所以未变文件零成本；属功能补齐，未在本次"只修 bug"范围内
+- `upsertMusicTrack` 的 `has_cover`/`has_lyrics` 是无条件覆盖
+  （`repository.ts:761-762`），读取失败时无法区分"真没有"与"这次没读到"
+- `qy-file://audio` 协议处理器每次请求打 3 行 console.log
+  （`main/index.ts`，调试残留）
+
 ---
 
 ## 纪律提醒（动工前重读）
