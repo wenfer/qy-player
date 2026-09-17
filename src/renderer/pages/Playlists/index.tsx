@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ListMusic, Plus, Upload, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2, GripVertical } from 'lucide-react';
+import { Cloud, ListMusic, Plus, Upload, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2, GripVertical } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
+import ServerPlaylists from './ServerPlaylists';
 
 /**
  * 歌单页（QYP3-015/016/017）：列表 + 详情 + m3u/m3u8 导入 + m3u8/XSPF 导出。
  * 排序（QYP3-015a）= 拖拽为主 + 上/下移按钮（键盘/触屏可达性兜底）；
  * 列表操作一律乐观更新 + 失败回滚。
+ * P2：新增「服务器歌单」只读页签（服务器歌单不可在本应用内编辑）。
  */
+
+const tabClass = (active: boolean): string =>
+  `px-3 py-1.5 text-xs rounded-lg border transition-colors focus-ring flex items-center gap-1.5 ${
+    active ? 'bg-secondary border-border text-foreground' : 'border-border text-muted-foreground hover:bg-accent'
+  }`;
 
 interface PlaylistRow {
   id: number;
@@ -44,6 +51,8 @@ export default function PlaylistsPage() {
   const addToast = useToastStore((s) => s.addToast);
   const playback = useMusicPlaybackStore();
   const [playlists, setPlaylists] = useState<PlaylistRow[] | null>(null);
+  // 页签（P2）：本地歌单可管理，服务器歌单只读
+  const [tab, setTab] = useState<'local' | 'server'>('local');
   const [openId, setOpenId] = useState<number | null>(null);
   const [items, setItems] = useState<PlaylistItemRow[] | null>(null);
   const [newName, setNewName] = useState('');
@@ -240,6 +249,30 @@ export default function PlaylistsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      {/* 来源切换（P2）：本地歌单可增删改，服务器歌单只读 */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <button
+          type="button"
+          onClick={() => setTab('local')}
+          aria-pressed={tab === 'local'}
+          className={tabClass(tab === 'local')}
+        >
+          <ListMusic size={14} /> 我的歌单
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('server')}
+          aria-pressed={tab === 'server'}
+          className={tabClass(tab === 'server')}
+        >
+          <Cloud size={14} /> 服务器歌单
+        </button>
+      </div>
+
+      {tab === 'server' ? (
+        <ServerPlaylists />
+      ) : (
+        <>
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <button
           type="button"
@@ -454,6 +487,8 @@ export default function PlaylistsPage() {
             ))}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

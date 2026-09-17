@@ -63,6 +63,14 @@ export class EmbyClient extends JellyfinClient {
     return response.data;
   }
 
+  /** Emby 同端点，路径多一层 `/emby` 前缀（P2 服务器歌单）。 */
+  async getPlaylistItems(playlistId: string): Promise<JellyfinItem[]> {
+    const response = await this.client.get(`/emby/Playlists/${playlistId}/Items`, {
+      params: { UserId: this.userId },
+    });
+    return response.data.Items || [];
+  }
+
   async getContinueWatching(): Promise<JellyfinItem[]> {
     const response = await this.client.get(`/emby/Users/${this.userId}/Items/Resume`, {
       params: {

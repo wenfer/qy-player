@@ -154,6 +154,18 @@ export class JellyfinClient {
     return response.data;
   }
 
+  /**
+   * 歌单条目（P2 只读浏览）：Jellyfin/Emby 的规范端点是
+   * `/Playlists/{id}/Items`（父级 Items 查询对歌单容器不保证返回条目）。
+   * 顺序即歌单顺序，因此不排序。
+   */
+  async getPlaylistItems(playlistId: string): Promise<JellyfinItem[]> {
+    const response = await this.client.get(`/Playlists/${playlistId}/Items`, {
+      params: { UserId: this.userId },
+    });
+    return response.data.Items || [];
+  }
+
   async getContinueWatching(): Promise<JellyfinItem[]> {
     const response = await this.client.get(`/Users/${this.userId}/Items/Resume`, {
       params: {

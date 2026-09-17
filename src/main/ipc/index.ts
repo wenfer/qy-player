@@ -105,6 +105,7 @@ import {
   setMpvMusicActive,
   setMusicEngineActive,
 } from '../modules/playback-engine/music-active';
+import { SleepTimer } from '../modules/ui-shell/sleep-timer';
 import {
   closeDeskLyrics,
   isDesktopLyricsSupported,
@@ -401,6 +402,34 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       return ok({ saved: true });
     }
   );
+
+  // ------------------------------------------------------------------
+  // 睡眠定时（P2）：到点暂停播放（音乐/视频通用）
+  // ------------------------------------------------------------------
+  const sleepTimer = new SleepTimer({
+    now: () => Date.now(),
+    setTimer: (cb, ms) => setTimeout(cb, ms),
+    clearTimer: (handle) => clearTimeout(handle),
+    onExpire: () => {
+      // 先取消可能正在倒计时的自动连播（否则"停止"后下一集仍会起播）；
+      // 复用 'user' 原因：语义就是"用户主动停止"，overlay 据此收起
+      autoNext.cancel('user');
+      // mpv（视频或 mpv 引擎音乐）直接暂停；renderer 引擎音乐由
+      // renderer 收到 ON_EXPIRED 后自行暂停
+      if (player.isReady()) void player.pause().catch(() => {});
+      const win = getMainWindow?.();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.SLEEP.ON_EXPIRED);
+      }
+    },
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SLEEP.GET_STATE, () => ok(sleepTimer.state()));
+
+  ipcMain.handle(IPC_CHANNELS.SLEEP.SET, (_event, args: { minutes?: number }) => {
+    sleepTimer.set(args?.minutes);
+    return ok(sleepTimer.state());
+  });
 
   // ------------------------------------------------------------------
   // 歌单（QYP3-015/016/017）
@@ -1619,6 +1648,29 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     console.error('[GET-ITEM-DETAILS] 所有服务器都无法获取详情');
     return null;
   });
+
+  // 服务器歌单条目（P2 只读）：必须在 serverId 上严格路由——歌单 id
+  // 只在其所属服务器上有意义，跨服务器试等于拿别人的 id 乱问。
+  ipcMain.handle(
+    IPC_CHANNELS.ONLINE.GET_PLAYLIST_ITEMS,
+    async (_event, playlistId: string, serverId: number) => {
+      if (typeof playlistId !== 'string' || !playlistId) return [];
+      if (!Number.isInteger(serverId) || serverId <= 0) return [];
+      try {
+        const binding = bindServerById(storage, secretStore, serverId);
+        const client = createClient({
+          type: binding.type,
+          baseUrl: binding.baseUrl,
+          apiKey: binding.apiKey,
+          userId: binding.userId,
+        });
+        return await client.getPlaylistItems(playlistId);
+      } catch (e) {
+        console.error('[GET-PLAYLIST-ITEMS] 服务器歌单获取失败:', e instanceof Error ? e.message : e);
+        return [];
+      }
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_STREAM_URL, async (_event, itemId: string, mediaSourceId: string, mode?: 'direct' | 'transcode') => {
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {

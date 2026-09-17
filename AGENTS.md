@@ -42,8 +42,8 @@
 │     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
-│     playback-engine/          音乐：引擎选择/audio-url 协议桥/歌单 IO/LRC 解析/均衡器（ADR-0007）
-│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词窗口（ADR-0008）
+│     playback-engine/          音乐：引擎选择/audio-url 协议桥/歌单 IO/LRC 解析/均衡器/ReplayGain（ADR-0007）
+│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
 └─ mpv 0.32 子进程               ~/.local/bin/mpv 优先，系统 mpv 兜底；通信走 Unix Socket JSON IPC
@@ -58,10 +58,11 @@
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（服务器/WebDAV/转码/CUE/兼容性优先 → mpv；spectrum-first 且直连格式 → renderer 引擎）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 本地驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次）
-- **服务器音乐**：音乐页「来源」切换见 `pages/Music/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）
+- **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId
 - **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）
 - **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默
 - **拾音器**：频谱来自 renderer 引擎 AnalyserNode（fftSize 2048、≤30fps）；mpv 引擎退化为按 时长+进度 绘制的播放波形（无缓存、无外部依赖）
+- **睡眠定时**：权威定时器在 main（`ui-shell/sleep-timer.ts`，会话内有效不持久化）；到点先 `autoNext.cancel()` 再暂停 mpv，并下发 `sleep:on-expired` 让 renderer 停 renderer 引擎音乐——**两个引擎都可能是"正在放的那个"**，只处理自己那侧
 
 ## 已知机制与陷阱（改相关代码前必读）
 

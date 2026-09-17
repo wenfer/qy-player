@@ -1,11 +1,13 @@
 // 服务器音乐映射层（QYP3-025）：纯函数，无 IPC。
 import { describe, expect, it } from 'vitest';
 import {
+  isAudioItem,
   mapServerAlbums,
+  mapServerPlaylists,
   mapServerTracks,
   pickMusicLibraries,
   type ServerLibraryGroup,
-} from '../../../src/renderer/pages/Music/server-music';
+} from '../../../src/renderer/utils/server-music';
 
 const group = (over: Partial<ServerLibraryGroup> = {}): ServerLibraryGroup => ({
   serverId: 1,
@@ -88,5 +90,34 @@ describe('mapServerTracks (QYP3-025)', () => {
       duration: null,
       index: null,
     });
+  });
+});
+
+describe('mapServerPlaylists (P2)', () => {
+  it('maps name/item count/image tag and drops entries without an id', () => {
+    expect(
+      mapServerPlaylists([
+        { Id: 'p1', Name: '通勤', ChildCount: 12, ImageTags: { Primary: 'tg' } },
+        { Name: '无 id' },
+        { Id: 'p2', Name: '深夜' },
+      ])
+    ).toEqual([
+      { id: 'p1', name: '通勤', itemCount: 12, tag: 'tg' },
+      { id: 'p2', name: '深夜', itemCount: null, tag: null },
+    ]);
+  });
+
+  it('degrades a missing name instead of throwing', () => {
+    expect(mapServerPlaylists([{ Id: 'p3' }])[0].name).toBe('未命名歌单');
+  });
+});
+
+describe('isAudioItem (P2)', () => {
+  it('keeps audio entries and drops video/other containers', () => {
+    expect(isAudioItem({ Type: 'Audio' })).toBe(true);
+    // 服务器未给 Type（部分歌单条目）时按可播处理，交给解析层判断
+    expect(isAudioItem({ Id: 'x' })).toBe(true);
+    expect(isAudioItem({ Type: 'Movie' })).toBe(false);
+    expect(isAudioItem({ Type: 'Episode' })).toBe(false);
   });
 });

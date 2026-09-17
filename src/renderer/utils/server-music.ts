@@ -1,5 +1,5 @@
 /**
- * 服务器音乐浏览（QYP3-025）：纯函数映射层。
+ * 服务器媒体（音乐库 / 歌单）浏览的纯函数映射层。
  *
  * 只做"服务器条目 → UI 结构"的归一与容错：Jellyfin/Emby 的 Items 响应
  * 字段可能缺失（旧版本、不同库类型），缺字段一律降级而不是抛错。
@@ -72,6 +72,7 @@ interface RawItem {
   ProductionYear?: number;
   RunTimeTicks?: number;
   IndexNumber?: number;
+  ChildCount?: number;
   ImageTags?: { Primary?: string };
 }
 
@@ -100,4 +101,30 @@ export function mapServerTracks(items: unknown[]): ServerTrack[] {
       duration: typeof it.RunTimeTicks === 'number' ? it.RunTimeTicks / 10_000_000 : null,
       index: typeof it.IndexNumber === 'number' ? it.IndexNumber : null,
     }));
+}
+
+/** 服务器歌单（P2 只读浏览）。 */
+export interface ServerPlaylist {
+  id: string;
+  name: string;
+  /** 条目数（服务器给不出时为 null）。 */
+  itemCount: number | null;
+  tag: string | null;
+}
+
+export function mapServerPlaylists(items: unknown[]): ServerPlaylist[] {
+  return (items as RawItem[])
+    .filter((it) => str(it?.Id))
+    .map((it) => ({
+      id: it.Id as string,
+      name: str(it.Name) ?? '未命名歌单',
+      itemCount: typeof it.ChildCount === 'number' ? it.ChildCount : null,
+      tag: str(it.ImageTags?.Primary),
+    }));
+}
+
+/** 歌单里的条目是否可当音轨播（视频歌单不在此页范围）。 */
+export function isAudioItem(item: unknown): boolean {
+  const type = (item as { Type?: unknown } | null)?.Type;
+  return type === undefined || type === 'Audio';
 }

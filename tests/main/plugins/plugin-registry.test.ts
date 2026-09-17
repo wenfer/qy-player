@@ -215,7 +215,10 @@ describe('plugin http danger branches', () => {
     registerPlugin(makePlugin({ manifest: { ...makePlugin().manifest, id, name: id } }), {
       ...CONTEXT_OPTIONS,
       minRequestIntervalMs: 10,
-      defaultTimeoutMs: 400,
+      // 默认超时只影响"非超时"用例（超时/取消用例都显式传 timeoutMs）。
+      // 400ms 在并行跑满 80+ 文件时会被本地 http server 的调度延迟打穿，
+      // 让"超容量拒绝"偶发变成 NETWORK_ERROR——放宽到 5s 消除假红。
+      defaultTimeoutMs: 5000,
     });
     const context = getPluginContext(id);
     if (!context) throw new Error('no context');

@@ -123,6 +123,9 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEMS, parentId, options, serverId),
   getItemDetails: (itemId: string, serverId?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEM_DETAILS, itemId, serverId),
+  /** 服务器歌单条目（P2 只读）：歌单 id 必须配它的 serverId。 */
+  getServerPlaylistItems: (playlistId: string, serverId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_PLAYLIST_ITEMS, playlistId, serverId),
   // Subtitles (QYP2-020)
   pickSubtitleFile: () => ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.PICK_FILE),
   importSubtitle: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SUBTITLES.IMPORT, input),
@@ -221,6 +224,15 @@ const electronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
   },
+  // 睡眠定时（P2）：到点暂停播放；ON_EXPIRED 让 renderer 停 renderer 引擎
+  getSleepTimer: () => ipcRenderer.invoke(IPC_CHANNELS.SLEEP.GET_STATE),
+  setSleepTimer: (minutes: number) => ipcRenderer.invoke(IPC_CHANNELS.SLEEP.SET, { minutes }),
+  onSleepTimerExpired: (cb: () => void) => {
+    const listener = (): void => cb();
+    ipcRenderer.on(IPC_CHANNELS.SLEEP.ON_EXPIRED, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SLEEP.ON_EXPIRED, listener);
+  },
+
   // 桌面歌词（QYP3-022）：主窗口推状态；歌词窗口收事件
   showDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.SHOW),
   hideDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.HIDE),

@@ -45,6 +45,14 @@ export const IPC_CHANNELS = {
      */
     ON_SESSION_END: 'music:on-session-end',
   },
+  /** 睡眠定时（P2）：到点暂停播放，音乐/视频通用（会话内有效，不持久化）。 */
+  SLEEP: {
+    GET_STATE: 'sleep:get-state',
+    /** 设置分钟数（0 = 关闭）。 */
+    SET: 'sleep:set',
+    /** main → renderer：定时到点（renderer 侧停 renderer 引擎音乐）。 */
+    ON_EXPIRED: 'sleep:on-expired',
+  },
   DESKLYRICS: {
     /** 打开桌面歌词窗口（ADR-0008）。 */
     SHOW: 'desklyrics:show',
@@ -80,6 +88,8 @@ export const IPC_CHANNELS = {
     GET_ITEM_DETAILS: 'online:get-item-details',
     GET_STREAM_URL: 'online:get-stream-url',
     GET_CONTINUE_WATCHING: 'online:get-continue-watching',
+    /** 服务器歌单条目（P2 只读）：`/Playlists/{id}/Items`。 */
+    GET_PLAYLIST_ITEMS: 'online:get-playlist-items',
     SEARCH: 'online:search',
   },
   PROGRESS: {

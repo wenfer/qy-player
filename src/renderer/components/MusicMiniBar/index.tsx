@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Heart, Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
+import { Heart, Mic2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
   useMusicPlaybackStore,
 } from '../../stores/music-playback-store';
+import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useToastStore } from '../../stores/toast-store';
 import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
@@ -25,6 +26,7 @@ function resolveMode(setting: string, engine: string | null): VisualizerMode | n
 
 export default function MusicMiniBar() {
   const playback = useMusicPlaybackStore();
+  const sleep = useSleepTimerStore();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
@@ -246,6 +248,18 @@ export default function MusicMiniBar() {
       >
         <Mic2 size={16} />
       </button>
+      {sleep.active && (
+        <button
+          type="button"
+          onClick={() => void sleep.setMinutes(0)}
+          aria-label="取消睡眠定时"
+          title="点击取消睡眠定时"
+          className="px-2 py-1 rounded-lg text-[10px] text-primary border border-border hover:bg-accent focus-ring flex items-center gap-1 flex-shrink-0"
+        >
+          <Moon size={12} />
+          {formatRemaining(sleep.remainingMs)}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => {

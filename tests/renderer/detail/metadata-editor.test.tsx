@@ -63,7 +63,8 @@ describe('MetadataEditor (QYP2-023)', () => {
   it('sends only changed fields as patches with the seen revision', async () => {
     renderEditor();
     await screen.findByText('编辑元数据');
-    const titleInput = screen.getByLabelText('标题') as HTMLInputElement;
+    // 字段是异步加载的：等字段本身出现（只等标题会偶发拿不到）
+    const titleInput = (await screen.findByLabelText('标题')) as HTMLInputElement;
     fireEvent.change(titleInput, { target: { value: '手工标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() =>
@@ -92,7 +93,8 @@ describe('MetadataEditor (QYP2-023)', () => {
     });
     renderEditor();
     await screen.findByText('编辑元数据');
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '我的标题' } });
+    const input = await screen.findByLabelText('标题');
+    fireEvent.change(input, { target: { value: '我的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     // Draft text survives (失败保留草稿).
     expect((screen.getByLabelText('标题') as HTMLInputElement).value).toBe('我的标题');
@@ -117,7 +119,7 @@ describe('MetadataEditor (QYP2-023)', () => {
       .mockResolvedValueOnce({ ok: true, data: { changed: ['title'], cleared: [] } });
     renderEditor();
     await screen.findByText('编辑元数据');
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '我的标题' } });
+    fireEvent.change(await screen.findByLabelText('标题'), { target: { value: '我的标题' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await screen.findByRole('button', { name: '用我的值覆盖' });
     fireEvent.click(screen.getByRole('button', { name: '用我的值覆盖' }));
@@ -133,6 +135,7 @@ describe('MetadataEditor (QYP2-023)', () => {
     restoreMetadataFields.mockResolvedValue({ ok: true, data: { cleared: ['title'] } });
     renderEditor();
     await screen.findByText('编辑元数据');
+    await screen.findByLabelText('标题');
     fireEvent.click(screen.getByRole('button', { name: '恢复标题的来源值' }));
     await waitFor(() => expect(restoreMetadataFields).toHaveBeenCalledWith(5, ['title']));
     await waitFor(() => expect(getMetadataFields).toHaveBeenCalledTimes(2));

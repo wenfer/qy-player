@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MusicMiniBar from '../../../src/renderer/components/MusicMiniBar';
 import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playback-store';
+import { useSleepTimerStore } from '../../../src/renderer/stores/sleep-timer-store';
 
 /**
  * 迷你控制条可见性（QYP3-026）：
@@ -41,6 +42,7 @@ const serverTrack = { ...localTrack, id: 0, title: '以父之名', url: 'http://
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useSleepTimerStore.setState({ active: false, minutes: null, expiresAt: null, remainingMs: null });
   useMusicPlaybackStore.setState({
     engine: null,
     current: null,
@@ -108,5 +110,22 @@ describe('music mini bar visibility (QYP3-026)', () => {
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
     expect(container.firstChild).toBeNull();
     expect(container.querySelector('canvas')).toBeNull();
+  });
+
+  it('shows the sleep countdown chip and cancels it on click', async () => {
+    useMusicPlaybackStore.setState({ engine: 'webaudio', current: localTrack, isPlaying: true });
+    useSleepTimerStore.setState({
+      active: true,
+      minutes: 30,
+      expiresAt: Date.now() + 12 * 60_000,
+      remainingMs: 12 * 60_000,
+    });
+    render(<MusicMiniBar />);
+    const chip = await screen.findByLabelText('取消睡眠定时');
+    expect(chip.textContent).toContain('12:00');
+
+    vi.spyOn(useSleepTimerStore.getState(), 'setMinutes').mockResolvedValue(undefined);
+    fireEvent.click(chip);
+    expect(useSleepTimerStore.getState().setMinutes).toHaveBeenCalledWith(0);
   });
 });

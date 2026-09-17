@@ -4,7 +4,7 @@ import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
 import ServerMusicBrowser from './ServerMusicBrowser';
-import { pickMusicLibraries, type MusicLibraryRef, type ServerLibraryGroup } from './server-music';
+import { pickMusicLibraries, type MusicLibraryRef, type ServerLibraryGroup } from '../../utils/server-music';
 
 /**
  * 音乐库页（三期 QYP3-008 / QYP3-008a）：专辑 / 歌手 / 全部曲目 / 收藏

@@ -1,4 +1,5 @@
 import { HashRouter, Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
 import Home from './pages/Home';
 import Detail from './pages/Detail';
 import Settings from './pages/Settings';
@@ -18,6 +19,7 @@ import MusicMiniBar from './components/MusicMiniBar';
 import ToastContainer from './components/Toast';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
+import { useSleepTimerStore } from './stores/sleep-timer-store';
 
 /**
  * Auto-next host (QYP2-035): the countdown overlay lives app-wide; firing
@@ -64,6 +66,18 @@ function AutoNextHost() {
 }
 
 /**
+ * 睡眠定时宿主（P2）：权威状态在主进程，这里只负责在应用启动时同步一次
+ * 并挂上「到点」事件桥（音乐/视频通用，不依赖任何页面是否打开）。
+ */
+function SleepTimerHost() {
+  const init = useSleepTimerStore((s) => s.init);
+  useEffect(() => {
+    void init();
+  }, [init]);
+  return null;
+}
+
+/**
  * 桌面歌词窗口（ADR-0008）复用同一个 renderer 打包产物，但独立成一个
  * BrowserWindow：不带导航栏/播放器外壳，只渲染歌词。
  */
@@ -97,6 +111,7 @@ function Shell() {
         <MusicMiniBar />
         <ToastContainer />
         <AutoNextHost />
+        <SleepTimerHost />
       </div>
   );
 }

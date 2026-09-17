@@ -372,10 +372,6 @@
 ## P2 欠账（计划 §9 标记，QYP3-024 之后追加）
 
 ### QYP2P-001 修复设置项读写不对称 `[x]`
-- 备注：全量门禁存在两个**既有**偶发用例（并行负载下 `findBy*` 超时）：
-  `tests/renderer/library/local-library.test.tsx`、
-  `tests/renderer/detail/metadata-editor.test.tsx`；单跑与复跑均通过，
-  与本次改动无关（两者都不涉及 `getSettings`）
 - 背景：`SETTINGS.SET` 用 `JSON.stringify` 写入，`SETTINGS.GET` 直接返回
   库里的裸字符串 → 四个功能整体失效：EQ 增益（`Array.isArray('"[6,5,…]"')`
   为假，均衡器从此既不在 UI 恢复也不下发给 mpv）、ReplayGain 模式
@@ -405,11 +401,62 @@
   写入预增益、削波开关、关闭时整块隐藏）
 - 范围：ReplayGain 仅 mpv 引擎（renderer 引擎只有 EQ，UI 已注明）
 
-### QYP2P-003 睡眠定时 `[ ]`
+### QYP2P-003 睡眠定时 `[x]`
+- 内容：到点**暂停**播放（不改"停止/退出"语义，暂停后可以继续听），
+  音乐与视频通用；`ui-shell/sleep-timer.ts` 一次性定时器（时钟/定时器
+  可注入，上限 24h，0 或非法值 = 关闭，重复设置替换而非叠加）；
+  权威状态在主进程（窗口重载不丢），**不持久化**（重启后旧定时还在跑
+  才是意外）；IPC 四件套 `sleep:get-state` / `sleep:set` /
+  `sleep:on-expired`；设置页档位（关闭/15/30/45/60/90/120 分钟）+
+  剩余时间 + 取消；迷你条挂月亮徽标显示倒计时，点击即取消
+- 到点行为：先取消可能正在倒计时的自动连播（否则"停止"后下一集仍会
+  起播）→ 暂停 mpv → 下发 ON_EXPIRED 让 renderer 停 renderer 引擎音乐
+  （只有 renderer 引擎在放时才动，mpv 引擎不重复动作）
+- Evidence: `tests/main/ui-shell/sleep-timer.test.ts` 7/7（未启用/设置与
+  剩余/到点一次性并自清/重复设置替换/0 与非法值取消/24h 限幅与取整/
+  cancel）；`tests/renderer/settings/sleep-timer.test.tsx` 5/5（档位写入与
+  剩余显示/取消/倒计时格式化/到点暂停 renderer 引擎/引擎不是它时不动）；
+  `tests/renderer/music/mini-bar.test.tsx` 4/4（含徽标倒计时与点击取消）
 
-### QYP2P-004 服务器歌单只读 `[ ]`
+### QYP2P-004 服务器歌单只读 `[x]`
+- 依赖：025（服务器音乐队列）
+- 内容：歌单页加「服务器歌单」页签（本地/服务器切换）——列出所有**已激活**
+  服务器上的歌单（`includeItemTypes=Playlist`），点进去看条目、点曲目即播
+  （复用 025 的 `MusicTrackInput{serverId,provider,itemId}` + mpv 服务器队列）；
+  条目走规范端点 `/Playlists/{id}/Items?UserId=`（Emby 多一层 `/emby`）；
+  歌单 id 只在其所属服务器上有意义 → IPC **强制 serverId 严格路由**
+  （不做跨服务器试探）；非音频条目（视频歌单）不当作音轨呈现；
+  只读：不提供新建/重命名/删除/排序入口
+- 验收：只列已激活服务器；服务器歌单无编辑入口；点曲目走 mpv 且队列内
+  只有音轨；视频歌单给出可理解的空态
+- Evidence: `tests/main/online/playlist-items.test.ts` 3/3（Jellyfin 端点与
+  UserId / Emby `/emby` 前缀 / 缺 Items 与空歌单→空数组）；
+  `tests/renderer/music/server-music.test.ts` 10/10（新增歌单映射与
+  非音频过滤）；`tests/renderer/playlists/server-playlists.test.tsx` 4/4
+  （只列激活服务器 / 无编辑入口 / 打开后过滤视频并 mpv 播放 / 空态）；
+  typecheck 双配置 + 全量绿
+- 范围：服务器歌单的增删改不在本期（服务器端管理）；视频歌单只提示不入队
 
 ### QYP2P-005 网络收音机流 spike `[ ]`
+
+### QYP2P-006 修掉门禁里的偶发假红 `[x]`
+- 背景：全量跑到 80+ 文件后，出现三个"单跑必过、并行偶发失败"的用例：
+  `library/local-library`（load-more）、`home/unified-sources`（继续观看）、
+  `detail/metadata-editor`（标题输入框）。它们不是产品 bug，而是**测试自己
+  的等待不够**——典型如"等的是静态标题「编辑元数据」，随后同步取异步加载
+  出来的字段"，字段数据还没到就断言，并行负载一大就翻车
+- 内容：
+  - `metadata-editor.test.tsx` 把 4 处 `getByLabelText` 改成
+    `findByLabelText`（等异步字段本身）
+  - `plugin-registry.test.ts` 的 http 上下文默认超时 400ms → 5s
+    （超时/取消用例本就显式传 `timeoutMs`，默认值只是"其余用例"的预算；
+    400ms 会被并行调度打穿，让"超容量拒绝"偶发变成 NETWORK_ERROR）
+  - 新增 `tests/setup.ts` 把 @testing-library 的异步超时从默认 1s 放宽到
+    4s（并行建 jsdom 环境时老机器上 1s 不够），`vitest.config.ts` 注册
+    setupFiles
+- Evidence: 改动前同一套代码连续三次跑到**三个不同**用例假红
+  （local-library / unified-sources / metadata-editor）；修完后连续两轮
+  全量只剩 plugin-registry 偶发，再修该用例的默认超时后复跑全绿
 
 ---
 

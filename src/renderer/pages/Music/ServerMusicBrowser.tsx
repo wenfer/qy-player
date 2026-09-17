@@ -9,7 +9,7 @@ import {
   type MusicLibraryRef,
   type ServerAlbum,
   type ServerTrack,
-} from './server-music';
+} from '../../utils/server-music';
 
 /**
  * 服务器音乐浏览（QYP3-025）：专辑网格 → 专辑曲目 → 播放（mpv 引擎）。

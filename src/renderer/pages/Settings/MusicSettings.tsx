@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { MonitorUp, Sliders } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { EQ_BANDS } from '../../player/web-audio-engine';
 
 /**
- * 音乐播放偏好（QYP3-012）：引擎偏好、ReplayGain、均衡器。
+ * 音乐播放偏好（QYP3-012）：引擎偏好、ReplayGain、均衡器、睡眠定时。
  * EQ 双引擎共用：renderer 引擎直连 BiquadFilter；mpv 引擎由
  * main 侧映射为 lavfi equalizer 链（主进程消费同一 10 段 dB 数组）。
  */
+
+/** 睡眠定时档位（分钟）；0 = 关闭。跨页共享的当前档位来自 store。 */
+const SLEEP_OPTIONS: Array<{ minutes: number; label: string }> = [
+  { minutes: 0, label: '关闭' },
+  { minutes: 15, label: '15 分钟' },
+  { minutes: 30, label: '30 分钟' },
+  { minutes: 45, label: '45 分钟' },
+  { minutes: 60, label: '1 小时' },
+  { minutes: 90, label: '1.5 小时' },
+  { minutes: 120, label: '2 小时' },
+];
+
+const tabButtonClass = (active: boolean): string =>
+  `px-2 py-1 rounded-lg text-xs border transition-colors focus-ring ${
+    active ? 'bg-secondary border-border text-foreground' : 'border-border text-muted-foreground hover:bg-accent'
+  }`;
 
 const EQ_FREQ_LABELS = ['60', '170', '350', '1k', '3.5k', '6k', '9k', '12k', '14k', '16k'];
 const EQ_PRESETS_UI: Array<{ id: string; label: string; gains: number[] }> = [
@@ -64,6 +81,15 @@ export default function MusicSettings() {
   const [deskLocked, setDeskLocked] = useState(true);
   // 拾音器（QYP3-023）
   const [visualizer, setVisualizer] = useState<string>('auto');
+  // 睡眠定时（P2）：状态在 store（跨页共享，主进程为权威）
+  const sleep = useSleepTimerStore();
+  const setSleepMinutes = useCallback(
+    async (minutes: number): Promise<void> => {
+      await useSleepTimerStore.getState().setMinutes(minutes);
+      addToast(minutes > 0 ? `已设置 ${minutes} 分钟后暂停播放` : '已取消睡眠定时', 'success');
+    },
+    [addToast]
+  );
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -361,6 +387,40 @@ export default function MusicSettings() {
           <span className="text-xs text-muted-foreground w-full">
             显示在底部音乐控制条上，最高 30 帧/秒。冷门格式走 mpv 引擎时只有播放波形。
           </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">
+          <span className="text-sm">睡眠定时</span>
+          <span className="text-xs text-muted-foreground">
+            到点暂停播放，音乐与视频通用（仅本次运行有效）
+          </span>
+          <div className="flex flex-wrap gap-1.5 ml-auto">
+            {SLEEP_OPTIONS.map((opt) => (
+              <button
+                key={opt.minutes}
+                type="button"
+                onClick={() => void setSleepMinutes(opt.minutes)}
+                aria-pressed={opt.minutes === 0 ? !sleep.active : sleep.active && sleep.minutes === opt.minutes}
+                className={tabButtonClass(
+                  opt.minutes === 0 ? !sleep.active : sleep.active && sleep.minutes === opt.minutes
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {sleep.active && (
+            <div className="w-full flex items-center gap-2 pt-2 border-t border-border">
+              <span className="text-xs">剩余 {formatRemaining(sleep.remainingMs)}</span>
+              <button
+                type="button"
+                onClick={() => void setSleepMinutes(0)}
+                className="ml-auto px-2 py-1 rounded-lg text-xs border border-border hover:bg-accent focus-ring"
+              >
+                取消定时
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-4">
