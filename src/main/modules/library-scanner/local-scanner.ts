@@ -2,7 +2,7 @@ import type { SourceAdapter, SourceEntry, ScanDriver } from '../library-sources/
 import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
 import { parseAudioTagsFromBuffer, type ParsedAudioTags } from './tag-parser';
-import { saveCoverFromTags } from './cover-service';
+import { saveCoverFromTags, saveLyricsFromTags } from './cover-service';
 import { parseCue } from './cue-parser';
 import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
 import { applyNfoMetadata } from '../metadata/metadata-merger';
@@ -209,6 +209,8 @@ export function createLocalScanDriver(deps: {
   readAudio?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
   /** 封面落盘目录（QYP3-005）；缺省则不落盘（has_cover 仍入行）。 */
   coversDir?: string;
+  /** 歌词落盘目录（QYP3-019）；缺省则不落盘（has_lyrics 仍入行）。 */
+  lyricsDir?: string;
   /** CUE 文本读取（QYP3-006）：本地=fs；WebDAV=bounded GET。缺省则 CUE 跳过。 */
   readText?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
 }): LocalScanDriver {
@@ -341,6 +343,14 @@ export function createLocalScanDriver(deps: {
             await saveCoverFromTags(trackId, headBuf, deps.coversDir);
           } catch {
             // 落盘失败不影响入库
+          }
+        }
+        // 歌词落盘（QYP3-019）：标签歌词透传 .lrc（人工可编辑，受保护）
+        if (deps.lyricsDir && tags.lyrics) {
+          try {
+            await saveLyricsFromTags(trackId, deps.lyricsDir, tags.lyrics);
+          } catch {
+            // 失败不影响入库
           }
         }
         return;

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -317,6 +317,32 @@ describe('music ingest (QYP3-003)', () => {
     const flac = rows.find((r) => r.title === '晴天2' || r.codec === 'flac')!;
     expect(flac.title).toBe('晴天');
     expect(flac.duration).toBeCloseTo(20, 1);
+  });
+
+  it('writes embedded lyrics into lyricsDir during scan (QYP3-019)', async () => {
+    const sourceId = makeSource();
+    const lyricsOut = mkdtempSync(join(tmpdir(), 'qy-lyrics-'));
+    try {
+      const adapter = makeTreeAdapter({ '周杰伦/叶惠美/03 - 晴天.mp3': { size: 4000, mtime: 1 } });
+      const driver = createLocalScanDriver({
+        repo,
+        sourceId,
+        lyricsDir: lyricsOut,
+        readAudio: async () => {
+          const { readFile } = await import('node:fs/promises');
+          return readFile(join(process.cwd(), 'tests/fixtures/audio/sample-id3v23.mp3'));
+        },
+      });
+      await runScan(scanningAdapterOf(adapter), driver, sourceId);
+      const row = new Database(dbPath, { readonly: true })
+        .prepare('SELECT id FROM music_tracks WHERE source_id = ?')
+        .get(sourceId) as { id: number };
+      const file = join(lyricsOut, `${row.id}.lrc`);
+      expect(existsSync(file)).toBe(true);
+      expect(readFileSync(file, 'utf8')).toBe('[00:00.00]晴天歌词');
+    } finally {
+      rmSync(lyricsOut, { recursive: true, force: true });
+    }
   });
 
   it('falls back to filename heuristics when readAudio is absent (WebDAV 模式)', async () => {

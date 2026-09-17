@@ -8,7 +8,8 @@
  * 注册为 sweepable 分区（mtime-LRU），被清扫后由按需再生成兜底。
  */
 
-import { writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CacheManager } from '../cache/cache-manager';
 
@@ -174,11 +175,55 @@ export async function saveCoverFromTags(
   if (!cover) return null;
   const file = `${trackId}.${cover.ext}`;
   try {
+    // 全新安装时 coversDir 可能不存在（分区注册不建目录），先确保目录
+    await mkdir(coversDir, { recursive: true });
     await writeFile(join(coversDir, file), cover.data);
     return { file, bytes: cover.data.length };
   } catch {
     return null;
   }
+}
+
+/**
+ * 歌词落盘（QYP3-019）：扫描期从标签提取的歌词写入
+ * <lyricsDir>/<trackId>.lrc（原文透传——LRC/纯文本都能被解析器容错）。
+ * 失败静默；has_lyrics 标志仍入行。
+ */
+export async function saveLyricsFromTags(
+  trackId: number,
+  lyricsDir: string,
+  lyrics: string | undefined
+): Promise<boolean> {
+  if (!lyrics || lyrics.trim().length === 0) return false;
+  try {
+    await mkdir(lyricsDir, { recursive: true });
+    await writeFile(join(lyricsDir, `${trackId}.lrc`), lyrics, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 读歌词缓存（GET_LYRICS 用）；无缓存返回 null。 */
+export async function readLyricsCache(trackId: number, lyricsDir: string): Promise<string | null> {
+  try {
+    const path = join(lyricsDir, `${trackId}.lrc`);
+    if (!existsSync(path)) return null;
+    return await readFile(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** 注册 lyrics 缓存分区（QYP3-019：受保护——人工可编辑，永不清扫）。 */
+export function registerLyricsPartition(cacheManager: CacheManager, lyricsDir: string): void {
+  cacheManager.register({
+    id: 'lyrics',
+    description: '音乐歌词缓存（受保护，永不清扫）',
+    rootDir: lyricsDir,
+    quota: {},
+    sweepable: false,
+  });
 }
 
 /** 注册 covers 缓存分区（QYP3-005；可清扫——派生数据可再生成）。 */

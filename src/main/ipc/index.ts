@@ -98,7 +98,7 @@ import { registerAudioSourceProvider } from '../modules/playback-engine/audio-ur
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
 import { setMusicEngineActive } from '../modules/playback-engine/music-active';
 import { importM3u, listTrackCatalog, exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
-import { registerCoversPartition } from '../modules/library-scanner/cover-service';
+import { registerCoversPartition, registerLyricsPartition, readLyricsCache } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
   createUnifiedQueryService,
@@ -203,6 +203,9 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
 
   // Stream headers are stashed main-side; renderers only see session ids.
   const streamHeaders: StreamHeaderCache = createStreamHeaderCache();
+
+  // QYP3-019：歌词缓存目录（扫描期从标签透传落盘，人工可编辑 → 受保护）
+  const lyricsDir = join(app.getPath('userData'), 'lyrics');
 
   // Plugin registry (QYP2-029 挂账② / QYP2-032): tmdb is the ONLY
   // registered metadata provider. Douban stays unregistered per the
@@ -502,6 +505,16 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   });
 
 
+  // 歌词（QYP3-019/021）：读歌词缓存（扫描期从标签落盘；无词返回 hasLyrics=false）
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_LYRICS, async (_event, args: { trackId: number }) => {
+    const trackId = Number(args?.trackId);
+    if (!Number.isInteger(trackId) || trackId <= 0) {
+      return err('VALIDATION_FAILED', '参数不合法');
+    }
+    const content = await readLyricsCache(trackId, lyricsDir);
+    return ok({ hasLyrics: content !== null, content });
+  });
+
   ipcMain.handle(IPC_CHANNELS.MUSIC.SET_ENGINE_ACTIVE, (_event, value: unknown) => {
     setMusicEngineActive(value === true);
     return ok({ value: Boolean(value) });
@@ -601,6 +614,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   );
   // QYP3-005：音乐封面（派生缓存，可清扫后按需再生成）
   registerCoversPartition(cacheManager, join(app.getPath('userData'), 'covers'));
+  // QYP3-019：歌词（人工可编辑，永不清扫）
+  registerLyricsPartition(cacheManager, lyricsDir);
 
   ipcMain.handle(IPC_CHANNELS.DIAGNOSTICS.SUMMARY, () => {
     return ok(
@@ -1280,7 +1295,7 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
           serverType: serverConfig.type,
           baseUrl: serverConfig.base_url,
           views: [],
-          error: '服务器未登录，请到设置中编辑并填写密码以完成登录',
+          error: '服务器未登录，请到媒体库中编辑并填写密码以完成登录',
         });
         continue;
       }
@@ -1490,6 +1505,8 @@ function registerCatalogHandlers(
   });
   // Metadata editor (QYP2-023): images live under <userData>/images/.
   const metadataImagesDir = join(app.getPath('userData'), 'images');
+  // QYP3-019：歌词缓存（扫描期从标签落盘，人工可编辑）
+  const lyricsDir = join(app.getPath('userData'), 'lyrics');
   // Two-phase safe delete (QYP2-024, plan §14.2): short-lived single-use
   // tokens; renderer supplies only {sourceId, itemId}, never paths.
   const safeDelete = new SafeDeleteService({
@@ -1674,6 +1691,7 @@ function registerCatalogHandlers(
             repo,
             sourceId,
             coversDir: join(app.getPath('userData'), 'covers'), // QYP3-005
+            lyricsDir, // QYP3-019
             // NFO contents are read through the adapter's containment check,
             // so a stored relative path can never escape the source root.
             readNfo: async (relativePath) =>
