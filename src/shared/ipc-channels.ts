@@ -22,6 +22,12 @@ export const IPC_CHANNELS = {
     GET_ALBUMS: 'music:get-albums',
     GET_ALBUM_TRACKS: 'music:get-album-tracks',
     GET_TRACKS: 'music:get-tracks',
+    /** 歌手聚合 / 单歌手专辑（QYP3-008a）。 */
+    GET_ARTISTS: 'music:get-artists',
+    GET_ARTIST_ALBUMS: 'music:get-artist-albums',
+    /** 收藏列表与收藏开关（QYP3-008a）。 */
+    GET_FAVORITES: 'music:get-favorites',
+    SET_FAVORITE: 'music:set-favorite',
     /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
     REPORT_PROGRESS: 'music:report-progress',
     GET_LYRICS: 'music:get-lyrics',

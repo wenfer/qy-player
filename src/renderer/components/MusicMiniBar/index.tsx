@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
+import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
 
 /**

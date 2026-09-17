@@ -224,6 +224,47 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
     });
   };
 
+  /**
+   * QYP3-008a：本地音乐搜索（标题/歌手/专辑）。
+   * 与 catalog 搜索同纪律：%/_ 按字面匹配（参数化查询，非注入问题），
+   * 失败由 isolateSource 兜底——音乐无结果不阻塞其它来源。
+   */
+  const musicSearch = (query: string, limit: number): UnifiedCard[] => {
+    const sourceIds = (
+      db.prepare(`SELECT id FROM library_sources WHERE kind IN ('local', 'webdav')`).all() as Array<{
+        id: number;
+      }>
+    ).map((r) => r.id);
+    if (sourceIds.length === 0) return [];
+    const placeholders = sourceIds.map(() => '?').join(',');
+    const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const like = `%${escaped}%`;
+    const rows = db
+      .prepare(
+        `SELECT id, source_id, title, artist, album, year
+         FROM music_tracks
+         WHERE source_id IN (${placeholders})
+           AND (title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\'
+                OR albumartist LIKE ? ESCAPE '\\')
+         ORDER BY title
+         LIMIT ?`
+      )
+      .all(...sourceIds, like, like, like, like, limit) as Array<{
+      id: number;
+      source_id: number;
+      title: string | null;
+      artist: string | null;
+      album: string | null;
+      year: number | null;
+    }>;
+    return rows.map((row) => ({
+      ref: { provider: 'music' as const, sourceId: row.source_id, itemId: String(row.id) },
+      title: row.title ?? '未知曲目',
+      kind: 'audio',
+      ...(row.year != null ? { year: row.year } : {}),
+    }));
+  };
+
   return {
     /** 继续观看：目录（local/webdav）+ 在线（Jellyfin/Emby）合并、MediaRef 去重。 */
     async continueWatching(limit = 40): Promise<UnifiedCard[]> {
@@ -254,11 +295,12 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
     async search(query: string, page = 1): Promise<{ items: UnifiedCard[]; page: number; total: number }> {
       const clean = query.trim();
       if (!clean) return { items: [], page: 1, total: 0 };
-      const [catalogPart, onlinePart] = await Promise.all([
+      const [catalogPart, musicPart, onlinePart] = await Promise.all([
         isolateSource(async () => catalogSearch(clean, UNIFIED_MAX_PAGE_SIZE)),
+        isolateSource(async () => musicSearch(clean, UNIFIED_MAX_PAGE_SIZE)),
         isolateSource(async () => deps.onlineSearch(clean).then((rows) => rows.map(cardFromOnlineContinue))),
       ]);
-      const merged = dedupeByMediaRef([...catalogPart, ...onlinePart]);
+      const merged = dedupeByMediaRef([...catalogPart, ...musicPart, ...onlinePart]);
       const pageResult = paginate(merged, page, UNIFIED_MAX_PAGE_SIZE);
       return pageResult;
     },

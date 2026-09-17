@@ -656,6 +656,54 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     return ok({ tracks: catalogRepo.listMusicTracksPaged(sourceIds, offset, limit) });
   });
 
+  // 歌手聚合 + 单歌手专辑（QYP3-008a）
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_ARTISTS, (_event, args: { limit?: number }) => {
+    const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200);
+    const sourceIds = catalogRepo
+      .listSources()
+      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+      .map((s) => s.id);
+    return ok({ artists: catalogRepo.listMusicArtists(sourceIds, limit) });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.GET_ARTIST_ALBUMS,
+    (_event, args: { albumartist: string; limit?: number }) => {
+      const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200);
+      if (typeof args?.albumartist !== 'string') {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      const sourceIds = catalogRepo
+        .listSources()
+        .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+        .map((s) => s.id);
+      return ok({ albums: catalogRepo.listArtistAlbums(sourceIds, args.albumartist, limit) });
+    }
+  );
+
+  // 收藏（QYP3-008a）：music 条目不在 catalog_user_state 域内，标记落在音轨行
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_FAVORITES, (_event, args: { limit?: number }) => {
+    const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200);
+    const sourceIds = catalogRepo
+      .listSources()
+      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
+      .map((s) => s.id);
+    return ok({ tracks: catalogRepo.listFavoriteMusicTracks(sourceIds, limit) });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.SET_FAVORITE,
+    (_event, args: { trackId: number; favorite: boolean }) => {
+      const trackId = Number(args?.trackId);
+      if (!Number.isInteger(trackId) || trackId <= 0) {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      const favorite = args?.favorite === true;
+      catalogRepo.setMusicFavorite(trackId, favorite);
+      return ok({ trackId, favorite });
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
     return ok({
       skipIntro: storage.getConfig('playback.skipIntro') !== 'false',

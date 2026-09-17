@@ -38,7 +38,9 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: Awaited<ReturnType<typ
 }
 
 function navigateForRef(navigate: (path: string) => void, ref: MediaRef): void {
-  if (ref.provider === 'catalog' || ref.provider === 'music') navigate(`/browse/${ref.sourceId}/item/${ref.itemId}`);
+  // 音乐条目不在 catalog_items 域内（music_tracks），详情页无法承载 → 去音乐库
+  if (ref.provider === 'music') navigate('/music');
+  else if (ref.provider === 'catalog') navigate(`/browse/${ref.sourceId}/item/${ref.itemId}`);
   else navigate(`/detail/${ref.provider}/${ref.serverId}/${ref.itemId}`);
 }
 

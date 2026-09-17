@@ -334,6 +334,14 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS idx_playlist_items_pos ON playlist_items(playlist_id, position);
   `,
+
+  // 008（QYP3-008a）：音乐收藏。music_tracks 不在 catalog_items 域内
+  // （catalog_user_state 的 item_id 外键指向 catalog_items），故收藏标记
+  // 落在音轨自身；migration 只追加，不修改已发布列。
+  `
+  ALTER TABLE music_tracks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX IF NOT EXISTS idx_music_tracks_favorite ON music_tracks(favorite);
+  `,
 ];
 
 

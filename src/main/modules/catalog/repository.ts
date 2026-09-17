@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { CatalogKind, SourceKind } from '../../../shared/types';
-import type { MusicAlbumRow, MusicTrackRow } from '../../../shared/types/music';
+import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
 
 /**
  * Parameterized data access for the phase-2 catalog schema (migration 005).
@@ -488,14 +488,64 @@ export function createCatalogRepository(db: Database.Database) {
         .all(...sourceIds, ...sourceIds, limit) as MusicAlbumRow[];
     },
 
-    /** QYP3-008：单专辑曲目（按碟号/音轨号排序）。 */
+    /** QYP3-008a：歌手聚合（按 albumartist；封面取该歌手首条有封面的音轨）。 */
+    listMusicArtists(sourceIds: number[], limit = 200): MusicArtistRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT albumartist,
+                  COUNT(DISTINCT album) AS album_count,
+                  COUNT(*) AS track_count,
+                  (SELECT t.id FROM music_tracks t
+                    WHERE t.source_id IN (${placeholders})
+                      AND t.albumartist IS music_tracks.albumartist
+                      AND t.has_cover = 1
+                    ORDER BY t.album, t.disc_no, t.track_no, t.id
+                    LIMIT 1) AS cover_track_id
+           FROM music_tracks
+           WHERE source_id IN (${placeholders})
+           GROUP BY albumartist
+           ORDER BY albumartist
+           LIMIT ?`
+        )
+        .all(...sourceIds, ...sourceIds, limit) as MusicArtistRow[];
+    },
+
+    /** QYP3-008a：单歌手的专辑列表。 */
+    listArtistAlbums(sourceIds: number[], albumartist: string, limit = 200): MusicAlbumRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT albumartist, album,
+                  COUNT(*) AS track_count,
+                  SUM(duration) AS total_duration,
+                  MIN(year) AS year,
+                  (SELECT t.id FROM music_tracks t
+                    WHERE t.source_id IN (${placeholders})
+                      AND t.albumartist IS music_tracks.albumartist
+                      AND t.album IS music_tracks.album
+                      AND t.has_cover = 1
+                    ORDER BY t.disc_no, t.track_no, t.id
+                    LIMIT 1) AS cover_track_id
+           FROM music_tracks
+           WHERE source_id IN (${placeholders}) AND albumartist = ?
+           GROUP BY albumartist, album
+           ORDER BY album
+           LIMIT ?`
+        )
+        .all(...sourceIds, ...sourceIds, albumartist, limit) as MusicAlbumRow[];
+    },
+
+    /** 单专辑曲目（按碟号/音轨号排序）。 */
     listAlbumTracks(sourceIds: number[], albumartist: string, album: string): MusicTrackRow[] {
       if (sourceIds.length === 0) return [];
       const placeholders = sourceIds.map(() => '?').join(',');
       return db
         .prepare(
           `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
-                  year, duration, codec, bitrate, has_cover, has_lyrics
+                  year, duration, codec, bitrate, has_cover, has_lyrics, favorite
            FROM music_tracks
            WHERE source_id IN (${placeholders})
              AND albumartist = ?
@@ -512,13 +562,55 @@ export function createCatalogRepository(db: Database.Database) {
       return db
         .prepare(
           `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
-                  year, duration, codec, bitrate, has_cover, has_lyrics
+                  year, duration, codec, bitrate, has_cover, has_lyrics, favorite
            FROM music_tracks
            WHERE source_id IN (${placeholders})
            ORDER BY albumartist, album, disc_no, track_no
            LIMIT ? OFFSET ?`
         )
         .all(...sourceIds, limit, offset) as MusicTrackRow[];
+    },
+
+    /** QYP3-008a：收藏曲目。 */
+    listFavoriteMusicTracks(sourceIds: number[], limit = 200): MusicTrackRow[] {
+      if (sourceIds.length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      return db
+        .prepare(
+          `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                  year, duration, codec, bitrate, has_cover, has_lyrics, favorite
+           FROM music_tracks
+           WHERE source_id IN (${placeholders}) AND favorite = 1
+           ORDER BY albumartist, album, disc_no, track_no
+           LIMIT ?`
+        )
+        .all(...sourceIds, limit) as MusicTrackRow[];
+    },
+
+    /** QYP3-008a：收藏开关（返回切换后的状态）。 */
+    setMusicFavorite(trackId: number, favorite: boolean): boolean {
+      db.prepare('UPDATE music_tracks SET favorite = ? WHERE id = ?').run(favorite ? 1 : 0, trackId);
+      return favorite;
+    },
+
+    /** QYP3-008a：统一搜索——按标题/歌手/专辑匹配本地音乐。 */
+    searchMusicTracks(sourceIds: number[], query: string, limit = 200): MusicTrackRow[] {
+      if (sourceIds.length === 0 || query.trim().length === 0) return [];
+      const placeholders = sourceIds.map(() => '?').join(',');
+      const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      const like = `%${escaped}%`;
+      return db
+        .prepare(
+          `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                  year, duration, codec, bitrate, has_cover, has_lyrics, favorite
+           FROM music_tracks
+           WHERE source_id IN (${placeholders})
+             AND (title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\'
+                  OR albumartist LIKE ? ESCAPE '\\')
+           ORDER BY albumartist, album, disc_no, track_no
+           LIMIT ?`
+        )
+        .all(...sourceIds, like, like, like, like, limit) as MusicTrackRow[];
     },
 
     // ------------------------------------------------------------------
@@ -572,7 +664,7 @@ export function createCatalogRepository(db: Database.Database) {
       // item_ref: music:<sourceId>:<trackId>（QYP3-015 契约）
       const trackStmt = db.prepare(
         `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
-                year, duration, codec, bitrate, has_cover, has_lyrics
+                year, duration, codec, bitrate, has_cover, has_lyrics, favorite
          FROM music_tracks WHERE id = ? AND source_id = ?`
       );
       return rows.map((row) => {

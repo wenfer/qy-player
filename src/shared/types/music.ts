@@ -17,6 +17,17 @@ export interface MusicTrackRow {
   bitrate: number | null;
   has_cover: number;
   has_lyrics: number;
+  /** 收藏（QYP3-008a，migration 008）。 */
+  favorite: number;
+}
+
+/** 歌手聚合（网格视图，页 ≤200，§16.4）。 */
+export interface MusicArtistRow {
+  albumartist: string | null;
+  album_count: number;
+  track_count: number;
+  /** 该歌手名下第一条有内嵌封面的音轨 id（封面 URL 用）。 */
+  cover_track_id: number | null;
 }
 
 /** 专辑聚合（网格视图，页 ≤200，§16.4）。 */

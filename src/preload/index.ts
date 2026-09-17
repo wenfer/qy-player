@@ -169,6 +169,14 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ALBUM_TRACKS, { albumartist, album }),
   getMusicTracks: (offset = 0, limit = 200) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_TRACKS, { offset, limit }),
+  // 歌手 / 收藏（QYP3-008a）
+  getMusicArtists: (limit = 200) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ARTISTS, { limit }),
+  getArtistAlbums: (albumartist: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_ARTIST_ALBUMS, { albumartist }),
+  getMusicFavorites: (limit = 200) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_FAVORITES, { limit }),
+  setMusicFavorite: (trackId: number, favorite: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_FAVORITE, { trackId, favorite }),
   reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
   // 歌单（QYP3-015/016/017）

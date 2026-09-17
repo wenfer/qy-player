@@ -45,7 +45,7 @@ afterAll(() => {
 describe('music tables (migration 007)', () => {
   it('creates music/playlist tables with business-key uniqueness', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(7);
+    expect(getVersion(db)).toBe(8);
     const names = tableNames(db);
     expect(names).toEqual(expect.arrayContaining(['music_tracks', 'music_cue_entries', 'playlists', 'playlist_items']));
     db.prepare(
@@ -144,7 +144,7 @@ function getVersion(db: Database.Database): number {
 describe('skip_overrides (migration 006)', () => {
   it('applies migration 006 and round-trips series-scope overrides', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(7);
+    expect(getVersion(db)).toBe(8);
     const storage = createStorage(db);
     // 初次无设定
     expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toBeNull();
@@ -199,7 +199,7 @@ describe('getWatchHistory localOnly filter', () => {
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(7);
+    expect(getVersion(db)).toBe(8);
     const tables = tableNames(db);
     for (const table of CATALOG_TABLES) expect(tables).toContain(table);
     for (const table of LEGACY_TABLES) expect(tables).toContain(table);
@@ -228,7 +228,7 @@ describe('catalog migrations (005)', () => {
 
     // Reopen through the normal path: 005 + 006 both apply (append-only chain).
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(7);
+    expect(getVersion(db)).toBe(8);
     expect((db.prepare('SELECT COUNT(*) AS n FROM local_media').get() as { n: number }).n).toBe(1);
     expect((db.prepare('SELECT position FROM playback_progress').get() as { position: number }).position).toBe(600);
 
