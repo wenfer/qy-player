@@ -107,6 +107,7 @@
 
 ### UI 约定（用户偏好，勿回退）
 - **设置页仅软件配置**（服务器、快捷键等）；媒体来源（本地目录/WebDAV）在独立「媒体库」页面（`/media-sources`）管理，勿合并回去
+- **设置页按板块分页签**（`Settings/index.tsx`：播放 / 音乐 / 插件），一次只显示一个板块——影视与音乐是两套独立配置域，音乐项（引擎/音量链路/均衡器/拾音器/歌词/睡眠定时）一律进「音乐」页签，勿塞回播放板块（用户明确要求两者不要混在一起）
 - **`SETTINGS.GET`/`SET` 是 JSON 对称契约**：SET 走 `JSON.stringify`，GET 走 `decodeConfigValue` 解析回来（解析失败退回裸串，兼容主进程裸值）。renderer 侧读设置**不要**再手动 `JSON.parse`，也**不要**假设返回字符串——历史上这条不对称让均衡器/ReplayGain/自定义预设/拾音器开关四项静默失效
 - **拒绝横向滚动条**：超宽内容一律换行（`flex-wrap` / grid），用户明确反对横向拖动
 - Tailwind + 深色主题语义 token（`bg-card`/`border-border`/`text-muted-foreground`/`focus-ring`）
