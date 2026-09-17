@@ -437,7 +437,24 @@
   typecheck 双配置 + 全量绿
 - 范围：服务器歌单的增删改不在本期（服务器端管理）；视频歌单只提示不入队
 
-### QYP2P-005 网络收音机流 spike `[ ]`
+### QYP2P-005 网络收音机流 spike `[x]`（结论：暂不实现）
+- 产出：`docs/decisions/0009-network-radio.md`（ADR）
+- 静态核实：目标 mpv 二进制含 ICY 链路（`icy-title` /
+  `icy_metadata_headers` / `read_icy`），但 mpv 动态链接系统
+  libavformat，实际是否生效取决于目标机 ffmpeg（Debian 10 = 4.1，ICY
+  自 2014 年起在 http 协议内）；本机 mpv 因缺 libluajit 无法运行，
+  真实播放验证归 TARGET-VERIFY
+- 冲突清点（spike 的主要产出）：① 进度保存每 10s 无条件写 watch_history
+  且 duration 缺失时 `getResumePosition` 直接返回 position → 直播流会
+  污染历史与续播；② 播放解析是 MediaRef 驱动，电台 URL 不在目录域内；
+  ③ 队列/收藏/歌词/桌面歌词都按 trackId 或 serverId 走；④ 直播 UI 语义
+  不同（无进度/不可 seek/LIVE）且 ICY 标题需要新增 mpv metadata 转发；
+  ⑤ 断流是 error 不是 eof，需要重连退避
+- 决策：**不做**——它等于给播放状态机开平行通道，而非复用既有管线；
+  若将来要做，ADR 里给出了 5 步顺序，第 2 步（不可续播标志）是硬前置
+- Evidence: ADR-0009；`strings -a ~/.local/bin/mpv | grep -iE 'icy'`
+  （6 条命中）；`playback-state/index.ts:156/138` 与
+  `playback-resolver.ts` 的代码定位
 
 ### QYP2P-006 修掉门禁里的偶发假红 `[x]`
 - 背景：全量跑到 80+ 文件后，出现三个"单跑必过、并行偶发失败"的用例：

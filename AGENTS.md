@@ -130,7 +130,7 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 - 运行时说明（缓存/并发预算/诊断/回滚）：`docs/OPERATIONS.md`
 - 发布后待目标机验证清单：`docs/TARGET-VERIFY.md`
 - 架构决策记录：`docs/decisions/`（0001 MediaRef/目录域、0005 mpv probe、
-  0006 豆瓣门禁）
+  0006 豆瓣门禁、0009 网络收音机 spike 结论）
 - mpv 老系统编译：`docs/BUILD-MPV.md`
 - 版本历史：`CHANGELOG.md`
 - 发布流程：tag 由人工批准发布说明后创建；GitHub Actions 全格式打包
