@@ -96,7 +96,12 @@ import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import { CacheManager } from '../modules/cache/cache-manager';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
-import { setMusicEngineActive } from '../modules/playback-engine/music-active';
+import {
+  clearMusicSession,
+  isMusicSessionActive,
+  setMpvMusicActive,
+  setMusicEngineActive,
+} from '../modules/playback-engine/music-active';
 import {
   closeDeskLyrics,
   isDesktopLyricsSupported,
@@ -954,9 +959,20 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       const gains = sanitizeEqGains(audioChain.eqGains);
       void player.applyMusicAudioChain(mpvAudioFilterFromEq(gains) ?? '', audioChain.replaygain ?? null);
       mpvAfWasSet = true;
-    } else if (mpvAfWasSet) {
-      void player.applyMusicAudioChain('', null);
-      mpvAfWasSet = false;
+      setMpvMusicActive(true); // QYP3-026：音乐会话（媒体键/状态转发按音乐走）
+    } else {
+      if (mpvAfWasSet) {
+        void player.applyMusicAudioChain('', null);
+        mpvAfWasSet = false;
+      }
+      // QYP3-026：非音乐加载即结束音乐会话。否则音乐控制条会一直挂在
+      // 视频上，且 renderer 引擎的音乐还在继续出声（两者同时播放）。
+      if (isMusicSessionActive()) {
+        clearMusicSession();
+        if (!_event.sender.isDestroyed()) {
+          _event.sender.send(IPC_CHANNELS.MUSIC.ON_SESSION_END);
+        }
+      }
     }
 
     // Real headers never cross the IPC boundary: the renderer hands back the

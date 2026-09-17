@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Heart, Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
-import { useMusicPlaybackStore } from '../../stores/music-playback-store';
+import {
+  attachMusicMpvBridge,
+  useMusicPlaybackStore,
+} from '../../stores/music-playback-store';
 import { useToastStore } from '../../stores/toast-store';
 import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
 
 /**
- * 音乐迷你控制条（QYP3-013）：webaudio 引擎激活时全局常驻（可折叠）。
- * mpv 引擎的音视频控制由全局 PlayerControls 驱动，不在此重复。
- * 歌词面板（QYP3-021）由本条的「词」按钮开合；拾音器（QYP3-023）
- * 按设置模式显示迷你条。
+ * 音乐迷你控制条（QYP3-013 / QYP3-026）：音乐会话（任一引擎）期间全局
+ * 常驻（可折叠）。mpv 引擎的位置由主进程状态事件经
+ * `attachMusicMpvBridge` 写回（视频不会驱动本条）；歌词面板（QYP3-021）
+ * 由本条的「词」按钮开合；拾音器（QYP3-023）按设置模式显示。
  */
 
 /** 拾音器模式：off=关闭；auto 在 renderer 引擎下按频谱、否则波形。 */
@@ -92,10 +95,12 @@ export default function MusicMiniBar() {
 
   useEffect(() => {
     setMounted(true);
+    // mpv 引擎位置源 + 视频接管时的会话收尾（QYP3-026）
+    attachMusicMpvBridge();
   }, []);
 
   useEffect(() => {
-    // 全局媒体键（QYP3-013）：main 侧在音乐激活时转发
+    // 全局媒体键（QYP3-013）：main 侧在音乐会话期间转发
     const off = window.electronAPI.onMusicCommand?.((command: string) => {
       if (command === 'toggle') {
         playback.isPlaying ? playback.pause() : playback.resume();
@@ -105,7 +110,8 @@ export default function MusicMiniBar() {
         void playback.prev();
       } else if (command === 'favorite') {
         const current = useMusicPlaybackStore.getState().current;
-        if (current) void toggleFavoriteRef.current(current.id);
+        // 服务器曲目不在本地库（id=0），没有可收藏的行
+        if (current && current.id > 0) void toggleFavoriteRef.current(current.id);
       }
     });
     return () => {
@@ -114,7 +120,9 @@ export default function MusicMiniBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!mounted || playback.engine !== 'webaudio' || !playback.current) return null;
+  if (!mounted || !playback.engine || !playback.current) return null;
+  // 服务器曲目以服务器为准（不落本地库），收藏只对扫描入库的音轨开放
+  const canFavorite = playback.current.id > 0;
 
   const fmt = (sec: number): string => {
     const m = Math.floor(sec / 60);
@@ -214,11 +222,13 @@ export default function MusicMiniBar() {
       </div>
       <button
         type="button"
-        onClick={() => playback.current && void toggleFavorite(playback.current.id)}
-        aria-label={playback.current && favoriteIds.has(playback.current.id) ? '取消收藏' : '收藏此曲'}
-        aria-pressed={Boolean(playback.current && favoriteIds.has(playback.current.id))}
-        className={`p-1.5 rounded-lg hover:bg-accent focus-ring ${
-          playback.current && favoriteIds.has(playback.current.id)
+        onClick={() => canFavorite && playback.current && void toggleFavorite(playback.current.id)}
+        aria-label={canFavorite && favoriteIds.has(playback.current.id) ? '取消收藏' : '收藏此曲'}
+        aria-pressed={Boolean(canFavorite && favoriteIds.has(playback.current.id))}
+        disabled={!canFavorite}
+        title={canFavorite ? undefined : '服务器曲目不支持收藏'}
+        className={`p-1.5 rounded-lg hover:bg-accent focus-ring disabled:opacity-40 disabled:cursor-default ${
+          canFavorite && favoriteIds.has(playback.current.id)
             ? 'text-primary'
             : 'text-muted-foreground hover:text-foreground'
         }`}

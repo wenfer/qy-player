@@ -7,6 +7,7 @@ import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { closeDeskLyrics } from './modules/ui-shell/desk-lyrics';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
 import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
+import { isMpvMusicActive } from './modules/playback-engine/music-active';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
 
@@ -38,27 +39,38 @@ function createWindow(): BrowserWindow {
   });
 
   // Forward player state changes to renderer
+  //
+  // QYP3-026：附带 music 标记（本次 mpv 加载的是音乐）。音乐控制条只
+  // 在自己发起的音乐 mpv 会话内消费这些事件——mpv 状态对视频与音乐
+  // 是同一份，没有这个标记视频进度会污染迷你条。
+  const sendPlayerState = (payload: Record<string, unknown>): void => {
+    mainWindow?.webContents.send(IPC_CHANNELS.PLAYER.ON_STATE_CHANGE, {
+      music: isMpvMusicActive(),
+      ...payload,
+    });
+  };
+
   player.on('time-pos', (time: number) => {
     const now = Date.now();
     if (now - lastTimePosSent < 250) return;
     lastTimePosSent = now;
-    mainWindow?.webContents.send('player:on-state-change', { currentTime: time });
+    sendPlayerState({ currentTime: time });
   });
 
   player.on('duration', (duration: number) => {
-    mainWindow?.webContents.send('player:on-state-change', { duration });
+    sendPlayerState({ duration });
   });
 
   player.on('pause', (paused: boolean) => {
-    mainWindow?.webContents.send('player:on-state-change', { isPlaying: !paused });
+    sendPlayerState({ isPlaying: !paused });
   });
 
   player.on('volume', (volume: number) => {
-    mainWindow?.webContents.send('player:on-state-change', { volume });
+    sendPlayerState({ volume });
   });
 
   player.on('fullscreen', (fullscreen: boolean) => {
-    mainWindow?.webContents.send('player:on-state-change', { isFullscreen: fullscreen });
+    sendPlayerState({ isFullscreen: fullscreen });
   });
 
   // When the MPV window closes (user pressed q), bring the app window back
@@ -70,7 +82,7 @@ function createWindow(): BrowserWindow {
   });
 
   player.on('eof', () => {
-    mainWindow?.webContents.send('player:on-state-change', { isPlaying: false, eof: true });
+    sendPlayerState({ isPlaying: false, eof: true });
   });
 
   // Load renderer

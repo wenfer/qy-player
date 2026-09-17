@@ -307,6 +307,32 @@
 - 服务器曲目无本地歌词缓存 → 切曲清空 currentLyrics（避免桌面歌词残留
   上一首）；接服务器歌词见 020b
 
+### QYP3-026 mpv 引擎音乐控制条 + 与视频互斥 `[x]`
+- 依赖：013, 023, 025
+- 背景：迷你条此前只在 renderer 引擎下渲染，导致三处死路——023 的 mpv
+  波形模式不可达、013/013a 的收藏键对 mpv 曲目静默失效、服务器音乐（025）
+  完全没有音乐 UI；另外视频起播不会停掉 renderer 引擎音乐（两路音同时响）
+- 内容：
+  - main：`music-active.ts` 增 mpv 音乐会话标志（`setMpvMusicActive`/
+    `isMusicSessionActive`/`clearMusicSession`）；LOAD_FILE 按是否带
+    audioChain 判定并在非音乐加载时结束会话 + 发 `MUSIC.ON_SESSION_END`
+    （`player:on-state-change` 的裸字符串同时换成通道常量）；
+    `player:on-state-change` 附带 `music` 标记
+  - renderer：`attachMusicMpvBridge()`（幂等）把带 `music` 标记的 mpv 状态
+    写回 store（position/duration/isPlaying + 桌面歌词推送）、自然 EOF 按
+    服务器队列推进下一曲、视频接管或 SESSION_END 时 `stop()` 收尾；
+    mpv 起播改为上报 `setMusicEngineActive(true)`（媒体键走音乐语义：
+    下一曲按队列而不是 mpv 快进 30 秒）；迷你条对任一引擎渲染，
+    服务器曲目（id=0，不在本地库）收藏按钮禁用
+- 验收：mpv 状态只写音乐会话；视频接管后音乐条消失且 renderer 引擎停止；
+  服务器曲目队列 EOF 自动下一曲
+- Evidence: `tests/main/playback-engine/music-active.test.ts` 4/4；
+  `tests/renderer/music/mpv-bridge.test.tsx` 6/6（标记过滤/残留事件不误杀/
+  位置与歌词推送/EOF 推进/无队列不动 mpv/会话结束收尾）；
+  `tests/renderer/music/mini-bar.test.tsx` 3/3（mpv 渲染 + 波形条/
+  收藏按钮禁用与启用/无会话不渲染）；typecheck 双配置 + 全量绿
+- 待实机：mpv 音乐与视频切换时迷你条的显隐时机——已列入 TARGET-VERIFY
+
 ### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`
 - 依赖：全部
 - 内容：门禁全绿；TARGET-VERIFY 增补音乐项；CHANGELOG 1.2.0；README/

@@ -45,6 +45,8 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   getSpectrum: () => Uint8Array | null;
   /** 服务器队列内跳转（QYP3-025）：mpv 引擎的上下曲靠它推进。 */
   playServerAt: (index: number) => Promise<void>;
+  /** 结束音乐会话（QYP3-026）：视频接管 mpv 时由主进程事件触发。 */
+  stop: () => void;
 }
 
 let engineSingleton: WebAudioEngine | null = null;
@@ -90,6 +92,56 @@ function loadLyricsFor(trackId: number): void {
     .catch(() => {
       currentLyrics = null;
     });
+}
+
+let bridgeAttached = false;
+
+/**
+ * mpv 引擎位置源（QYP3-026）。
+ *
+ * mpv 的音乐与视频共用同一路 `player:on-state-change`，主进程按
+ * LOAD_FILE 是否带 audioChain 打 `music` 标记；这里只在音乐会话内写回
+ * store（否则视频进度会驱动音乐控制条）。自然播放结束按音乐队列推进
+ * 下一曲（与 renderer 引擎的 onEnded 同语义，无倒计时）。
+ *
+ * 幂等：多处挂载只会订阅一次。
+ */
+export function attachMusicMpvBridge(): void {
+  if (bridgeAttached) return;
+  bridgeAttached = true;
+  window.electronAPI.onPlayerStateChange((state: unknown) => {
+    const s = state as {
+      music?: boolean;
+      currentTime?: number;
+      duration?: number;
+      isPlaying?: boolean;
+      eof?: boolean;
+    };
+    const store = useMusicPlaybackStore.getState();
+    if (s.music && store.engine === 'mpv') {
+      const patch: Partial<MusicPlayingState> = {};
+      if (typeof s.currentTime === 'number') patch.position = s.currentTime;
+      if (typeof s.duration === 'number' && s.duration > 0) patch.duration = s.duration;
+      if (typeof s.isPlaying === 'boolean') patch.isPlaying = s.isPlaying;
+      if (Object.keys(patch).length > 0) useMusicPlaybackStore.setState(patch);
+      pushDeskLyrics(
+        typeof s.currentTime === 'number' ? s.currentTime : store.position,
+        typeof s.isPlaying === 'boolean' ? s.isPlaying : store.isPlaying
+      );
+      // 自然结束：队列内推进（队尾 next() 内部 stop，不回卷）
+      if (s.eof && store.serverQueue.length > 0) void store.next();
+      return;
+    }
+    // 视频接管 mpv（非音乐加载）：只在本 store 认为 mpv 在放音乐时收尾。
+    // renderer 引擎与视频互斥走主进程的显式 ON_SESSION_END（否则一次
+    // 残留的 mpv 事件会误杀刚起播的 renderer 引擎音乐）。
+    if (!s.music && useMusicPlaybackStore.getState().engine === 'mpv') {
+      useMusicPlaybackStore.getState().stop();
+    }
+  });
+  window.electronAPI.onMusicSessionEnd(() => {
+    useMusicPlaybackStore.getState().stop();
+  });
 }
 
 function getEngine(): WebAudioEngine {
@@ -291,8 +343,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         loadLyricsFor(queue[idx]?.trackId ?? start.trackId);
       } else {
         // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
-        // 音乐激活态解除（媒体键回到视频语义）
-        void window.electronAPI.setMusicEngineActive(false);
+        // QYP3-026：媒体键仍按音乐语义路由到 renderer（"下一曲"要走音乐
+        // 队列，而不是 mpv 的快进 30 秒）；视频加载时主进程会结束会话。
+        void window.electronAPI.setMusicEngineActive(true);
         set({
           engine: 'mpv',
           current: {
@@ -454,6 +507,28 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     } catch (e) {
       set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
     }
+  },
+
+  stop: () => {
+    // 幂等：视频状态事件会高频到达，已无音乐会话时直接返回（不 set）
+    if (get().engine === null) return;
+    engineSingleton?.pause();
+    currentLyrics = null;
+    pushDeskLyrics(get().position, false);
+    void window.electronAPI.setMusicEngineActive(false);
+    set({
+      engine: null,
+      current: null,
+      position: 0,
+      duration: 0,
+      isPlaying: false,
+      queueLength: 0,
+      queueIndex: 0,
+      queueSnapshot: [],
+      serverQueue: [],
+      serverIndex: -1,
+      errorMessage: null,
+    });
   },
 }));
 

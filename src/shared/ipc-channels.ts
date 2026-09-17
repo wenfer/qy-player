@@ -37,6 +37,11 @@ export const IPC_CHANNELS = {
     SET_ENGINE_ACTIVE: 'music:set-engine-active',
     /** 全局媒体键转发（renderer 引擎激活时 main → renderer）。 */
     ON_COMMAND: 'music:on-command',
+    /**
+     * main → renderer：音乐会话被非音乐媒体（视频）取代（QYP3-026）。
+     * renderer 据此停掉 renderer 引擎并清空音乐控制条状态。
+     */
+    ON_SESSION_END: 'music:on-session-end',
   },
   DESKLYRICS: {
     /** 打开桌面歌词窗口（ADR-0008）。 */

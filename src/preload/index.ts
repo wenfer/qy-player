@@ -206,6 +206,12 @@ const electronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_COMMAND, listener);
   },
+  /** 音乐会话被视频取代（QYP3-026）：停 renderer 引擎 + 收音乐控制条。 */
+  onMusicSessionEnd: (cb: () => void) => {
+    const listener = (): void => cb();
+    ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
+  },
   // 桌面歌词（QYP3-022）：主窗口推状态；歌词窗口收事件
   showDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.SHOW),
   hideDeskLyrics: () => ipcRenderer.invoke(IPC_CHANNELS.DESKLYRICS.HIDE),
