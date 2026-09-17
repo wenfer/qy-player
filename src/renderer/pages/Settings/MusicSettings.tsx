@@ -20,11 +20,40 @@ const EQ_PRESETS_UI: Array<{ id: string; label: string; gains: number[] }> = [
   { id: 'rock', label: '摇滚', gains: [5, 4, 2, 0, -1, 0, 1, 3, 4, 4] },
 ];
 
+/** 自定义预设（QYP3-012a）：存 app_config `playback.eqPresets`。 */
+export interface EqPreset {
+  id: string;
+  label: string;
+  gains: number[];
+}
+
+const EQ_PRESETS_KEY = 'playback.eqPresets';
+
+/** 只接受结构合法的条目（手改配置/旧版本残留不允许污染 UI）。 */
+export function parseEqPresets(raw: unknown): EqPreset[] {
+  if (!Array.isArray(raw)) return [];
+  const out: EqPreset[] = [];
+  for (const item of raw) {
+    const preset = item as { id?: unknown; label?: unknown; gains?: unknown };
+    if (typeof preset?.label !== 'string' || !Array.isArray(preset.gains)) continue;
+    if (preset.gains.length !== EQ_BANDS.length) continue;
+    if (preset.gains.some((v) => !Number.isFinite(Number(v)))) continue;
+    out.push({
+      id: typeof preset.id === 'string' ? preset.id : `custom-${out.length}`,
+      label: preset.label,
+      gains: preset.gains.map((v) => Number(v)),
+    });
+  }
+  return out;
+}
+
 export default function MusicSettings() {
   const addToast = useToastStore((s) => s.addToast);
   const [engine, setEngine] = useState<string>('spectrum-first');
   const [replaygain, setReplaygain] = useState<string>('off');
   const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
+  const [customPresets, setCustomPresets] = useState<EqPreset[]>([]);
+  const [presetName, setPresetName] = useState('');
   // 桌面歌词（QYP3-022）
   const [deskOpen, setDeskOpen] = useState(false);
   const [deskFontSize, setDeskFontSize] = useState(28);
@@ -51,6 +80,8 @@ export default function MusicSettings() {
         if (Array.isArray(q?.data) && q.data.length === 10) {
           setEqGains(q.data.map((v) => Number(v) || 0));
         }
+        const presets = (await window.electronAPI.getSettings(EQ_PRESETS_KEY)) as { data?: unknown };
+        setCustomPresets(parseEqPresets(presets?.data));
         const f = (await window.electronAPI.getSettings('deskLyrics.fontSize')) as { data?: unknown };
         if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
         const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
@@ -145,6 +176,51 @@ export default function MusicSettings() {
     [save]
   );
 
+  /** 保存/删除自定义预设（QYP3-012a）：整表覆盖写，持久化失败必须回滚。 */
+  const persistPresets = useCallback(
+    async (next: EqPreset[], message: string): Promise<void> => {
+      const prev = customPresets;
+      setCustomPresets(next);
+      try {
+        const res = (await window.electronAPI.setSettings(EQ_PRESETS_KEY, next)) as { ok?: boolean };
+        if (res?.ok === false) throw new Error('failed');
+        addToast(message, 'success');
+      } catch {
+        setCustomPresets(prev);
+        addToast('保存失败，请重试', 'error');
+      }
+    },
+    [customPresets, addToast]
+  );
+
+  const savePreset = useCallback(async (): Promise<void> => {
+    const label = presetName.trim();
+    if (!label) {
+      addToast('请先填写预设名称', 'error');
+      return;
+    }
+    if ([...EQ_PRESETS_UI, ...customPresets].some((p) => p.label === label)) {
+      addToast('已有同名预设', 'error');
+      return;
+    }
+    const next = [
+      ...customPresets,
+      { id: `custom-${Date.now()}`, label, gains: [...eqGains] },
+    ];
+    setPresetName('');
+    await persistPresets(next, `已保存预设：${label}`);
+  }, [presetName, customPresets, eqGains, persistPresets, addToast]);
+
+  const deletePreset = useCallback(
+    async (id: string): Promise<void> => {
+      await persistPresets(
+        customPresets.filter((p) => p.id !== id),
+        '预设已删除'
+      );
+    },
+    [customPresets, persistPresets]
+  );
+
   const adjustBand = useCallback(
     (index: number, value: number): void => {
       setEqGains((prev) => {
@@ -218,16 +294,27 @@ export default function MusicSettings() {
               均衡器
             </span>
             <div className="flex flex-wrap gap-1.5 ml-auto">
-              {EQ_PRESETS_UI.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => void applyEq(p.gains, `已应用预设：${p.label}`)}
-                  disabled={saving}
-                  className="px-2 py-1 text-[10px] border border-border rounded-lg hover:bg-accent focus-ring"
-                >
-                  {p.label}
-                </button>
+              {[...EQ_PRESETS_UI, ...customPresets].map((p) => (
+                <span key={p.id} className="inline-flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => void applyEq(p.gains, `已应用预设：${p.label}`)}
+                    disabled={saving}
+                    className="px-2 py-1 text-[10px] border border-border rounded-l-lg hover:bg-accent focus-ring"
+                  >
+                    {p.label}
+                  </button>
+                  {p.id.startsWith('custom-') && (
+                    <button
+                      type="button"
+                      onClick={() => void deletePreset(p.id)}
+                      aria-label={`删除预设 ${p.label}`}
+                      className="px-1.5 py-1 text-[10px] border border-l-0 border-border rounded-r-lg text-muted-foreground hover:text-foreground hover:bg-accent focus-ring"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
               ))}
             </div>
           </div>
@@ -255,6 +342,25 @@ export default function MusicSettings() {
           <p className="text-[11px] text-muted-foreground mt-2">
             实时生效于音乐播放；视频播放不受均衡器影响。
           </p>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="预设名称"
+              aria-label="自定义预设名称"
+              className="bg-input border border-border rounded-lg px-2 py-1 text-xs focus-ring w-40"
+            />
+            <button
+              type="button"
+              onClick={() => void savePreset()}
+              className="px-3 py-1 text-xs rounded-lg border border-border hover:bg-accent focus-ring"
+            >
+              保存当前为预设
+            </button>
+            <span className="text-[11px] text-muted-foreground">
+              自定义预设存本地配置；点预设名右侧 × 可删除。
+            </span>
+          </div>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-4">
