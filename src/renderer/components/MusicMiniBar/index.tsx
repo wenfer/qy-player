@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Heart, Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
+import { useToastStore } from '../../stores/toast-store';
 import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
 
@@ -25,6 +26,58 @@ export default function MusicMiniBar() {
   const [mounted, setMounted] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [visualizer, setVisualizer] = useState<string>('auto');
+  // 收藏集合（QYP3-013a）：全局收藏快捷键与迷你条共用同一份状态
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+  const addToast = useToastStore((s) => s.addToast);
+
+  const loadFavorites = useCallback(async (): Promise<void> => {
+    try {
+      const res = (await window.electronAPI.getMusicFavorites(200)) as {
+        ok?: boolean;
+        data?: { tracks?: Array<{ id: number }> };
+      };
+      setFavoriteIds(new Set((res?.data?.tracks ?? []).map((t) => t.id)));
+    } catch {
+      // 收藏状态读不到不影响播放
+    }
+  }, []);
+
+  /** 切换当前曲目收藏（快捷键 / 迷你条按钮共用）。 */
+  const toggleFavorite = useCallback(
+    async (trackId: number): Promise<void> => {
+      const next = !favoriteIds.has(trackId);
+      setFavoriteIds((prev) => {
+        const copy = new Set(prev);
+        if (next) copy.add(trackId);
+        else copy.delete(trackId);
+        return copy;
+      });
+      try {
+        const res = (await window.electronAPI.setMusicFavorite(trackId, next)) as { ok?: boolean };
+        if (res?.ok === false) throw new Error('failed');
+        addToast(next ? '已收藏' : '已取消收藏', 'success');
+      } catch {
+        setFavoriteIds((prev) => {
+          const copy = new Set(prev);
+          if (next) copy.delete(trackId);
+          else copy.add(trackId);
+          return copy;
+        });
+        addToast('收藏失败，请重试', 'error');
+      }
+    },
+    [favoriteIds, addToast]
+  );
+
+  // 快捷键回调在挂载时注册一次，用 ref 拿最新的切换实现（避免闭包过期）
+  const toggleFavoriteRef = useRef(toggleFavorite);
+  useEffect(() => {
+    toggleFavoriteRef.current = toggleFavorite;
+  }, [toggleFavorite]);
+
+  useEffect(() => {
+    void loadFavorites();
+  }, [loadFavorites]);
 
   useEffect(() => {
     // 拾音器设置（QYP3-023）：默认 auto（renderer 引擎→频谱，否则波形）
@@ -50,6 +103,9 @@ export default function MusicMiniBar() {
         void playback.next();
       } else if (command === 'prev') {
         void playback.prev();
+      } else if (command === 'favorite') {
+        const current = useMusicPlaybackStore.getState().current;
+        if (current) void toggleFavoriteRef.current(current.id);
       }
     });
     return () => {
@@ -156,6 +212,19 @@ export default function MusicMiniBar() {
           <span className="text-[10px] text-muted-foreground">{fmt(playback.duration)}</span>
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => playback.current && void toggleFavorite(playback.current.id)}
+        aria-label={playback.current && favoriteIds.has(playback.current.id) ? '取消收藏' : '收藏此曲'}
+        aria-pressed={Boolean(playback.current && favoriteIds.has(playback.current.id))}
+        className={`p-1.5 rounded-lg hover:bg-accent focus-ring ${
+          playback.current && favoriteIds.has(playback.current.id)
+            ? 'text-primary'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Heart size={16} />
+      </button>
       <button
         type="button"
         onClick={() => setShowLyrics((v) => !v)}

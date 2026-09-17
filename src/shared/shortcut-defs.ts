@@ -46,6 +46,12 @@ export const GLOBAL_SHORTCUTS: ShortcutDef[] = [
     defaultAccelerator: 'CommandOrControl+Shift+Q',
   },
   {
+    id: 'favoriteCurrent',
+    label: '收藏当前曲目',
+    description: '音乐播放中收藏 / 取消收藏当前曲目（视频播放时无效）',
+    defaultAccelerator: 'CommandOrControl+Shift+F',
+  },
+  {
     id: 'cycleAspect',
     label: '循环切换画面比例',
     description: '自动 → 16:9 → 4:3 → 2.35:1 → 1:1',

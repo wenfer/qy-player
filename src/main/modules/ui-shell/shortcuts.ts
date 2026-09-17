@@ -48,6 +48,13 @@ export function registerGlobalShortcuts(
       }
       if (player.isReady()) player.seek(-30, 'relative').catch(() => {});
     },
+    // 收藏当前曲目（QYP3-013a）：只对音乐生效（renderer 引擎激活时），
+    // 视频播放没有"曲目"概念，静默无操作。
+    favoriteCurrent: () => {
+      if (isMusicEngineActive()) {
+        mainWindow.webContents.send(IPC_CHANNELS.MUSIC.ON_COMMAND, 'favorite');
+      }
+    },
     toggleWindow: () => {
       if (mainWindow.isVisible()) mainWindow.hide();
       else {
