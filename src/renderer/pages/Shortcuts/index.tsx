@@ -74,8 +74,11 @@ export default function ShortcutsPage() {
           window.electronAPI.getSettings('shortcuts'),
           window.electronAPI.getSettings('mpv-shortcuts'),
         ]);
-        if (g) setGlobalOverrides(JSON.parse(g));
-        if (m) setMpvOverrides(JSON.parse(m));
+        // SETTINGS.GET 已与 SET 对称解析（对象直接可用，无需再 JSON.parse）
+        const asOverrides = (value: unknown): Overrides =>
+          typeof value === 'object' && value !== null ? (value as Overrides) : {};
+        setGlobalOverrides(asOverrides((g as { data?: unknown })?.data));
+        setMpvOverrides(asOverrides((m as { data?: unknown })?.data));
       } catch {
         // Fall back to defaults
       } finally {

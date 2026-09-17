@@ -208,24 +208,66 @@ function reportProgress(final: boolean): void {
   });
 }
 
-/** 音频链设置读取（QYP3-012）：EQ dB 数组 + ReplayGain 模式。 */
-async function readAudioChainSettings(): Promise<[number[] | null, string | null]> {
+/** 音频链设备侧参数（主进程按此 set_property；P2 增加 ReplayGain 高级项）。 */
+interface AudioChainSettings {
+  eqGains: number[] | null;
+  replaygain: string | null;
+  replaygainPreamp: number | null;
+  replaygainFallback: number | null;
+  replaygainClip: boolean;
+}
+
+/**
+ * 音频链设置读取（QYP3-012 + P2）：EQ dB 数组 + ReplayGain（模式与
+ * 预增益/兜底增益/削波保护）。读不到的项留给主进程默认值。
+ */
+async function readAudioChainSettings(): Promise<AudioChainSettings> {
+  const empty: AudioChainSettings = {
+    eqGains: null,
+    replaygain: null,
+    replaygainPreamp: null,
+    replaygainFallback: null,
+    replaygainClip: false,
+  };
   try {
-    const eqRes = (await window.electronAPI.getSettings('playback.eqGains')) as {
-      ok?: boolean;
-      data?: unknown;
+    const read = async (key: string): Promise<unknown> => {
+      const res = (await window.electronAPI.getSettings(key)) as { data?: unknown };
+      return res?.data;
     };
-    const eqValue = eqRes?.data;
-    let eqGains: number[] | null = null;
-    if (Array.isArray(eqValue)) {
-      eqGains = eqValue.map((v) => Number(v) || 0);
-    }
-    const rgRes = (await window.electronAPI.getSettings('playback.replaygain')) as { data?: unknown };
-    const rg = typeof rgRes?.data === 'string' ? rgRes.data : null;
-    return [eqGains, rg && rg !== 'off' ? rg : null];
+    const [eqValue, rgValue, preampValue, fallbackValue, clipValue] = await Promise.all([
+      read('playback.eqGains'),
+      read('playback.replaygain'),
+      read('playback.replaygainPreamp'),
+      read('playback.replaygainFallback'),
+      read('playback.replaygainClip'),
+    ]);
+    const rg = typeof rgValue === 'string' && rgValue !== 'off' ? rgValue : null;
+    const num = (v: unknown): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    return {
+      eqGains: Array.isArray(eqValue) ? eqValue.map((v) => Number(v) || 0) : null,
+      replaygain: rg,
+      replaygainPreamp: num(preampValue),
+      replaygainFallback: num(fallbackValue),
+      // SETTINGS.GET 与 SET 对称：布尔设置读回就是布尔；兼容旧裸值
+      replaygainClip: clipValue === true || clipValue === 'true',
+    };
   } catch {
-    return [null, null];
+    return empty;
   }
+}
+
+/** 音频链 → playerLoadFile 第 6 参数（未设置的模式不发键，主进程用默认值）。 */
+function audioChainPayload(chain: AudioChainSettings): Record<string, unknown> {
+  return {
+    ...(chain.eqGains ? { eqGains: chain.eqGains } : {}),
+    ...(chain.replaygain ? { replaygain: chain.replaygain } : {}),
+    ...(chain.replaygainPreamp !== null ? { replaygainPreamp: chain.replaygainPreamp } : {}),
+    ...(chain.replaygainFallback !== null ? { replaygainFallback: chain.replaygainFallback } : {}),
+    replaygainClip: chain.replaygainClip,
+  };
 }
 
 /**
@@ -268,14 +310,14 @@ async function fallbackToMpv(): Promise<void> {
   }
   engineSingleton?.pause();
   useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false });
-  const [eqGains, replaygain] = await readAudioChainSettings();
+  const chain = await readAudioChainSettings();
   await window.electronAPI.playerLoadFile(
     resolution.data.url,
     resolution.data.startPosition > 0 ? resolution.data.startPosition : undefined,
     undefined,
     resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
     undefined,
-    { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) }
+    audioChainPayload(chain)
   );
 }
 
@@ -344,7 +386,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         if (token !== playToken) return;
         const engineInstance = getEngine();
         // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
-        const [eqGains] = await readAudioChainSettings();
+        const { eqGains } = await readAudioChainSettings();
         if (eqGains) engineInstance.setEq(eqGains);
         lastReportAt = Date.now();
         await engineInstance.playQueue(queue, idx, get().repeat, get().shuffle);
@@ -389,14 +431,14 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           serverIndex: start.serverId ? startIndex : -1,
         });
         // QYP3-012：mpv 引擎同样带 EQ/ReplayGain（设置在主进程消费）
-        const [eqGains, replaygain] = await readAudioChainSettings();
+        const chain = await readAudioChainSettings();
         await window.electronAPI.playerLoadFile(
           url,
           startPosition > 0 ? startPosition : undefined,
           undefined,
           mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
           undefined,
-          { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
+          audioChainPayload(chain),
         );
         // 服务器曲目走服务器歌词端点（QYP3-020b），本地读缓存分区
         loadLyricsFor(sourceOfTrack(start));
@@ -516,14 +558,14 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         errorMessage: null,
         currentSource: sourceOfTrack(track),
       });
-      const [eqGains, replaygain] = await readAudioChainSettings();
+      const chain = await readAudioChainSettings();
       await window.electronAPI.playerLoadFile(
         res.data.url,
         res.data.startPosition > 0 ? res.data.startPosition : undefined,
         undefined,
         res.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
         undefined,
-        { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
+        audioChainPayload(chain),
       );
       // 歌词在起播之后拉取（QYP3-020b）：歌词是非关键路径，任何失败
       // 都不允许影响已经发生的 loadfile

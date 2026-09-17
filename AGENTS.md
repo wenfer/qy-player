@@ -94,6 +94,7 @@
 
 ### UI 约定（用户偏好，勿回退）
 - **设置页仅软件配置**（服务器、快捷键等）；媒体来源（本地目录/WebDAV）在独立「媒体库」页面（`/media-sources`）管理，勿合并回去
+- **`SETTINGS.GET`/`SET` 是 JSON 对称契约**：SET 走 `JSON.stringify`，GET 走 `decodeConfigValue` 解析回来（解析失败退回裸串，兼容主进程裸值）。renderer 侧读设置**不要**再手动 `JSON.parse`，也**不要**假设返回字符串——历史上这条不对称让均衡器/ReplayGain/自定义预设/拾音器开关四项静默失效
 - **拒绝横向滚动条**：超宽内容一律换行（`flex-wrap` / grid），用户明确反对横向拖动
 - Tailwind + 深色主题语义 token（`bg-card`/`border-border`/`text-muted-foreground`/`focus-ring`）
 - 异步操作必须有 Toast 反馈（`stores/toast-store`）；列表操作用乐观更新 + 失败回滚

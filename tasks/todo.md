@@ -364,8 +364,52 @@
   - **遗留（需人工决定）**：`package.json` 仍为 `1.1.0`，与 CHANGELOG 的
     1.2.0 不一致；按项目规范发版 = 推 tag（`git tag v1.2.0 && git push
     origin v1.2.0`），该动作需人工批准后执行，本次不动版本号、不打 tag
-- 范围外（计划 §9 的 P2，未纳入本次）：服务器歌单只读、睡眠定时、
-  ReplayGain 高级设置、网络收音机流（需先 spike）
+- 范围外（计划 §9 的 P2）：服务器歌单只读、睡眠定时、ReplayGain 高级设置、
+  网络收音机流（需先 spike）——见下方 P2 小节
+
+---
+
+## P2 欠账（计划 §9 标记，QYP3-024 之后追加）
+
+### QYP2P-001 修复设置项读写不对称 `[x]`
+- 备注：全量门禁存在两个**既有**偶发用例（并行负载下 `findBy*` 超时）：
+  `tests/renderer/library/local-library.test.tsx`、
+  `tests/renderer/detail/metadata-editor.test.tsx`；单跑与复跑均通过，
+  与本次改动无关（两者都不涉及 `getSettings`）
+- 背景：`SETTINGS.SET` 用 `JSON.stringify` 写入，`SETTINGS.GET` 直接返回
+  库里的裸字符串 → 四个功能整体失效：EQ 增益（`Array.isArray('"[6,5,…]"')`
+  为假，均衡器从此既不在 UI 恢复也不下发给 mpv）、ReplayGain 模式
+  （mpv 收到带引号的 `"track"` 被拒，静默无效）、自定义 EQ 预设（重启即
+  消失）、拾音器「关闭」（`'"off"' !== 'off'` → 关不掉）
+- 内容：新增 `storage/config-value.ts` 的 `encodeConfigValue`/
+  `decodeConfigValue`（解析失败退回裸串，兼容主进程专用键如
+  `playback.autoNext`）；`SETTINGS.GET` 改为对称解析；同步两处受影响
+  的读取方（快捷键页原先手动 `JSON.parse`、桌面歌词锁定项原先是字符串比较）
+- 验收：写进去能读出来；旧裸值不炸
+- Evidence: `tests/main/storage/config-value.test.ts` 4/4（往返/字符串不被
+  加引号/裸值回退/缺键）；`tests/renderer/settings/eq-presets.test.tsx`
+  6/6 与全部既有用例未改断言即通过（测试此前按"已解析"契约 mock，
+  即测试与生产契约不一致——本次修复让生产对齐测试）
+
+### QYP2P-002 ReplayGain 高级设置 `[x]`
+- 内容：模式之外补 `replaygain-preamp`（整体预增益）/`replaygain-fallback`
+  （无标签曲目兜底增益）/`replaygain-clip`（削波保护）——已对目标 mpv
+  二进制核实三个选项均存在（`strings` 提取），故不做版本探测；
+  `playback-engine/replaygain.ts` 纯函数限幅归一（±15 dB，脏值归 0）；
+  `PlayerCore.applyMusicAudioChain` 接收归一后的链并逐个 set_property；
+  设置页在启用 ReplayGain 时展开高级控件（滑块 + 复选框）
+- 验收：脏配置不进 mpv；关闭模式时不设置任何 RG 属性
+- Evidence: `tests/main/playback-engine/replaygain.test.ts` 5/5（默认/关闭→
+  null/两种入参形态/限幅与脏值/clip 只认严格 true）；
+  `tests/renderer/settings/replaygain-advanced.test.tsx` 3/3（读取存量、
+  写入预增益、削波开关、关闭时整块隐藏）
+- 范围：ReplayGain 仅 mpv 引擎（renderer 引擎只有 EQ，UI 已注明）
+
+### QYP2P-003 睡眠定时 `[ ]`
+
+### QYP2P-004 服务器歌单只读 `[ ]`
+
+### QYP2P-005 网络收音机流 spike `[ ]`
 
 ---
 

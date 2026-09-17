@@ -51,6 +51,10 @@ export default function MusicSettings() {
   const addToast = useToastStore((s) => s.addToast);
   const [engine, setEngine] = useState<string>('spectrum-first');
   const [replaygain, setReplaygain] = useState<string>('off');
+  // ReplayGain 高级项（P2）：dB / dB / 削波保护
+  const [rgPreamp, setRgPreamp] = useState<number>(0);
+  const [rgFallback, setRgFallback] = useState<number>(0);
+  const [rgClip, setRgClip] = useState<boolean>(false);
   const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
   const [customPresets, setCustomPresets] = useState<EqPreset[]>([]);
   const [presetName, setPresetName] = useState('');
@@ -74,6 +78,18 @@ export default function MusicSettings() {
           data?: unknown;
         };
         setReplaygain(typeof r?.data === 'string' ? r.data : 'off');
+        const p = (await window.electronAPI.getSettings('playback.replaygainPreamp')) as {
+          data?: unknown;
+        };
+        if (Number.isFinite(Number(p?.data))) setRgPreamp(Number(p?.data));
+        const fb = (await window.electronAPI.getSettings('playback.replaygainFallback')) as {
+          data?: unknown;
+        };
+        if (Number.isFinite(Number(fb?.data))) setRgFallback(Number(fb?.data));
+        const c = (await window.electronAPI.getSettings('playback.replaygainClip')) as {
+          data?: unknown;
+        };
+        setRgClip(c?.data === true || c?.data === 'true');
         const q = (await window.electronAPI.getSettings('playback.eqGains')) as {
           data?: unknown;
         };
@@ -85,7 +101,7 @@ export default function MusicSettings() {
         const f = (await window.electronAPI.getSettings('deskLyrics.fontSize')) as { data?: unknown };
         if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
         const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
-        setDeskLocked(l?.data !== 'false');
+        setDeskLocked(l?.data !== false && l?.data !== 'false');
         const v = (await window.electronAPI.getSettings('playback.visualizer')) as { data?: unknown };
         if (typeof v?.data === 'string') setVisualizer(v.data);
       } catch {
@@ -128,6 +144,17 @@ export default function MusicSettings() {
     async (value: string): Promise<void> => {
       setReplaygain(value);
       await save('playback.replaygain', value, 'ReplayGain 设置已保存');
+    },
+    [save]
+  );
+
+  /** ReplayGain 高级项（P2）：预增益 / 兜底增益 / 削波保护。 */
+  const changeReplaygainAdvanced = useCallback(
+    async (key: 'Preamp' | 'Fallback' | 'Clip', value: number | boolean): Promise<void> => {
+      if (key === 'Preamp') setRgPreamp(value as number);
+      else if (key === 'Fallback') setRgFallback(value as number);
+      else setRgClip(value as boolean);
+      await save(`playback.replaygain${key}`, value, 'ReplayGain 设置已保存');
     },
     [save]
   );
@@ -268,6 +295,55 @@ export default function MusicSettings() {
           <span className="text-xs text-muted-foreground w-full">
             依标签里的增益信息拉平音量差异；无标签的曲目不受影响。
           </span>
+
+          {/* 高级项（P2）：仅在启用 ReplayGain 时才有意义 */}
+          {replaygain !== 'off' && (
+            <div className="w-full flex flex-col gap-3 pt-3 border-t border-border">
+              <label className="flex flex-wrap items-center gap-3">
+                <span className="text-xs text-muted-foreground">整体预增益</span>
+                <input
+                  type="range"
+                  min={-15}
+                  max={15}
+                  step={0.5}
+                  value={rgPreamp}
+                  onChange={(e) => setRgPreamp(Number(e.target.value))}
+                  onBlur={() => void changeReplaygainAdvanced('Preamp', rgPreamp)}
+                  className="flex-1 min-w-[160px] accent-[var(--primary)]"
+                  aria-label="ReplayGain 预增益"
+                />
+                <span className="text-xs w-14 text-right">{rgPreamp.toFixed(1)} dB</span>
+              </label>
+              <label className="flex flex-wrap items-center gap-3">
+                <span className="text-xs text-muted-foreground">无标签曲目增益</span>
+                <input
+                  type="range"
+                  min={-15}
+                  max={15}
+                  step={0.5}
+                  value={rgFallback}
+                  onChange={(e) => setRgFallback(Number(e.target.value))}
+                  onBlur={() => void changeReplaygainAdvanced('Fallback', rgFallback)}
+                  className="flex-1 min-w-[160px] accent-[var(--primary)]"
+                  aria-label="ReplayGain 兜底增益"
+                />
+                <span className="text-xs w-14 text-right">{rgFallback.toFixed(1)} dB</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={rgClip}
+                  onChange={(e) => void changeReplaygainAdvanced('Clip', e.target.checked)}
+                  className="accent-[var(--primary)]"
+                  aria-label="ReplayGain 削波保护"
+                />
+                <span className="text-xs text-muted-foreground">削波保护（增益过大时限制峰值）</span>
+              </label>
+              <span className="text-[11px] text-muted-foreground">
+                这些参数只在 mpv 引擎（服务器曲目 / 冷门格式）生效。
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">

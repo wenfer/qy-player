@@ -1,6 +1,7 @@
 import { MpvIpcClient } from './mpv-ipc-client';
 import { MpvProcessManager, MpvOptions } from './mpv-process';
 import { EventEmitter } from 'events';
+import type { ReplayGainChain } from '../playback-engine/replaygain';
 
 export { MpvIpcClient, MpvProcessManager };
 export type { MpvOptions };
@@ -167,17 +168,26 @@ export class PlayerCore extends EventEmitter {
   }
 
   /**
-   * 音乐音频链（QYP3-012）：EQ（af=lavfi equalizer）与 ReplayGain。
+   * 音乐音频链（QYP3-012 + P2 ReplayGain 高级）：EQ（af=lavfi equalizer）
+   * 与 ReplayGain（模式 + 预增益 + 兜底增益 + 削波保护）。
    * null = 清空（视频加载复位，属性跨 loadfile 持久）。失败静默。
    */
-  async applyMusicAudioChain(eqFilter: string | null, replaygain: string | null): Promise<void> {
+  async applyMusicAudioChain(
+    eqFilter: string | null,
+    replaygain: ReplayGainChain | null
+  ): Promise<void> {
     if (!this.ipc) return;
     if (eqFilter !== null) {
       await this.ipc.setProperty('af', eqFilter).catch(() => {});
     }
-    if (replaygain !== null) {
-      await this.ipc.setProperty('replaygain', replaygain).catch(() => {});
+    if (replaygain === null) {
+      await this.ipc.setProperty('replaygain', 'no').catch(() => {});
+      return;
     }
+    await this.ipc.setProperty('replaygain', replaygain.mode).catch(() => {});
+    await this.ipc.setProperty('replaygain-preamp', replaygain.preamp).catch(() => {});
+    await this.ipc.setProperty('replaygain-fallback', replaygain.fallback).catch(() => {});
+    await this.ipc.setProperty('replaygain-clip', replaygain.clip ? 'yes' : 'no').catch(() => {});
   }
 
   async pause(): Promise<void> {

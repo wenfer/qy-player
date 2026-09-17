@@ -6,6 +6,7 @@ import { app } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
 import { PlayerCore } from '../modules/player-core';
 import { getDatabase, createStorage, closeDatabase } from '../modules/storage/db';
+import { decodeConfigValue, encodeConfigValue } from '../modules/storage/config-value';
 import { PlaybackStateManager } from '../modules/playback-state';
 import { createClient } from '../modules/online-connector';
 import { lyricsToLrc } from '../modules/online-connector/lyrics';
@@ -97,6 +98,7 @@ import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import { CacheManager } from '../modules/cache/cache-manager';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
+import { normalizeReplayGain } from '../modules/playback-engine/replaygain';
 import {
   clearMusicSession,
   isMusicSessionActive,
@@ -977,17 +979,27 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     httpHeaders?: string,
     mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string; serverId?: number },
     streamSessionId?: string,
-    audioChain?: { eqGains?: number[]; replaygain?: string }
+    audioChain?: {
+      eqGains?: number[];
+      /** ReplayGain 模式（off/track/album）＋高级项（P2）。 */
+      replaygain?: string;
+      replaygainPreamp?: number;
+      replaygainFallback?: number;
+      replaygainClip?: boolean;
+    }
   ) => {
     if (!player.isReady()) {
       await player.start();
     }
 
-    // 音乐音频链（QYP3-012）：仅音乐加载时设置，视频加载复位（af 跨
-    // loadfile 持久）。必须在 mpv 启动后设置。
+    // 音乐音频链（QYP3-012 + P2 ReplayGain 高级）：仅音乐加载时设置，
+    // 视频加载复位（af 跨 loadfile 持久）。必须在 mpv 启动后设置。
     if (audioChain) {
       const gains = sanitizeEqGains(audioChain.eqGains);
-      void player.applyMusicAudioChain(mpvAudioFilterFromEq(gains) ?? '', audioChain.replaygain ?? null);
+      void player.applyMusicAudioChain(
+        mpvAudioFilterFromEq(gains) ?? '',
+        normalizeReplayGain(audioChain)
+      );
       mpvAfWasSet = true;
       setMpvMusicActive(true); // QYP3-026：音乐会话（媒体键/状态转发按音乐走）
     } else {
@@ -1423,12 +1435,13 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   // Settings handlers (secret config keys never cross the IPC boundary)
   ipcMain.handle(IPC_CHANNELS.SETTINGS.GET, (_event, key: string) => {
     assertNotSecretConfigKey(key);
-    return storage.getConfig(key);
+    // 与 SETTINGS.SET 的 JSON.stringify 对称（见 config-value.ts）
+    return decodeConfigValue(storage.getConfig(key));
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.SET, (_event, key: string, value: unknown) => {
     assertNotSecretConfigKey(key);
-    storage.setConfig(key, JSON.stringify(value));
+    storage.setConfig(key, encodeConfigValue(value));
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.GET_SERVERS, () => {
