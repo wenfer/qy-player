@@ -244,8 +244,9 @@
 - 验收：客户端契约测试；无词→桌面歌词自动隐藏
 - Evidence: `tests/main/online/lyrics.test.ts` 4/4（端点/空词/404/Emby
   静默降级）
-- 阻塞：服务器音频库浏览/播放未实现（music 目录域目前只有本地+WebDAV），
-  端点暂未接线到 UI——待服务器音乐浏览任务
+- 阻塞：UI 接线待 020b——歌词面板/桌面歌词目前按本地 trackId 读歌词缓存，
+  服务器曲目需 `{serverId, itemId}` 路由的新 IPC（025 已铺好服务器曲目队列，
+  端点本身可用）
 
 ### QYP3-021 歌词面板 `[x]`
 - 依赖：018
@@ -284,6 +285,27 @@
   有界/确定性/中间高 + 无 2D 上下文静默降级）；typecheck 绿
 - 待实机：30fps 下的 CPU 占用采样（老机）、mpv 引擎切波形是否跳变——
   已列入 TARGET-VERIFY
+
+### QYP3-025 服务器音乐库浏览与播放 `[x]`
+- 依赖：011, 015
+- 背景：music 目录域此前只有本地/WebDAV（`pickMusicLibraries` 无入口），
+  服务器音频既看不到也播不了，连带 020 的 Lyrics 端点无处可接
+- 内容：音乐页顶部「来源」切换（本地/WebDAV + 每个服务器的音乐库视图）；
+  `server-music.ts` 纯映射层（`pickMusicLibraries` 只认
+  `CollectionType=music` 且跳过加载失败的服务器；`mapServerAlbums`/
+  `mapServerTracks` 容错缺字段、RunTimeTicks→秒）；`ServerMusicBrowser`
+  专辑网格→曲目列表→播放；store 扩展 `MusicTrackInput.serverId/provider/
+  itemId`、`refOfTrack`（服务器曲目严格按 serverId 路由）、`serverQueue/
+  serverIndex` + `playServerAt`，mpv 引擎的 next/prev 在服务器队列内推进
+  （队尾 stop 而非回卷）
+- 验收：服务器专辑/曲目映射单测；播放走 mpv 且上下曲在队列内推进；
+  未登录/非音乐库不出现入口
+- Evidence: `tests/renderer/music/server-music.test.ts` 7/7（视图筛选/容错/
+  ticks 换算）；`tests/renderer/music/server-music-browser.test.tsx` 4/4
+  （来源只列音乐库、专辑→曲目→播放 mpv 且 resolvePlayback 按 serverId
+  路由、next/prev 队列内推进、队尾 stop）；typecheck 双配置 + 全量绿
+- 服务器曲目无本地歌词缓存 → 切曲清空 currentLyrics（避免桌面歌词残留
+  上一首）；接服务器歌词见 020b
 
 ### QYP3-024 Checkpoint F：全量回归/文档/发布 `[ ]`
 - 依赖：全部

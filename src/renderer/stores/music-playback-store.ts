@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { WebAudioEngine, type QueueTrack, type RepeatMode } from '../player/web-audio-engine';
+import type { MediaRef } from '../../shared/types/catalog';
 
 /**
  * 音乐播放状态（QYP3-010/011/014）。
@@ -25,10 +26,13 @@ export interface MusicPlayingState {
   errorMessage: string | null;
   /** 引擎队列快照（next/prev 后恢复 current；不进渲染热点）。 */
   queueSnapshot: EngineExtTrack[];
+  /** 服务器音乐队列（QYP3-025）：mpv 引擎下靠它推进上下曲。 */
+  serverQueue: MusicTrackInput[];
+  serverIndex: number;
 }
 
 export interface MusicPlaybackStore extends MusicPlayingState {
-  playQueue: (tracks: TrackInput[], startIndex: number) => Promise<void>;
+  playQueue: (tracks: MusicTrackInput[], startIndex: number) => Promise<void>;
   pause: () => void;
   resume: () => void;
   next: () => Promise<void>;
@@ -39,6 +43,8 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
   getSpectrum: () => Uint8Array | null;
+  /** 服务器队列内跳转（QYP3-025）：mpv 引擎的上下曲靠它推进。 */
+  playServerAt: (index: number) => Promise<void>;
 }
 
 let engineSingleton: WebAudioEngine | null = null;
@@ -61,6 +67,14 @@ function pushDeskLyrics(position: number, isPlaying: boolean): void {
     position,
     isPlaying,
   });
+}
+
+/** MediaRef 构造（QYP3-025）：服务器曲目按 serverId 严格路由。 */
+export function refOfTrack(t: MusicTrackInput): MediaRef {
+  if (t.serverId && t.itemId) {
+    return { provider: t.provider ?? 'jellyfin', serverId: t.serverId, itemId: t.itemId };
+  }
+  return { provider: 'music', sourceId: t.sourceId, itemId: String(t.trackId) };
 }
 
 /** 换曲时重新拉取歌词（缓存读取，失败静默=无词）。 */
@@ -142,9 +156,20 @@ async function readAudioChainSettings(): Promise<[number[] | null, string | null
   }
 }
 
-interface TrackInput {
+/**
+ * 队列输入（QYP3-025 扩展）：本地音轨（trackId/sourceId）或服务器音频
+ * 条目（serverId/provider/itemId）。二者互斥——服务器曲目一律走 mpv
+ * 引擎（ADR-0007：服务器 → mpv）。
+ */
+export interface MusicTrackInput {
+  /** 本地音轨 id；服务器曲目为 0。 */
   trackId: number;
+  /** 本地来源 id；服务器曲目为 0。 */
   sourceId: number;
+  serverId?: number;
+  provider?: 'jellyfin' | 'emby';
+  /** 服务器条目 id（Jellyfin/Emby Audio）。 */
+  itemId?: string;
   title: string;
   artist: string | null;
   albumartist: string | null;
@@ -194,17 +219,17 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   shuffle: false,
   errorMessage: null,
   queueSnapshot: [],
+  serverQueue: [],
+  serverIndex: -1,
 
   playQueue: async (tracks, startIndex) => {
     const start = tracks[startIndex];
     if (!start) return;
     const token = ++playToken;
     try {
-      const resolution = (await window.electronAPI.resolvePlayback({
-        provider: 'music',
-        sourceId: start.sourceId,
-        itemId: String(start.trackId),
-      })) as {
+      const resolution = (await window.electronAPI.resolvePlayback(
+        refOfTrack(start)
+      )) as {
         ok: boolean;
         data?: {
           kind: string;
@@ -226,11 +251,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         // 整队逐曲解析（webaudio 判定单源在主进程）；解析失败的曲跳过
         const queue: EngineExtTrack[] = [];
         for (const t of tracks) {
-          const r = (await window.electronAPI.resolvePlayback({
-            provider: 'music',
-            sourceId: t.sourceId,
-            itemId: String(t.trackId),
-          })) as typeof resolution;
+          const r = (await window.electronAPI.resolvePlayback(refOfTrack(t))) as typeof resolution;
           if (r.ok && r.data?.engine?.engine === 'webaudio') {
             queue.push({
               id: t.trackId,
@@ -269,7 +290,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         });
         loadLyricsFor(queue[idx]?.trackId ?? start.trackId);
       } else {
-        // mpv 引擎接管：音乐激活态解除（媒体键回到视频语义）
+        // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
+        // 音乐激活态解除（媒体键回到视频语义）
         void window.electronAPI.setMusicEngineActive(false);
         set({
           engine: 'mpv',
@@ -286,6 +308,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           duration: start.duration ?? 0,
           isPlaying: true,
           errorMessage: null,
+          // 服务器队列（本地冷门格式时为单曲，上下曲无队列可走）
+          serverQueue: start.serverId ? tracks : [],
+          serverIndex: start.serverId ? startIndex : -1,
         });
         // QYP3-012：mpv 引擎同样带 EQ/ReplayGain（设置在主进程消费）
         const [eqGains, replaygain] = await readAudioChainSettings();
@@ -297,6 +322,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           undefined,
           { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
         );
+        // 服务器曲目无本地歌词缓存（QYP3-020b 接服务器歌词前先清空，
+        // 否则桌面歌词会残留上一首的原文）
+        if (start.serverId) currentLyrics = null;
+        else loadLyricsFor(start.trackId);
       }
     } catch (e) {
       set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
@@ -336,7 +365,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       await engineInstance.next(false);
       syncFromEngine(set, engineInstance);
     } else if (s.engine === 'mpv') {
-      void window.electronAPI.playerControl('stop');
+      // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则沿用旧行为
+      if (s.serverQueue.length > 0 && s.serverIndex + 1 < s.serverQueue.length) {
+        await get().playServerAt(s.serverIndex + 1);
+      } else {
+        void window.electronAPI.playerControl('stop');
+      }
     }
   },
 
@@ -348,7 +382,11 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       await engineInstance.prev();
       syncFromEngine(set, engineInstance);
     } else if (s.engine === 'mpv') {
-      void window.electronAPI.playerControl('stop');
+      if (s.serverQueue.length > 0 && s.serverIndex - 1 >= 0) {
+        await get().playServerAt(s.serverIndex - 1);
+      } else {
+        void window.electronAPI.playerControl('stop');
+      }
     }
   },
 
@@ -372,6 +410,51 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   clearError: () => set({ errorMessage: null }),
 
   getSpectrum: () => engineSingleton?.getSpectrum() ?? null,
+
+  playServerAt: async (index) => {
+    const s = get();
+    const track = s.serverQueue[index];
+    if (!track) return;
+    try {
+      const res = (await window.electronAPI.resolvePlayback(refOfTrack(track))) as {
+        ok: boolean;
+        data?: { url: string; startPosition: number; mediaContext?: unknown };
+        error?: { message: string };
+      };
+      if (!res.ok || !res.data) {
+        set({ errorMessage: res.error?.message ?? '解析播放地址失败' });
+        return;
+      }
+      set({
+        current: {
+          id: track.trackId,
+          title: track.title,
+          artist: track.artist,
+          album: null,
+          albumartist: track.albumartist,
+          duration: track.duration,
+          url: res.data.url,
+        },
+        serverIndex: index,
+        position: 0,
+        duration: track.duration ?? 0,
+        isPlaying: true,
+        errorMessage: null,
+      });
+      currentLyrics = null; // 服务器曲目：本地无歌词缓存
+      const [eqGains, replaygain] = await readAudioChainSettings();
+      await window.electronAPI.playerLoadFile(
+        res.data.url,
+        res.data.startPosition > 0 ? res.data.startPosition : undefined,
+        undefined,
+        res.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
+        undefined,
+        { ...(eqGains ? { eqGains } : {}), ...(replaygain ? { replaygain } : {}) },
+      );
+    } catch (e) {
+      set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
+    }
+  },
 }));
 
 function engineSnapshotCurrent(

@@ -11,6 +11,8 @@ const api = {
   getArtistAlbums: vi.fn(),
   getMusicFavorites: vi.fn(),
   setMusicFavorite: vi.fn(),
+  // QYP3-025：来源切换会探测服务器音乐库；默认无服务器
+  getLibraries: vi.fn(),
 };
 
 vi.stubGlobal('electronAPI', api);
@@ -36,6 +38,7 @@ const track = (id: number, title: string, favorite = 0) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.getLibraries.mockResolvedValue([]);
   api.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });
   api.getMusicArtists.mockResolvedValue({
     ok: true,

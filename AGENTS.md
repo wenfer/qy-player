@@ -58,7 +58,8 @@
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（服务器/WebDAV/转码/CUE/兼容性优先 → mpv；spectrum-first 且直连格式 → renderer 引擎）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 本地驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次）
-- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发
+- **服务器音乐**：音乐页「来源」切换见 `pages/Music/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）
+- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**服务器曲目无本地歌词缓存**（切曲须清空，否则桌面歌词残留上一首）；服务器歌词端点已实现但未接线
 - **拾音器**：频谱来自 renderer 引擎 AnalyserNode（fftSize 2048、≤30fps）；mpv 引擎退化为按 时长+进度 绘制的播放波形（无缓存、无外部依赖）
 
 ## 已知机制与陷阱（改相关代码前必读）
@@ -119,7 +120,7 @@ npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
 
 ## 文档索引
 
-- 三期规划（音乐播放，001～023 已完成，024 发布门禁待人工批准）：
+- 三期规划（音乐播放，001～023 及 025 已完成，024 发布门禁待人工批准）：
   `docs/PHASE3-PLAN.md` + `tasks/todo.md`
   + ADR-0007（音乐引擎）/ADR-0008（桌面歌词）
 

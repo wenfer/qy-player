@@ -3,6 +3,8 @@ import { Disc3, Heart, ListMusic, Music2, User } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
+import ServerMusicBrowser from './ServerMusicBrowser';
+import { pickMusicLibraries, type MusicLibraryRef, type ServerLibraryGroup } from './server-music';
 
 /**
  * 音乐库页（三期 QYP3-008 / QYP3-008a）：专辑 / 歌手 / 全部曲目 / 收藏
@@ -131,6 +133,9 @@ export default function MusicPage() {
   const [openAlbum, setOpenAlbum] = useState<{ albumartist: string; album: string } | null>(null);
   const [albumTracks, setAlbumTracks] = useState<MusicTrackRow[] | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
+  // 服务器音乐库（QYP3-025）：null = 本地库
+  const [serverLibs, setServerLibs] = useState<MusicLibraryRef[]>([]);
+  const [activeLib, setActiveLib] = useState<MusicLibraryRef | null>(null);
 
   const playFromList = useCallback(
     async (list: MusicTrackRow[], trackId: number) => {
@@ -281,13 +286,34 @@ export default function MusicPage() {
   );
 
   useEffect(() => {
+    // 服务器音乐库入口（QYP3-025）：未登录/无音乐库的服务器不出现
+    void window.electronAPI
+      .getLibraries()
+      .then((res) => {
+        const groups = (res as unknown as ServerLibraryGroup[]) ?? [];
+        setServerLibs(pickMusicLibraries(Array.isArray(groups) ? groups : []));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (activeLib) return; // 服务器库由 ServerMusicBrowser 自行加载
     if (view === 'albums') void loadAlbums();
     else if (view === 'artists') {
       if (selectedArtist) void loadArtistAlbums(selectedArtist);
       else void loadArtists();
     } else if (view === 'all') void loadAllTracks();
     else void loadFavorites();
-  }, [view, selectedArtist, loadAlbums, loadArtists, loadArtistAlbums, loadAllTracks, loadFavorites]);
+  }, [
+    view,
+    selectedArtist,
+    activeLib,
+    loadAlbums,
+    loadArtists,
+    loadArtistAlbums,
+    loadAllTracks,
+    loadFavorites,
+  ]);
 
   const tabClass = (active: boolean): string =>
     `px-3 py-1.5 text-xs rounded-lg border transition-colors focus-ring flex items-center gap-1.5 ${
@@ -317,6 +343,34 @@ export default function MusicPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      {/* 来源切换（QYP3-025）：本地库 / 各服务器的音乐库 */}
+      {serverLibs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-[11px] text-muted-foreground">来源</span>
+          <button
+            type="button"
+            onClick={() => setActiveLib(null)}
+            className={tabClass(activeLib === null)}
+          >
+            本地 / WebDAV
+          </button>
+          {serverLibs.map((lib) => (
+            <button
+              key={`${lib.serverId}-${lib.viewId}`}
+              type="button"
+              onClick={() => setActiveLib(lib)}
+              className={tabClass(activeLib?.serverId === lib.serverId && activeLib?.viewId === lib.viewId)}
+            >
+              {lib.serverName} · {lib.viewName}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeLib ? (
+        <ServerMusicBrowser library={activeLib} />
+      ) : (
+      <>
       {/* 视图切换 */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <button type="button" onClick={() => switchView('albums')} className={tabClass(view === 'albums')}>
@@ -429,6 +483,8 @@ export default function MusicPage() {
         />
       ) : (
         trackList(favorites ?? [])
+      )}
+      </>
       )}
     </div>
   );

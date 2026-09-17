@@ -8,6 +8,8 @@ const electronAPI = {
   getMusicAlbums: vi.fn(),
   getAlbumTracks: vi.fn(),
   getMusicTracks: vi.fn(),
+  // QYP3-025：来源切换会探测服务器音乐库；默认无服务器
+  getLibraries: vi.fn(),
   // toast store 依赖（MusicPage 使用）
 };
 
@@ -34,6 +36,7 @@ const albums = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  electronAPI.getLibraries.mockResolvedValue([]);
   electronAPI.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums } });
   electronAPI.getMusicTracks.mockResolvedValue({
     ok: true,
