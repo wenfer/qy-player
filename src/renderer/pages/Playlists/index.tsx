@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ListMusic, Plus, Upload, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2 } from 'lucide-react';
+import { ListMusic, Plus, Upload, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2, GripVertical } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 
 /**
  * 歌单页（QYP3-015/016/017）：列表 + 详情 + m3u/m3u8 导入 + m3u8/XSPF 导出。
- * 排序 = 上/下移（拖拽列 P1）；列表操作乐观更新 + 失败回滚。
+ * 排序（QYP3-015a）= 拖拽为主 + 上/下移按钮（键盘/触屏可达性兜底）；
+ * 列表操作一律乐观更新 + 失败回滚。
  */
 
 interface PlaylistRow {
@@ -47,6 +48,9 @@ export default function PlaylistsPage() {
   const [items, setItems] = useState<PlaylistItemRow[] | null>(null);
   const [newName, setNewName] = useState('');
   const [editing, setEditing] = useState<{ id: number; name: string } | null>(null);
+  // 拖拽排序（QYP3-015a）：拖起项与被悬停项，仅用于样式反馈
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const loadPlaylists = useCallback(async (): Promise<void> => {
     try {
@@ -175,22 +179,20 @@ export default function PlaylistsPage() {
     [items, loadPlaylists, addToast]
   );
 
-  const reorder = useCallback(
-    async (playlistId: number, position: number, direction: -1 | 1): Promise<void> => {
-      const to = position + direction;
-      if (to < 0 || to >= (items?.length ?? 0)) return;
-      // 乐观重排
-      const swap = (arr: PlaylistItemRow[]): PlaylistItemRow[] => {
-        const a = arr.findIndex((i) => i.position === position);
-        const b = arr.findIndex((i) => i.position === to);
-        if (a === -1 || b === -1) return arr;
-        const copy = [...arr];
-        [copy[a], copy[b]] = [copy[b], copy[a]];
-        return copy.map((it, i) => ({ ...it, position: i }));
-      };
+  /**
+   * 拖拽/按钮排序共用（QYP3-015a）：把 from 位置的条目整移到 to
+   * （主进程事务整移，中间项顺移）。乐观重排 + 失败回滚。
+   */
+  const moveItem = useCallback(
+    async (playlistId: number, from: number, to: number): Promise<void> => {
+      const list = items ?? [];
+      if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
       const prev = items;
-      setItems((cur) => swap(cur ?? []));
-      const res = (await window.electronAPI.reorderPlaylistItem(playlistId, position, to)) as {
+      const copy = [...list];
+      const [moved] = copy.splice(from, 1);
+      copy.splice(to, 0, moved);
+      setItems(copy.map((it, i) => ({ ...it, position: i })));
+      const res = (await window.electronAPI.reorderPlaylistItem(playlistId, from, to)) as {
         ok: boolean;
         data?: { reordered: boolean };
       };
@@ -200,6 +202,13 @@ export default function PlaylistsPage() {
       }
     },
     [items, addToast]
+  );
+
+  const reorder = useCallback(
+    (playlistId: number, position: number, direction: -1 | 1): void => {
+      void moveItem(playlistId, position, position + direction);
+    },
+    [moveItem]
   );
 
   const playFrom = useCallback(
@@ -359,9 +368,46 @@ export default function PlaylistsPage() {
               </button>
             )}
           </div>
+          <p className="text-[10px] text-muted-foreground mb-2">拖动条目可调整顺序</p>
           <div className="flex flex-col gap-1">
             {(items ?? []).map((it) => (
-              <div key={it.id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors">
+              <div
+                key={it.id}
+                draggable
+                aria-grabbed={dragIndex === it.position}
+                onDragStart={(e) => {
+                  setDragIndex(it.position);
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', String(it.position));
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (overIndex !== it.position) setOverIndex(it.position);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const raw = e.dataTransfer.getData('text/plain');
+                  const from = dragIndex ?? (raw ? Number(raw) : NaN);
+                  if (openId !== null && Number.isInteger(from)) void moveItem(openId, from, it.position);
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDragIndex(null);
+                  setOverIndex(null);
+                }}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors ${
+                  dragIndex === it.position ? 'opacity-50' : ''
+                } ${overIndex === it.position && dragIndex !== it.position ? 'ring-1 ring-primary' : ''}`}
+              >
+                <span
+                  aria-hidden
+                  title="拖动可调整顺序"
+                  className="text-muted-foreground/60 cursor-grab flex-shrink-0"
+                >
+                  <GripVertical size={14} />
+                </span>
                 <Music2 size={14} className="text-muted-foreground" />
                 <button
                   type="button"

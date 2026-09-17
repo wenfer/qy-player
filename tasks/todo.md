@@ -77,7 +77,7 @@
   repository.listMusicAlbums / listAlbumTracks / listMusicTracksPaged
   （页 ≤200 §16.4）；MUSIC.GET_ALBUMS/GET_ALBUM_TRACKS/GET_TRACKS
   IPC 四件套
-- 收藏/歌手视图与统一搜索接入 → P1（QYP3-008a，随 Checkpoint B 回补）
+- 收藏/歌手视图与统一搜索接入 → QYP3-008a（已完成，见下）
 - 验收：repo 聚合用例 + 渲染 3 例；CDP 实机（专辑网格/曲目列表/空态）
 - Evidence: catalog-migrations 13 例；music-library.test 3 例；全量 664/55
 
@@ -161,6 +161,47 @@
   channel 命名契约（无数字段）
 - 验收：CDP 实机（建/加/排序/移除往返全通）；698/59 全绿
 - Evidence: /tmp/pm/playlists_ui.png + pl2 日志
+
+### QYP3-008a 收藏 / 歌手视图 + 统一搜索接入音乐 `[x]`
+- 依赖：008
+- 内容：音乐页四视图（专辑 / 歌手 / 全部曲目 / 收藏）；歌手聚合
+  （listMusicArtists + listArtistAlbums）；收藏标记落 music_tracks
+  （migration 008：catalog_user_state 的 item_id 外键指向 catalog_items，
+  音乐条目不在该域内）；收藏切换乐观更新 + 失败回滚；统一搜索接入
+  music_tracks（provider='music'，搜索页跳转 /music）
+- 验收：歌手/收藏/搜索用例
+- Evidence: `tests/main/catalog/music-catalog.test.ts` 5/5（歌手聚合/
+  单歌手专辑/收藏开关/搜索字面量/统一搜索含音乐卡）；
+  `tests/renderer/music/music-views.test.tsx` 4/4（歌手下钻/收藏乐观
+  移除/失败回滚/全部曲目收藏）
+
+### QYP3-012a 均衡器自定义预设 `[x]`
+- 依赖：012
+- 内容：内置 7 预设 + 自定义预设（命名保存/应用/删除），存
+  app_config `playback.eqPresets`；parseEqPresets 只接受结构合法条目；
+  整表覆盖写 + 失败回滚
+- 验收：预设编辑用例
+- Evidence: `tests/renderer/settings/eq-presets.test.tsx` 6/6（脏数据
+  拒绝/内置与自定义同列/应用写 eqGains/保存/空名重名拦截/删除）
+
+### QYP3-013a 收藏快捷键 `[x]`
+- 依赖：008a
+- 内容：GLOBAL_SHORTCUTS 新增 favoriteCurrent
+  （默认 CommandOrControl+Shift+F）；音乐激活时转发 ON_COMMAND
+  'favorite'（视频播放静默无操作）；迷你条爱心按钮共用同一实现
+  （用 ref 规避挂载时闭包过期）
+- 验收：快捷键路由用例
+- Evidence: `tests/main/ui-shell/shortcuts-music.test.ts` 3/3（注册/
+  仅音乐激活时转发/未激活保持 mpv 语义）
+
+### QYP3-015a 歌单拖拽排序 `[x]`
+- 依赖：015
+- 内容：条目可拖拽（HTML5 DnD：dragstart/dragover/drop + 手柄提示 +
+  拖起半透明/悬停描边），与既有上/下移按钮共用 moveItem（from→to
+  整移，乐观重排 + 失败回滚）；按钮保留作键盘/触屏兜底
+- 验收：拖拽排序用例
+- Evidence: `tests/renderer/music/playlist-drag.test.tsx` 3/3（拖拽到
+  位/失败回滚/按钮兜底）
 
 ### QYP3-016 m3u/m3u8 导入导出 `[x]`
 - 依赖：015
