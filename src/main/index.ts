@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, protocol } from 'electron';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { PlayerCore } from './modules/player-core';
 import { registerIpcHandlers, playbackStateManager } from './ipc';
 import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
@@ -10,6 +11,7 @@ import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type 
 import { isMpvMusicActive } from './modules/playback-engine/music-active';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
+import { resolveCoverFileName } from './modules/library-scanner/cover-service';
 
 let mainWindow: BrowserWindow | null = null;
 const player = new PlayerCore();
@@ -161,7 +163,6 @@ app.whenReady().then(() => {
   {
     const coversRoot = resolve(app.getPath('userData'), 'covers');
     const sep = require('node:path').sep;
-    void sep;
     protocol.registerFileProtocol('qy-file', (request, callback) => {
       try {
         // 手工解析：standard scheme 会把第二段当 host；路径段可能是
@@ -169,9 +170,15 @@ app.whenReady().then(() => {
         const raw = request.url.replace(/^qy-file:\/\//, '');
         const coversMatch = raw.match(/^covers\/([\w.-]+)$/);
         if (coversMatch) {
-          const target = resolve(coversRoot, coversMatch[1]);
-          if (!target.startsWith(coversRoot + '/')) return callback({ error: -3 });
-          return callback(target);
+          // 包含校验即"可服务"判定：扩展名探测出的候选名同样过这道关
+          // （前缀带分隔符 → 目录自身、`.`、`..` 一律不予服务）
+          const isServed = (fileName: string): boolean => {
+            const candidate = resolve(coversRoot, fileName);
+            return candidate.startsWith(coversRoot + sep) && existsSync(candidate);
+          };
+          const name = resolveCoverFileName(coversMatch[1], isServed);
+          if (!name) return callback({ error: -3 });
+          return callback(resolve(coversRoot, name));
         }
         const audioMatch = raw.match(/^audio\/(\d+)\/(.+)$/);
         if (audioMatch) {

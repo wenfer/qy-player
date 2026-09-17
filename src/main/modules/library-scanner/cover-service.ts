@@ -215,6 +215,35 @@ export async function readLyricsCache(trackId: number, lyricsDir: string): Promi
   }
 }
 
+/** 封面落盘可能出现的扩展名（`extOf` 只产出这两种，按常见度排序）。 */
+export const COVER_FILE_EXTS = ['jpg', 'png'] as const;
+
+/**
+ * 封面请求名 → 实际存在的文件名（QYP3-028）。
+ *
+ * 渲染层按 `<trackId>.png` 请求封面，但落盘用的是内嵌图片的真实格式
+ * （`<trackId>.jpg` 占绝大多数——ID3 APIC 的 MIME 通常是 image/jpeg）。
+ * 渲染层无从得知真实格式，所以扩展名只能当提示：先按原名精确命中，未命中
+ * 再换同名其他扩展名探测。
+ *
+ * 只接受纯文件名（拒绝任何路径分隔符与 `..`）；是否可服务由调用方通过
+ * `isServed` 判定（协议层在那里做目录包含校验）。未命中返回 null。
+ */
+export function resolveCoverFileName(
+  requested: string,
+  isServed: (fileName: string) => boolean
+): string | null {
+  if (!requested || /[/\\]/.test(requested) || requested.includes('..')) return null;
+  if (isServed(requested)) return requested;
+  const stem = requested.replace(/\.[\w-]+$/, '');
+  if (!stem) return null;
+  for (const ext of COVER_FILE_EXTS) {
+    const candidate = `${stem}.${ext}`;
+    if (candidate !== requested && isServed(candidate)) return candidate;
+  }
+  return null;
+}
+
 /** 注册 lyrics 缓存分区（QYP3-019：受保护——人工可编辑，永不清扫）。 */
 export function registerLyricsPartition(cacheManager: CacheManager, lyricsDir: string): void {
   cacheManager.register({
