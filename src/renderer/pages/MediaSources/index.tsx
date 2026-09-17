@@ -417,6 +417,7 @@ export default function MediaSources() {
             saving={savingServer}
             formError={serverFormError}
             isEditing={!!editingServer}
+            hasCredential={editingServer?.hasCredential}
           />
         )}
 

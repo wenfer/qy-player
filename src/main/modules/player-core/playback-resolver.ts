@@ -210,7 +210,7 @@ export function bindOnlineServer(
   }
   const apiKey = resolveServerApiKey(server, secretStore);
   if (!apiKey) {
-    throw new ResolverError('NO_CREDENTIAL', '服务器未登录，请先在设置中完成登录');
+    throw new ResolverError('NO_CREDENTIAL', '服务器未登录，请先在媒体库中完成登录');
   }
   if (!server.user_id) {
     throw new ResolverError('NO_CREDENTIAL', '服务器缺少用户信息，请重新登录');

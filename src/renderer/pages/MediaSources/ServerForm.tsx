@@ -19,6 +19,7 @@ interface ServerFormProps {
   saving: boolean;
   formError: string | null;
   isEditing: boolean;
+  hasCredential?: boolean;
 }
 
 export default function ServerForm({
@@ -31,6 +32,7 @@ export default function ServerForm({
   saving,
   formError,
   isEditing,
+  hasCredential,
 }: ServerFormProps) {
   // Inputs on the card use the secondary track; focus handled by the
   // global focus-visible ring (theme-consistent with SourceForm).
@@ -43,7 +45,11 @@ export default function ServerForm({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">{isEditing ? '编辑服务器' : '添加服务器'}</h3>
         {isEditing && (
-          <span className="text-xs text-muted-foreground">留空密码则保留原有登录凭证</span>
+          hasCredential ? (
+            <span className="text-xs text-muted-foreground">留空密码则保留原有登录凭证</span>
+          ) : (
+            <span className="text-xs text-amber-500 font-medium">未登录，请输入密码以完成登录</span>
+          )
         )}
       </div>
 
@@ -122,7 +128,7 @@ export default function ServerForm({
               type={showPassword ? 'text' : 'password'}
               value={form.password}
               onChange={(e) => onChange({ ...form, password: e.target.value })}
-              placeholder={isEditing ? '••••••••' : ''}
+              placeholder={isEditing ? (hasCredential ? '••••••••' : '请输入密码以完成登录') : ''}
               autoComplete="new-password"
               className={`${inputClass} pr-10`}
             />

@@ -365,10 +365,10 @@ export default function Home() {
           添加 Jellyfin 或 Emby 服务器以浏览您的媒体库
         </p>
         <button
-          onClick={() => navigate('/settings')}
+          onClick={() => navigate('/media-sources')}
           className="px-5 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors focus-ring font-medium"
         >
-          前往设置
+          前往媒体库
         </button>
       </div>
     );
@@ -407,10 +407,10 @@ export default function Home() {
               <AlertCircle size={16} className="flex-shrink-0" />
               {e}
               <button
-                onClick={() => navigate('/settings')}
+                onClick={() => navigate('/media-sources')}
                 className="ml-auto text-xs underline underline-offset-2 hover:no-underline flex-shrink-0"
               >
-                前往设置
+                前往媒体库
               </button>
             </div>
           ))}
