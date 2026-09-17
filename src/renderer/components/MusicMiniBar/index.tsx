@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Mic2, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
-import LyricsPanel from '../LyricsPanel';
-
 import Visualizer, { type VisualizerMode } from '../Visualizer';
 
 /**
@@ -19,6 +17,7 @@ function resolveMode(setting: string, engine: string | null): VisualizerMode | n
   if (setting === 'spectrum') return 'spectrum';
   return engine === 'webaudio' ? 'spectrum' : 'waveform';
 }
+
 export default function MusicMiniBar() {
   const playback = useMusicPlaybackStore();
   const [collapsed, setCollapsed] = useState(false);
