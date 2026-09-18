@@ -110,7 +110,9 @@
   升级 mpv 会破坏老系统兼容（见硬性约束 2），所以 mpv 解码的音源（服务器 /
   WebDAV / CUE / 兜底冷门格式）**拿不到真实波形**——`Visualizer` 在无真实数据时
   画一条静态进度线，**绝不画假跳动的正弦波**（改前就是假正弦，已被用户指出）。
-  想给某音源加真波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据
+  想给某音源加真波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据。音乐页
+  顶部的**频谱图**（`components/SpectrumGraph`，QYP3-034：柱状/瀑布可切换）同此
+  约束——mpv 源显示"无法显示真实频谱"提示，绝不画假数据
 - **本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

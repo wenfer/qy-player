@@ -654,6 +654,25 @@
   类非法封面 FLAC 不再兜底 mpv、在内置引擎出真波形且不弹窗；服务器/WebDAV/CUE 音源
   拾音器显示静态进度线（诚实告知无真实波形）。已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-034 播放频谱图（音乐页内嵌，柱状/瀑布）`[x]`
+- 诉求（用户）：「做个播放时显示频谱图的功能」→ 经确认：音乐页顶部内嵌频谱区 +
+  柱状/瀑布两种图表可切换
+- 约束（延续 QYP3-033）：真实频谱只有 renderer 内置引擎（Web Audio）解码的音轨
+  才有；mpv 0.32 无实时频谱 IPC 接口 → mpv 源（服务器 / WebDAV / CUE / 兜底 FLAC）
+  面板如实提示"无法显示真实频谱"，**绝不画假数据**
+- 内容：
+  - `components/SpectrumGraph/index.tsx`（新增）：canvas 频谱图，柱状（64 柱频率
+    峰值）+ 瀑布（96 bin 热力图，离屏画布整体左移实现滚动）；≤30fps；纯函数
+    `downsampleSpectrum`（频率下采样）/`heatColor`（暗→蓝→青→黄→红热力配色）
+  - `pages/Music/index.tsx`：顶部内嵌（来源/视图切换之上），仅在有音乐会话
+    （`engine && current`）时渲染，切视图/切来源常驻
+  - 图表选择持久化到 `playback.spectrumChart`（SETTINGS.GET/SET 对称）
+- Evidence: 新增 `tests/renderer/music/spectrum-graph.test.tsx` 7 例（downsample
+  分组/空安全、heatColor 钳制、mpv 提示且无 canvas、webaudio 出 canvas、切换持久化、
+  读回持久化）；typecheck 双配置 + 全量测试 + 构建三产物
+- 待目标机验证：本地音轨频谱随音调跳动、柱状/瀑布切换并记住；服务器/WebDAV 音源
+  显示提示；30fps 下 CPU 占用（老机预算）。已记入 `docs/TARGET-VERIFY.md`
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→
