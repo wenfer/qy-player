@@ -291,9 +291,9 @@
 ### QYP3-023 拾音器双模式 `[x]`（帧率/CPU 与渐变实机待验证）
 - 依赖：010,011
 - 内容：renderer 引擎 AnalyserNode 实时频谱（fftSize 2048、30fps 上限、
-  48 柱峰值抽样）+ mpv 引擎播放波形（waveformAmplitude 确定性包络，
-  按 时长+进度 上色，无缓存无外部依赖）+ 模式切换（auto/spectrum/
-  waveform/off，存 `playback.visualizer`）+ 设置页 + 迷你条内嵌
+  48 柱峰值抽样）+ 实时波形（时域 `getByteTimeDomainData`，QYP3-033 接管
+  waveform 模式）+ 无真实数据时静态进度线（mpv/静音源，绝不计假波形）+ 模式切换
+  （auto/spectrum/waveform/off，存 `playback.visualizer`）+ 设置页 + 迷你条内嵌
 - 验收：帧率与 CPU 采样记录（老机预算）；双引擎切换无缝
 - Evidence: `tests/renderer/music/visualizer.test.tsx` 2/2（包络纯函数
   有界/确定性/中间高 + 无 2D 上下文静默降级）；typecheck 绿
@@ -608,6 +608,41 @@
 - 待目标机验证（无显示器环境无法验窗口显隐）：音乐（本地冷门格式 / 服务器 /
   WebDAV / 内置兜底）播放无弹窗且音频出声；视频播放仍有 mpv 窗口；音乐→视频
   →音乐切换窗口状态正确。已记入 `docs/TARGET-VERIFY.md`
+
+### QYP3-033 拾音器假波形 → 真波形 + 救非法封面 FLAC `[ ]`
+- 触发：QYP3-032 之后用户报「播放的波形是假的，我要的是真正的音频波形」
+- 现状（根因）：`Visualizer` 的 waveform 模式画的是 `waveformAmplitude`
+  （确定性包络）+ 正弦相位的**假波形**，与音频完全无关；spectrum 模式在 mpv
+  引擎下拿不到真实数据（全 0）也退化成同一条假波形
+- 约束（已与用户确认范围「接真波形 + 救嘲笑.flac」）：真实波形/频谱**只有
+  renderer 内置引擎（Web Audio）解码的音轨才有**——AnalyserNode 同时给频域
+  （`getByteFrequencyData`）与时域（`getByteTimeDomainData`）真实数据。**mpv 0.32
+  没有暴露实时频谱/波形的 IPC 接口**（`audio-fft` 是 0.34+ 才有），升级 mpv 会
+  破坏老系统兼容（AGENTS.md 硬性约束 2），故服务器/WebDAV/CUE/冷门格式等走 mpv
+  的音源**拿不到真实波形**——`Visualizer` 在无真实数据时改画**静态进度线**（绝不
+  画假跳动）
+- 修法：
+  - `web-audio-engine.ts`：新增 `getWaveform()`（时域 `getByteTimeDomainData`，
+    fftSize 长度缓冲，静音恒 128）；`music-playback-store.ts` 暴露 `getWaveform`，
+    `MusicMiniBar` 透传 `getWaveform` 给 `Visualizer`
+  - `Visualizer/index.tsx`：waveform 模式用真实时域数据画居中镜像波形条；spectrum
+    全 0 或 waveform 静音/无数据时改画静态进度线（播放段琥珀、未播段灰）；删除
+    已无用的 `waveformAmplitude` 假包络
+  - `flac-strip.ts`（新增）：fetch 本地 `qy-file://audio` FLAC 字节，解析并移除
+    所有 `METADATA_BLOCK_PICTURE`（type=6）块、重封装成 blob URL（音频帧原样保留，
+    无损）；封面展示走 `covers` 缓存分区，与播放流内嵌封面无关，剥离不影响封面
+  - `web-audio-engine.ts.recoverFlac(track)`：本地 FLAC 解码失败时剥离封面后以
+    blob 在内置引擎重播；`music-playback-store.ts.onError` 在 mpv 兜底**前**先调
+    `recoverFlac`，成功则保持 webaudio 引擎（真波形），失败再走原 mpv 兜底
+    （用 `flacRecovering` 标志吞掉自救期间的错误事件，避免重复兜底）
+- Evidence（待跑）：新增 `tests/renderer/player/flac-strip.test.ts`（剥离 PICTURE /
+  保留 STREAMINFO 与音频帧 / 末块标志重算 / 截断返回 null / isLocalFlacUrl）；
+  `web-audio-engine.test.ts` 增 `getWaveform` 与 `recoverFlac` 用例；
+  `visualizer.test.tsx` 重写（真实波形/静态进度线断言，去掉 `waveformAmplitude`）；
+  typecheck 双配置 + 全量测试 + 构建三产物
+- 目标机验证：本地普通音轨（mp3/正常 flac）拾音器出**真波形/真频谱**；嘲笑.flac
+  类非法封面 FLAC 不再兜底 mpv、在内置引擎出真波形且不弹窗；服务器/WebDAV/CUE 音源
+  拾音器显示静态进度线（诚实告知无真实波形）。已记入 `docs/TARGET-VERIFY.md`
 
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起

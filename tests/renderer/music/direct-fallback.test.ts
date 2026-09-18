@@ -44,6 +44,8 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
     resume = vi.fn();
     seek = vi.fn();
     getSpectrum = vi.fn(() => null);
+    getWaveform = vi.fn(() => null);
+    recoverFlac = vi.fn(async () => false);
     constructor() {
       h.engine.instance = this as unknown as Record<string, unknown>;
     }

@@ -10,6 +10,8 @@
  * 失败回退 native 引擎一次（错误回调上抛，由 store 决策）。
  */
 
+import { isLocalFlacUrl, stripFlacPicture } from './flac-strip';
+
 export type RepeatMode = 'off' | 'all' | 'one';
 
 export interface QueueTrack {
@@ -148,6 +150,10 @@ export class WebAudioEngine {
   private readonly gain: GainNode | null = null;
   private readonly queue = new PlaybackQueue();
   private freqData: Uint8Array | null = null;
+  /** 时域波形缓冲（getByteTimeDomainData；fftSize 长度，值中心 128=静音）。 */
+  private waveData: Uint8Array | null = null;
+  /** 上次剥离封面生成的 blob URL，换曲/自救前释放，避免内存泄漏。 */
+  private lastBlobUrl: string | null = null;
 
   onError?: (err: unknown) => void;
   onEnded?: () => void;
@@ -170,6 +176,7 @@ export class WebAudioEngine {
         this.analyser.fftSize = 2048;
         this.analyser.smoothingTimeConstant = 0.8;
         this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+        this.waveData = new Uint8Array(this.analyser.fftSize);
         let node: AudioNode = this.source;
         for (const freq of EQ_BANDS) {
           const f = this.ctx.createBiquadFilter();
@@ -225,6 +232,11 @@ export class WebAudioEngine {
       } catch {
         // resume 失败不阻断换源；部分环境无声但可继续，交由上层处理
       }
+    }
+    // 释放上一次封面剥离生成的 blob（如有），避免随每次换曲堆积
+    if (this.lastBlobUrl) {
+      URL.revokeObjectURL(this.lastBlobUrl);
+      this.lastBlobUrl = null;
     }
     this.audio.src = track.url;
     await this.audio.play?.();
@@ -283,6 +295,37 @@ export class WebAudioEngine {
     if (!this.analyser || !this.freqData) return null;
     this.analyser.getByteFrequencyData(this.freqData);
     return this.freqData;
+  }
+
+  /**
+   * 时域波形快照（QYP3-033：真波形）。无图返回 null；静音时值恒为 128，
+   * 由调用方判定"无信号"→ 显示静态进度线而非假跳动。
+   */
+  getWaveform(): Uint8Array | null {
+    if (!this.analyser || !this.waveData) return null;
+    this.analyser.getByteTimeDomainData(this.waveData);
+    return this.waveData;
+  }
+
+  /**
+   * FLAC 内嵌封面剥离自救（QYP3-033）：本地 FLAC 因非法封面被 Chromium
+   * 拒绝解码时，剥离封面后以 blob 在内置引擎重播——保留真频谱/真波形，
+   * 且不必兜底 mpv（顺便避免黑窗）。成功返回 true；非本地 FLAC / 无可剥离
+   * 封面 / 重封装后仍解码失败返回 false（交给上层 mpv 兜底）。
+   */
+  async recoverFlac(track: QueueTrack): Promise<boolean> {
+    if (!isLocalFlacUrl(track.url)) return false;
+    try {
+      const blobUrl = await stripFlacPicture(track.url);
+      if (!blobUrl) return false;
+      if (this.lastBlobUrl) URL.revokeObjectURL(this.lastBlobUrl);
+      this.lastBlobUrl = blobUrl;
+      this.audio.src = blobUrl;
+      await this.audio.play?.();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   get queueState(): { length: number; index: number; repeat: RepeatMode; shuffle: boolean; currentTrackId: number | null } {

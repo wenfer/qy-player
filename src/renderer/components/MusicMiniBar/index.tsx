@@ -165,6 +165,7 @@ export default function MusicMiniBar() {
             <Visualizer
               mode={mode}
               getSpectrum={playback.getSpectrum}
+              getWaveform={playback.getWaveform}
               isPlaying={playback.isPlaying}
               position={playback.position}
               duration={playback.duration}

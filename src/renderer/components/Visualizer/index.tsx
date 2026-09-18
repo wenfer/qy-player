@@ -1,22 +1,19 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * 拾音器（QYP3-023）：双模式可视化，帧率上限 30fps（老机预算）。
- * - spectrum：renderer 引擎 AnalyserNode 实时频谱（fftSize 2048）；
- * - waveform：mpv 引擎或无频谱数据时的播放波形——按 时长+进度 绘制
- *   （离线频谱 spike 失败后的降级路径，无需任何缓存/外部依赖）。
+ * 拾音器（QYP3-023 / QYP3-033）：双模式可视化，帧率上限 30fps（老机预算）。
+ *
+ * 真实数据只有「renderer 内置引擎（Web Audio）」解码的音轨才有——
+ * AnalyserNode 同时提供频域（getSpectrum）与时域（getWaveform）。
+ * mpv 引擎（服务器/WebDAV/CUE，以及因非法封面兜底到 mpv 的本地 FLAC）
+ * 在 mpv 0.32 下无法暴露实时频谱/波形（audio-fft 是 0.34+ 才有），渲染层
+ * 拿到的 AnalyserNode 只接到静音元素 → 全 0 / 全 128。
+ *
+ * 因此：有真实数据就画真实频谱/波形；拿不到真实数据（mpv 或静音）则画一条
+ * **静态进度线**（绝不画假跳动的正弦波）——诚实呈现"此源无真实波形"。
  */
 
 export type VisualizerMode = 'spectrum' | 'waveform';
-
-/** 波形振幅（确定性伪包络：同一 index 恒定，避免逐帧抖动）。 */
-export function waveformAmplitude(index: number, total: number): number {
-  if (total <= 0) return 0;
-  const t = index / total;
-  const envelope = Math.sin(Math.PI * t) * 0.7 + 0.3; // 两端低、中间高
-  const ripple = 0.5 + 0.5 * Math.sin(index * 1.7) * Math.cos(index * 0.6);
-  return Math.max(0.08, Math.min(1, envelope * (0.55 + 0.45 * ripple)));
-}
 
 /** 频谱全 0（mpv 引擎下渲染层 AnalyserNode 只接到静音元素）视为无数据。 */
 function isAllZero(data: Uint8Array): boolean {
@@ -26,10 +23,21 @@ function isAllZero(data: Uint8Array): boolean {
   return true;
 }
 
+/** 时域波形全在 128 附近（±3）→ 静音/无信号，视为无真实数据。 */
+function isFlatTimeDomain(data: Uint8Array): boolean {
+  for (let i = 0; i < data.length; i += 1) {
+    const v = data[i];
+    if (v < 125 || v > 131) return false;
+  }
+  return true;
+}
+
 interface VisualizerProps {
   mode: VisualizerMode;
-  /** 频谱数据源（renderer 引擎快照；无则自动画波形）。 */
+  /** 频谱数据源（renderer 引擎频域快照；无则静态进度线）。 */
   getSpectrum: () => Uint8Array | null;
+  /** 波形数据源（renderer 引擎时域快照；无/静音则静态进度线）。 */
+  getWaveform: () => Uint8Array | null;
   isPlaying: boolean;
   position: number;
   duration: number;
@@ -39,10 +47,31 @@ interface VisualizerProps {
 
 const BARS = 48;
 const FRAME_MS = 1000 / 30;
+const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
+const PROGRESS_PLAYED = 'rgba(255, 209, 102, 0.9)';
+const PROGRESS_IDLE = 'rgba(148, 163, 184, 0.4)';
+
+/** 无真实数据时画一条静态进度线（播放段琥珀、未播段灰），绝不假跳动。 */
+function drawStaticProgress(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  progress: number
+): void {
+  const barH = Math.max(2, Math.round(h * 0.14));
+  const y = Math.round((h - barH) / 2);
+  ctx.fillStyle = PROGRESS_IDLE;
+  ctx.fillRect(0, y, w, barH);
+  if (progress > 0) {
+    ctx.fillStyle = PROGRESS_PLAYED;
+    ctx.fillRect(0, y, w * progress, barH);
+  }
+}
 
 export default function Visualizer({
   mode,
   getSpectrum,
+  getWaveform,
   isPlaying,
   position,
   duration,
@@ -74,6 +103,8 @@ export default function Visualizer({
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
+      const progress = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
+
       if (mode === 'spectrum') {
         const data = isPlaying ? getSpectrum() : null;
         if (data && data.length > 0 && !isAllZero(data)) {
@@ -86,31 +117,42 @@ export default function Visualizer({
               if (v > peak) peak = v;
             }
             const barH = Math.max(1, (peak / 255) * h);
-            ctx.fillStyle = 'rgba(255, 209, 102, 0.9)';
+            ctx.fillStyle = SPECTRUM_COLOR;
             ctx.fillRect(i * barW + barW * 0.2, h - barH, barW * 0.6, barH);
           }
           return;
         }
-        // 无频谱数据（mpv 引擎静音元素全 0 / 未起播）→ 退化成波形，绝不空白闪烁
+        // 无真实频谱（mpv 静音元素全 0 / 未起播）→ 静态进度线
+        drawStaticProgress(ctx, w, h, progress);
+        return;
       }
 
-      const progress = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
-      const barW = w / BARS;
-      for (let i = 0; i < BARS; i += 1) {
-        // 播放中按时间相位轻微起伏，让降级波形“活”起来（非真实频谱，仅供
-        // mpv / 降级观感；真实音调频谱只在 webaudio 引擎下由 AnalyserNode 提供）。
-        const lively = isPlaying ? 0.6 + 0.4 * Math.sin(now / 170 + i * 0.55) : 1;
-        const amp = waveformAmplitude(i, BARS) * lively;
-        const barH = Math.max(1, amp * h * 0.9);
-        const played = i / BARS <= progress;
-        ctx.fillStyle = played ? 'rgba(255, 209, 102, 0.95)' : 'rgba(148, 163, 184, 0.45)';
-        ctx.fillRect(i * barW + barW * 0.2, (h - barH) / 2, barW * 0.6, barH);
+      // waveform：真实时域波形（居中镜像，幅度由实际采样驱动）
+      const wave = isPlaying ? getWaveform() : null;
+      if (wave && wave.length > 0 && !isFlatTimeDomain(wave)) {
+        const step = Math.max(1, Math.floor(wave.length / BARS));
+        const barW = w / BARS;
+        for (let i = 0; i < BARS; i += 1) {
+          let peak = 0;
+          for (let k = 0; k < step; k += 1) {
+            const v = wave[i * step + k] ?? 128;
+            const dev = Math.abs(v - 128);
+            if (dev > peak) peak = dev;
+          }
+          const norm = peak / 128;
+          const barH = Math.max(1, norm * h * 0.9);
+          ctx.fillStyle = SPECTRUM_COLOR;
+          ctx.fillRect(i * barW + barW * 0.2, (h - barH) / 2, barW * 0.6, barH);
+        }
+        return;
       }
+      // 无真实波形（mpv 静音元素全 128 / 未起播）→ 静态进度线
+      drawStaticProgress(ctx, w, h, progress);
     };
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [mode, getSpectrum, isPlaying, position, duration, height]);
+  }, [mode, getSpectrum, getWaveform, isPlaying, position, duration, height]);
 
   return (
     <canvas

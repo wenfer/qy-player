@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { WebAudioEngine, type QueueTrack, type RepeatMode } from '../player/web-audio-engine';
+import { isLocalFlacUrl } from '../player/flac-strip';
 import type { MediaRef } from '../../shared/types/catalog';
 
 /**
@@ -52,6 +53,8 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
   getSpectrum: () => Uint8Array | null;
+  /** 拾音器（QYP3-033）：真实时域波形快照；非 renderer 引擎/静音返回 null。 */
+  getWaveform: () => Uint8Array | null;
   /** 服务器队列内跳转（QYP3-025）：mpv 引擎的上下曲靠它推进。 */
   playServerAt: (index: number) => Promise<void>;
   /** 结束音乐会话（QYP3-026）：视频接管 mpv 时由主进程事件触发。 */
@@ -72,6 +75,8 @@ let playToken = 0;
  * 「谁失败了」，playQueue 的 catch 据此判断这次 rejection 是否已被兜底接管。
  */
 let directFallbackTrackId: number | null = null;
+/** FLAC 封面剥离自救进行中：期间忽略错误事件，决策交给 recoverFlac 的 .then。 */
+let flacRecovering = false;
 /** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
 let currentLyrics: string | null = null;
 let lastDeskPushAt = 0;
@@ -202,11 +207,26 @@ function getEngine(): WebAudioEngine {
       if (s.engine === 'mpv') return; // 已在兼容引擎上，无兜底可谈
       const failed = s.current as EngineExtTrack | null;
       if (!failed || typeof failed.trackId !== 'number' || typeof failed.sourceId !== 'number') return;
-      directFallbackTrackId = failed.trackId;
-      // 同步切到 mpv：状态面与"已交给兼容引擎"一致，紧随其后的
-      // play() rejection 也才能被认作预期（见 playQueue 的 catch）
-      useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false, errorMessage: null });
-      void fallbackToMpv(failed);
+      // QYP3-033：本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，先剥离封面
+      // 在内置引擎重播——保留真频谱/真波形，且不必兜底 mpv（也避免黑窗）。
+      // 自救进行中：忽略这次（及后续）错误，最终决策交给 recoverFlac 的 .then
+      if (flacRecovering) return;
+      if (isLocalFlacUrl(failed.url)) {
+        flacRecovering = true;
+        void getEngine()
+          .recoverFlac(failed)
+          .then((recovered) => {
+            flacRecovering = false;
+            if (recovered) {
+              // 自救成功：保持 webaudio 引擎（真频谱/真波形都在这里）
+              useMusicPlaybackStore.setState({ engine: 'webaudio', isPlaying: true, errorMessage: null });
+              return;
+            }
+            fallbackToMpvNow(failed);
+          });
+        return;
+      }
+      fallbackToMpvNow(failed);
     };
   }
   return engineSingleton;
@@ -306,6 +326,19 @@ export interface MusicTrackInput {
   duration: number | null;
   path: string;
   codec: string | null;
+}
+
+/**
+ * 兜底到 mpv 的统一入口（QYP3-033 抽取）：标记「谁失败了」+ 同步切到 mpv
+ * 状态面 + 实际触发 mpv loadfile。先前的 onError 内联逻辑迁移至此，供
+ * FLAC 自救失败后的兜底复用。
+ */
+function fallbackToMpvNow(track: EngineExtTrack): void {
+  directFallbackTrackId = track.trackId;
+  // 同步切到 mpv：状态面与"已交给兼容引擎"一致，紧随其后的
+  // play() rejection 也才能被认作预期（见 playQueue 的 catch）
+  useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false, errorMessage: null });
+  void fallbackToMpv(track);
 }
 
 /**
@@ -575,6 +608,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   clearError: () => set({ errorMessage: null }),
 
   getSpectrum: () => engineSingleton?.getSpectrum() ?? null,
+  getWaveform: () => engineSingleton?.getWaveform() ?? null,
 
   playServerAt: async (index) => {
     const s = get();

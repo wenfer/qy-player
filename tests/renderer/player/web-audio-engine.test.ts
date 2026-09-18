@@ -50,10 +50,11 @@ function fakeCtx(): AudioContext {
     state: 'running',
     createMediaElementSource: vi.fn(() => ({ connect: vi.fn() })),
     createAnalyser: vi.fn(() => ({
-      fftSize: 0,
+      fftSize: 2048,
       smoothingTimeConstant: 0,
-      frequencyBinCount: 64,
+      frequencyBinCount: 1024,
       getByteFrequencyData: (arr: Uint8Array) => arr.fill(7),
+      getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
       connect: vi.fn(),
     })),
     createBiquadFilter: vi.fn(() => ({
@@ -210,6 +211,66 @@ describe('WebAudioEngine (QYP3-010)', () => {
       },
     });
     expect(engine.getSpectrum()).toBeNull();
+  });
+
+  it('getWaveform returns a time-domain buffer centered at 128 (QYP3-033)', () => {
+    const { engine } = makeEngine();
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    const wave = engine.getWaveform();
+    expect(wave).not.toBeNull();
+    // fftSize=2048 → 时域缓冲长度 2048；fake 填充 128（静音）
+    expect(wave!.length).toBe(2048);
+    expect(wave![0]).toBe(128);
+  });
+
+  it('waveform stays null-safe when the graph could not build (QYP3-033)', () => {
+    const engine = new WebAudioEngine({
+      createElement: () => fakeAudio(),
+      createContext: () => {
+        throw new Error('no audio device');
+      },
+    });
+    expect(engine.getWaveform()).toBeNull();
+  });
+
+  it('recoverFlac strips embedded picture and retries for a local FLAC (QYP3-033)', async () => {
+    const audio = fakeAudio();
+    const ctx = fakeCtx();
+    const engine = new WebAudioEngine({
+      createElement: () => audio,
+      createContext: () => ctx,
+    });
+    // 造一个含 PICTURE(type=6) 块的 FLAC（STREAMINFO + PICTURE + 末块 + 音频帧）
+    const input = new Uint8Array([
+      0x66, 0x4c, 0x61, 0x43, // 'fLaC'
+      0x00, 0x00, 0x00, 0x02, 1, 2, // STREAMINFO（非末块）
+      0x06, 0x00, 0x00, 0x02, 9, 9, // PICTURE（应被剥离）
+      0x84, 0x00, 0x00, 0x01, 5, // VORBIS（末块）
+      0xff, 0xf8, 0x00, // 音频帧
+    ]);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => input.slice().buffer,
+    }));
+    const createObjectURL = vi.fn(() => 'blob:fake-stripped');
+    const RealURL = globalThis.URL;
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', Object.assign(Object.create(RealURL), { createObjectURL }));
+    try {
+      // 本地 FLAC（qy-file://audio），含非法封面 → 剥离后在内置引擎重播
+      const ok = await engine.recoverFlac(makeTrack(1, 'qy-file://audio/1/嘲笑.flac'));
+      expect(ok).toBe(true);
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(audio.src).toBe('blob:fake-stripped');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('recoverFlac returns false for non-local / non-flac urls (QYP3-033)', async () => {
+    const { engine } = makeEngine();
+    expect(await engine.recoverFlac(makeTrack(1, 'qy-file://audio/1/x.mp3'))).toBe(false);
+    expect(await engine.recoverFlac(makeTrack(1, 'https://example.com/a.flac'))).toBe(false);
   });
 
   it('volume goes to gain node when the graph exists', () => {

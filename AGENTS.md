@@ -103,6 +103,24 @@
   删。mpv 引擎（服务器/WebDAV/冷门格式）渲染层拿不到真实音频数据，**没有
   真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 + 架构总览
   音乐会话段）
+- **真实波形/频谱只能来自 renderer 内置引擎（Web Audio）**（QYP3-033）。渲染层
+  的 AnalyserNode 同时给频域（`getSpectrum`，`getByteFrequencyData`）与时域
+  （`getWaveform`，`getByteTimeDomainData`）真实数据；拾音器据此画真波形/频谱。
+  mpv 0.32 **没有**暴露实时频谱/波形的 IPC 接口（`audio-fft` 是 0.34+ 才有），
+  升级 mpv 会破坏老系统兼容（见硬性约束 2），所以 mpv 解码的音源（服务器 /
+  WebDAV / CUE / 兜底冷门格式）**拿不到真实波形**——`Visualizer` 在无真实数据时
+  画一条静态进度线，**绝不画假跳动的正弦波**（改前就是假正弦，已被用户指出）。
+  想给某音源加真波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据
+- **本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033）。
+  某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
+  0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`
+  整文件失败，导致该 FLAC 走不了内置引擎（既无真波形、又会被兜底到 mpv 弹黑窗）；
+  mpv 0.32 对同样的块只 warning。`music-playback-store.ts` 的 `onError` 在 mpv
+  兜底**前**先调 `WebAudioEngine.recoverFlac(track)`：经 `qy-file://audio` 协议
+  fetch 字节、用 `flac-strip.ts` 移除所有 type=6 封面块、重封装成 blob 在内置引擎
+  重播——音频帧原样保留（无损）。封面展示走 `covers` 缓存分区，与播放流内嵌封面
+  无关，剥离不影响封面。改相关逻辑前确认：本地 FLAC 仍能在内置引擎出真波形、
+  非法封面文件不再兜底 mpv、封面照常显示
 - **音乐经 mpv 解码时绝不能让 mpv 弹窗**（QYP3-032）。mpv 共享实例由
   `playerLoadFile` 懒启动；音频文件（含内嵌封面，mpv 当成一条 mjpeg video
   轨）若不压窗会露出黑屏。修复路径：启动参数 `--force-window=no`，音乐加载
