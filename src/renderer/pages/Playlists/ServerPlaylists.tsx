@@ -110,7 +110,9 @@ export default function ServerPlaylists() {
         })),
         startIndex
       );
-      if (playback.errorMessage) addToast(playback.errorMessage, 'error');
+      // 实时 state（闭包里的 playback 是点击时的旧快照，读不到刚写下的错误）
+      const failed = useMusicPlaybackStore.getState().errorMessage;
+      if (failed) addToast(failed, 'error');
     },
     [open, playback, addToast]
   );

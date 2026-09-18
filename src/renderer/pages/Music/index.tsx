@@ -154,7 +154,10 @@ export default function MusicPage() {
         })),
         startIndex
       );
-      if (playback.errorMessage) addToast(playback.errorMessage, 'error');
+      // 读实时 state：playback 是点击那一刻闭包里的快照，await 之后它还是旧值，
+      // 失败信息会读成 null（QYP3-030：错误提示因此一直不显示）
+      const failed = useMusicPlaybackStore.getState().errorMessage;
+      if (failed) addToast(failed, 'error');
     },
     [playback, addToast]
   );

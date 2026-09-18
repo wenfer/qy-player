@@ -62,6 +62,16 @@ let engineSingleton: WebAudioEngine | null = null;
 let lastReportAt = 0;
 /** 播放令牌：新 playQueue 使旧 playCurrent 竞态失效（重复点击防护）。 */
 let playToken = 0;
+
+/**
+ * direct 引擎解码失败、已交给 mpv 兜底的那一首（QYP3-030）。
+ *
+ * 失败路径上 `error` 事件先到、`play()` 的 rejection 后到，而状态里的
+ * current 是在 `await playQueue()` 之后才写入的 —— 兜底因此不能读 current
+ * （首播读到 null 会直接放弃；换曲后读到上一首会喂错曲子）。这里记下
+ * 「谁失败了」，playQueue 的 catch 据此判断这次 rejection 是否已被兜底接管。
+ */
+let directFallbackTrackId: number | null = null;
 /** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
 let currentLyrics: string | null = null;
 let lastDeskPushAt = 0;
@@ -189,8 +199,14 @@ function getEngine(): WebAudioEngine {
     };
     engineSingleton.onError = () => {
       const s = useMusicPlaybackStore.getState();
-      if (s.engine === 'mpv') return;
-      void fallbackToMpv();
+      if (s.engine === 'mpv') return; // 已在兼容引擎上，无兜底可谈
+      const failed = s.current as EngineExtTrack | null;
+      if (!failed || typeof failed.trackId !== 'number' || typeof failed.sourceId !== 'number') return;
+      directFallbackTrackId = failed.trackId;
+      // 同步切到 mpv：状态面与"已交给兼容引擎"一致，紧随其后的
+      // play() rejection 也才能被认作预期（见 playQueue 的 catch）
+      useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false, errorMessage: null });
+      void fallbackToMpv(failed);
     };
   }
   return engineSingleton;
@@ -292,39 +308,55 @@ export interface MusicTrackInput {
   codec: string | null;
 }
 
-async function fallbackToMpv(): Promise<void> {
-  const s = useMusicPlaybackStore.getState();
-  if (s.engine !== 'webaudio' || !s.current) return;
-  const cur = s.current as EngineExtTrack;
-  const resolution = (await window.electronAPI.resolvePlayback(
-    { provider: 'music', sourceId: cur.sourceId, itemId: String(cur.trackId) },
-    { engineForce: 'mpv' }
-  )) as {
-    ok: boolean;
-    data?: { url: string; startPosition: number; mediaContext?: unknown; streamSessionId?: string };
-    error?: { message: string };
-  };
-  if (!resolution.ok || !resolution.data) {
+/**
+ * direct 引擎解码失败兜底（ADR-0007，QYP3-030）。
+ *
+ * 参数是**失败的那一首**，不是 store 里的 current：`error` 事件先于
+ * `play()` 的 rejection 到达，而当前曲目状态是在 `await playQueue()` 之后
+ * 才写入的，读 current 会在首播时读到 null（兜底失效）、在换曲后读到上一首
+ * （喂错曲子）。
+ *
+ * 兜底失败才报错：能播的文件（内置引擎解不了但 mpv 能解的，如内嵌图片块
+ * 非法的 FLAC）对用户而言是「能播的」，不该弹一条误导性的错误。
+ */
+async function fallbackToMpv(track: EngineExtTrack): Promise<void> {
+  try {
+    const resolution = (await window.electronAPI.resolvePlayback(
+      { provider: 'music', sourceId: track.sourceId, itemId: String(track.trackId) },
+      { engineForce: 'mpv' }
+    )) as {
+      ok: boolean;
+      data?: { url: string; startPosition: number; mediaContext?: unknown; streamSessionId?: string };
+      error?: { message: string };
+    };
+    if (!resolution.ok || !resolution.data) {
+      useMusicPlaybackStore.setState({
+        engine: null,
+        isPlaying: false,
+        errorMessage: resolution.error?.message ?? '这首曲目无法播放',
+      });
+      return;
+    }
+    engineSingleton?.pause();
+    useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false });
+    const chain = await readAudioChainSettings();
+    await window.electronAPI.playerLoadFile(
+      resolution.data.url,
+      resolution.data.startPosition > 0 ? resolution.data.startPosition : undefined,
+      undefined,
+      resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
+      // 认证头会话必须回传（WebDAV Basic / 转码 token）：主进程凭它 take()
+      // 出 headers 交给 mpv，缺了就是静默 401
+      resolution.data.streamSessionId,
+      audioChainPayload(chain)
+    );
+  } catch (e) {
     useMusicPlaybackStore.setState({
       engine: null,
       isPlaying: false,
-      errorMessage: resolution.error?.message ?? '播放失败',
+      errorMessage: e instanceof Error ? e.message : '这首曲目无法播放',
     });
-    return;
   }
-  engineSingleton?.pause();
-  useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false });
-  const chain = await readAudioChainSettings();
-  await window.electronAPI.playerLoadFile(
-    resolution.data.url,
-    resolution.data.startPosition > 0 ? resolution.data.startPosition : undefined,
-    undefined,
-    resolution.data.mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
-    // 认证头会话必须回传（WebDAV Basic / 转码 token）：主进程凭它 take()
-    // 出 headers 交给 mpv，缺了就是静默 401
-    resolution.data.streamSessionId,
-    audioChainPayload(chain)
-  );
 }
 
 export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
@@ -396,21 +428,23 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         const { eqGains } = await readAudioChainSettings();
         if (eqGains) engineInstance.setEq(eqGains);
         lastReportAt = Date.now();
-        await engineInstance.playQueue(queue, idx, get().repeat, get().shuffle);
-        const st = engineInstance.queueState;
+        // QYP3-030：状态先落再起播。引擎失败是异步的（error 事件 → 兜底），
+        // 兜底要按"正在播的那首"重播；若等 playQueue 返回再写状态，失败时
+        // 这里还是 null（首播）或上一首（换曲），兜底就会放弃或喂错曲子。
         void window.electronAPI.setMusicEngineActive(true); // 媒体键双用途路由
         set({
           engine: 'webaudio',
-          current: engineSnapshotCurrent(queue, st.currentTrackId),
+          current: queue[idx] ?? null,
           currentSource: sourceOfTrack(start),
           position: 0,
           duration: queue[idx]?.duration ?? 0,
           isPlaying: true,
-          queueLength: st.length,
-          queueIndex: st.index,
+          queueLength: queue.length,
+          queueIndex: idx,
           queueSnapshot: queue,
           errorMessage: null,
         });
+        await engineInstance.playQueue(queue, idx, get().repeat, get().shuffle);
         loadLyricsFor(sourceOfTrack(start));
       } else {
         // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
@@ -453,6 +487,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         loadLyricsFor(sourceOfTrack(start));
       }
     } catch (e) {
+      // 这一首已交给 mpv 兜底：紧随 error 事件而来的 rejection
+      // （NotSupportedError）属预期，报错会误导用户以为放不了
+      if (directFallbackTrackId === start.trackId) {
+        directFallbackTrackId = null;
+        return;
+      }
       set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
     }
   },
