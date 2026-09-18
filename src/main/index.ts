@@ -6,6 +6,7 @@ import { registerIpcHandlers, playbackStateManager } from './ipc';
 import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
 import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { closeDeskLyrics } from './modules/ui-shell/desk-lyrics';
+import { startResourceGuard, stopResourceGuard } from './modules/ui-shell/resource-guard';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
 import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
 import { isMpvMusicActive } from './modules/playback-engine/music-active';
@@ -224,6 +225,14 @@ app.whenReady().then(() => {
   // Create system tray
   createTray(window);
 
+  // 系统资源压力采样（QYP3-036）：性能保护据此降低频谱刷新，CPU 紧张时把
+  // 资源让给音频解码。只在压力档变化时推送，渲染层拿不到也不影响播放。
+  startResourceGuard((pressure) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.RESOURCE.ON_PRESSURE, pressure);
+    }
+  });
+
   // Register global shortcuts from the persisted user config (defaults for
   // anything unset), and allow the renderer to re-apply edited bindings.
   let shortcutOverrides: ShortcutOverrides = {};
@@ -288,6 +297,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', async () => {
   unregisterGlobalShortcuts();
+  stopResourceGuard();
   destroyTray();
   closeDeskLyrics(); // 桌面歌词窗口（QYP3-022）：随应用退出
   // Final progress save before exit

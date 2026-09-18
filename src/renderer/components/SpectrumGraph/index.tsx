@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Activity, BarChart3, Waves } from 'lucide-react';
+import { useVisualizerFps } from '../../stores/resource-store';
 
 /**
  * 播放频谱图（QYP3-034）：音乐页顶部内嵌，播放音乐时常驻，随音调实时跳动。
@@ -17,7 +18,6 @@ export type SpectrumChart = 'bars' | 'waterfall';
 
 const BARS = 64;
 const BINS = 96;
-const FRAME_MS = 1000 / 30;
 /** 瀑布每帧左移的列宽（canvas px）。 */
 const COL_W = 2;
 const BARS_COLOR = 'rgba(255, 209, 102, 0.92)';
@@ -85,6 +85,8 @@ export default function SpectrumGraph({
 }: SpectrumGraphProps) {
   const [chart, setChart] = useState<SpectrumChart>('bars');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 性能保护（QYP3-036）：CPU 紧张时降帧，优先保证播放不卡
+  const frameMs = 1000 / Math.max(1, useVisualizerFps(30));
 
   // 图表选择持久化（读回设置；SETTINGS.GET/SET 是 JSON 对称契约）
   useEffect(() => {
@@ -156,7 +158,7 @@ export default function SpectrumGraph({
     let last = 0;
     const draw = (now: number): void => {
       raf = requestAnimationFrame(draw);
-      if (now - last < FRAME_MS) return; // ≤30fps
+      if (now - last < frameMs) return; // ≤30fps（性能保护下更低）
       last = now;
       const w = canvas.width;
       const h = canvas.height;
@@ -169,7 +171,7 @@ export default function SpectrumGraph({
       cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [engine, isPlaying, chart, getSpectrum, height]);
+  }, [engine, isPlaying, chart, getSpectrum, height, frameMs]);
 
   const changeChart = (next: SpectrumChart): void => {
     setChart(next);

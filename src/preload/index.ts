@@ -309,6 +309,13 @@ const electronAPI = {
   // Window
   setCompactMode: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_COMPACT_MODE, enabled),
+  // 系统资源压力（QYP3-036）：性能保护据此降帧
+  getResourcePressure: () => ipcRenderer.invoke(IPC_CHANNELS.RESOURCE.GET_PRESSURE),
+  onResourcePressure: (cb: (pressure: string) => void) => {
+    const handler = (_event: unknown, pressure: string) => cb(pressure);
+    ipcRenderer.on(IPC_CHANNELS.RESOURCE.ON_PRESSURE, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.RESOURCE.ON_PRESSURE, handler);
+  },
   setFullscreen: (fullscreen: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_FULLSCREEN, fullscreen),
 

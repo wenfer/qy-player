@@ -110,6 +110,11 @@ export const IPC_CHANNELS = {
     SET_COMPACT_MODE: 'window:set-compact-mode',
     SET_FULLSCREEN: 'window:set-fullscreen',
   },
+  /** 系统资源压力（QYP3-036）：主进程采样 loadavg，推送/查询压力档。 */
+  RESOURCE: {
+    GET_PRESSURE: 'resource:get-pressure',
+    ON_PRESSURE: 'resource:on-pressure',
+  },
   SHORTCUTS: {
     APPLY: 'shortcuts:apply',
     APPLY_MPV: 'shortcuts:apply-mpv',

@@ -23,6 +23,7 @@ import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
 import { useCompactModeStore } from './stores/compact-mode-store';
 import { useMusicPlaybackStore } from './stores/music-playback-store';
+import { useResourceStore } from './stores/resource-store';
 
 /**
  * Auto-next host (QYP2-035): the countdown overlay lives app-wide; firing
@@ -161,12 +162,24 @@ function Shell() {
   );
 }
 
+/**
+ * 资源保护宿主（QYP3-036）：订阅主进程的系统压力采样并读回「性能保护」开关，
+ * 供可视化按压力降帧。与页面无关，始终挂载。
+ */
+function ResourceHost() {
+  useEffect(() => {
+    useResourceStore.getState().init();
+  }, []);
+  return null;
+}
+
 function App() {
   return (
     <HashRouter
       future={{ v7_startTransition: true, v7_relativeSplatPath: true } as object}
     >
       <CompactModeHost />
+      <ResourceHost />
       <Shell />
     </HashRouter>
   );

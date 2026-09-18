@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Maximize2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { Gauge, Maximize2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import { useCompactModeStore } from '../../stores/compact-mode-store';
+import { useResourceStore } from '../../stores/resource-store';
+import { pressureLabel } from '../../../shared/resource-pressure';
 import SpectrumGraph from '../SpectrumGraph';
 
 /**
@@ -34,6 +36,8 @@ const BTN =
 export default function CompactPlayer() {
   const playback = useMusicPlaybackStore();
   const exit = useCompactModeStore((s) => s.exit);
+  const pressure = useResourceStore((s) => s.pressure);
+  const powerSave = useResourceStore((s) => s.powerSave);
   // 拖动进度时先本地跟手，松手才真正 seek（避免 mpv 引擎被连续 seek 刷屏）
   const [dragPos, setDragPos] = useState<number | null>(null);
 
@@ -126,7 +130,21 @@ export default function CompactPlayer() {
         >
           <Shuffle size={15} />
         </button>
-        <Volume2 size={14} className="text-muted-foreground ml-auto flex-shrink-0" />
+        <button
+          type="button"
+          onClick={() => void useResourceStore.getState().setPowerSave(!powerSave)}
+          aria-label="性能保护"
+          aria-pressed={powerSave}
+          title={
+            powerSave
+              ? `性能保护：开·${pressureLabel(pressure)}`
+              : '性能保护：关（CPU 紧张时不会自动降低频谱刷新）'
+          }
+          className={`${BTN} ml-auto ${powerSave ? 'text-primary' : ''}`}
+        >
+          <Gauge size={15} />
+        </button>
+        <Volume2 size={14} className="text-muted-foreground flex-shrink-0" />
         <input
           type="range"
           min={0}

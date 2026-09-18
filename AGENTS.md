@@ -88,6 +88,14 @@
   退出原样恢复；进入先放宽 `setMinimumSize`（否则 1280×800 的下限会把浮窗顶回
   去），退出先 resize 回原尺寸再恢复下限。音乐会话结束（`engine` 变 null，含
   视频接管 mpv）由 `App.tsx` 的 `CompactModeHost` 自动还原，别把用户困在空小窗
+- **性能保护**（QYP3-036）：主进程每 ~3s 采样 `loadavg()/核心数`
+  （`ui-shell/resource-guard.ts`），分 normal/busy/critical 三档，**只在档位变化时**
+  经 `RESOURCE.ON_PRESSURE` 推给渲染层；渲染层的 `useVisualizerFps`
+  （`stores/resource-store.ts`）在开关开启时按档位把可视化帧率降到 30/12/3 fps
+  （`Visualizer` 与 `SpectrumGraph` 都走这个 hook），CPU 紧张时把资源让给音频解码。
+  只降可视化刷新，**不碰播放链路，也不改进程优先级**（老机/无 sudo 不可靠）。
+  开关存 `playback.powerSave`（**默认开**），精简浮窗的仪表按钮与设置页都可切。
+  改相关逻辑前确认：档位变化才推送、关掉开关恢复基准帧率、采样失败按 normal 兜底
 
 ### 音乐（两处静默失败陷阱，改前必读）
 - **音乐 loadfile 必须回传 `streamSessionId`（第 5 参）**。WebDAV 音频的

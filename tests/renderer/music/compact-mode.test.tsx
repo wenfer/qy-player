@@ -7,6 +7,7 @@ import CompactPlayer, {
 } from '../../../src/renderer/components/CompactPlayer';
 import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playback-store';
 import { useCompactModeStore } from '../../../src/renderer/stores/compact-mode-store';
+import { useResourceStore } from '../../../src/renderer/stores/resource-store';
 
 /**
  * 精简模式（QYP3-035）：主窗口原地缩成右上角浮窗，界面只留频谱图 + 进度 +
@@ -63,6 +64,7 @@ function seed(engine: 'webaudio' | 'mpv'): void {
 beforeEach(() => {
   vi.clearAllMocks();
   useCompactModeStore.setState({ compact: false });
+  useResourceStore.setState({ pressure: 'normal', powerSave: true });
   seed('webaudio');
 });
 
@@ -134,6 +136,17 @@ describe('CompactPlayer (QYP3-035)', () => {
     fireEvent.change(progress, { target: { value: '120' } });
     fireEvent.mouseUp(progress);
     expect(api.playerControl).toHaveBeenCalledWith('seek', 120, 'absolute');
+  });
+
+  it('power-save toggle flips the persisted setting (QYP3-036)', async () => {
+    render(<CompactPlayer />);
+    const btn = screen.getByLabelText('性能保护');
+    expect(btn.getAttribute('aria-pressed')).toBe('true'); // 默认开
+    fireEvent.click(btn);
+    await vi.waitFor(() =>
+      expect(api.setSettings).toHaveBeenCalledWith('playback.powerSave', false)
+    );
+    expect(useResourceStore.getState().powerSave).toBe(false);
   });
 
   it('restore button exits compact mode', () => {

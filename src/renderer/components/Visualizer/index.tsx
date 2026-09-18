@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useVisualizerFps } from '../../stores/resource-store';
 
 /**
  * 拾音器（QYP3-023 / QYP3-033）：双模式可视化，帧率上限 30fps（老机预算）。
@@ -46,7 +47,6 @@ interface VisualizerProps {
 }
 
 const BARS = 48;
-const FRAME_MS = 1000 / 30;
 const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
 const PROGRESS_PLAYED = 'rgba(255, 209, 102, 0.9)';
 const PROGRESS_IDLE = 'rgba(148, 163, 184, 0.4)';
@@ -79,6 +79,8 @@ export default function Visualizer({
   className = '',
 }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 性能保护（QYP3-036）：CPU 紧张时降帧，优先保证播放不卡
+  const frameMs = 1000 / Math.max(1, useVisualizerFps(30));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -97,7 +99,7 @@ export default function Visualizer({
 
     const draw = (now: number): void => {
       raf = requestAnimationFrame(draw);
-      if (now - last < FRAME_MS) return; // ≤30fps
+      if (now - last < frameMs) return; // ≤30fps（性能保护下更低）
       last = now;
       const w = canvas.width;
       const h = canvas.height;
@@ -152,7 +154,7 @@ export default function Visualizer({
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [mode, getSpectrum, getWaveform, isPlaying, position, duration, height]);
+  }, [mode, getSpectrum, getWaveform, isPlaying, position, duration, height, frameMs]);
 
   return (
     <canvas

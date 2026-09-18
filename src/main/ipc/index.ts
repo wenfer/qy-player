@@ -107,6 +107,7 @@ import {
 } from '../modules/playback-engine/music-active';
 import { SleepTimer } from '../modules/ui-shell/sleep-timer';
 import { setCompactMode } from '../modules/ui-shell/compact-window';
+import { getResourcePressure } from '../modules/ui-shell/resource-guard';
 import {
   closeDeskLyrics,
   isDesktopLyricsSupported,
@@ -438,6 +439,10 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     const compact = setCompactMode(getMainWindow?.(), Boolean(enabled));
     return ok({ compact });
   });
+
+  // 系统资源压力（QYP3-036）：性能保护据此降帧。取值为主进程最近一次采样，
+  // 变化时由主进程主动推送（ON_PRESSURE）。
+  ipcMain.handle(IPC_CHANNELS.RESOURCE.GET_PRESSURE, () => ok(getResourcePressure()));
 
   // ------------------------------------------------------------------
   // 歌单（QYP3-015/016/017）

@@ -713,6 +713,33 @@
 - 待目标机验证：浮窗尺寸/位置（右上角、置顶）、退出还原原尺寸、精简模式期间播放
   与频谱正常、音量/循环生效、视频接管时自动还原。已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-036 性能保护（CPU 紧张时降频谱刷新保播放）`[x]`
+- 诉求（用户）：「精简模式希望增加一个保护进程资源的功能，避免系统 cpu 资源紧张
+  的时候播放卡顿」
+- 思路：应用自身最大的**可控** CPU 开销就是可视化画布；CPU 紧张时把它让出去，
+  优先保证音频解码。不改进程优先级（老机 / 无 sudo 环境不可靠，且可能反噬音频线程）
+- 内容：
+  - `shared/resource-pressure.ts`（新增）：`ResourcePressure` 档位、`PRESSURE_FPS`
+    （30/12/3）、`pressureFromLoad(load1, cores)`、`scaledFps(base, powerSave, p)`、
+    中文档位文案——全为纯函数
+  - `main/modules/ui-shell/resource-guard.ts`（新增）：每 3s 采 `loadavg()/cpus()`
+    换算压力档，**只在变化时**回调；采样异常按 normal 兜底；定时器 unref
+  - IPC：`RESOURCE.GET_PRESSURE`（回执）+ `RESOURCE.ON_PRESSURE`（主进程推送）；
+    main/index.ts 启动/停止采样并广播到主窗口；preload 暴露
+    `getResourcePressure`/`onResourcePressure`
+  - `stores/resource-store.ts`（新增）：压力档 + 性能保护开关（默认开，存
+    `playback.powerSave`）+ `useVisualizerFps(base)` hook
+  - `Visualizer` 与 `SpectrumGraph` 改用 `useVisualizerFps`（帧率随压力降档）
+  - `CompactPlayer` 加「性能保护」仪表按钮（title 显示当前压力档）；`MusicSettings`
+    加性能保护开关；`App.tsx` 加 `ResourceHost` 订阅
+- Evidence: 新增 `tests/shared/resource-pressure.test.ts` 4 例（档位阈值/零核与 NaN
+  兜底/帧率缩放与不抬高/中文文案）、`tests/main/ui/resource-guard.test.ts` 2 例
+  （只在变化时推送 + 幂等启动）、`tests/renderer/music/resource-store.test.ts` 2 例
+  （读回压力+默认开+订阅推送、持久化）；compact-mode 增 1 例开关；typecheck 双配置
+  + 全量 892/892 + 构建三产物绿
+- 待目标机验证：制造 CPU 压力时频谱帧率下降、压力回落恢复、关掉开关后不再降帧；
+  降帧期间音频不卡（对比开关前后）。已记入 `docs/TARGET-VERIFY.md`
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→

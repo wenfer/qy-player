@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { MonitorUp, Sliders } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
+import { useResourceStore } from '../../stores/resource-store';
 import { EQ_BANDS } from '../../player/web-audio-engine';
 
 /**
@@ -83,6 +84,8 @@ export default function MusicSettings() {
   const [visualizer, setVisualizer] = useState<string>('auto');
   // 精简模式（QYP3-035）：播放音频时自动缩成浮窗
   const [autoCompact, setAutoCompact] = useState(false);
+  // 性能保护（QYP3-036）：状态在 store（主进程压力档 + 持久化开关）
+  const powerSave = useResourceStore((s) => s.powerSave);
   // 睡眠定时（P2）：状态在 store（跨页共享，主进程为权威）
   const sleep = useSleepTimerStore();
   const setSleepMinutes = useCallback(
@@ -243,6 +246,14 @@ export default function MusicSettings() {
       );
     },
     [save]
+  );
+
+  const changePowerSave = useCallback(
+    async (value: boolean): Promise<void> => {
+      await useResourceStore.getState().setPowerSave(value);
+      addToast(value ? '性能保护已开启' : '性能保护已关闭', 'success');
+    },
+    [addToast]
   );
 
   /** 保存/删除自定义预设（QYP3-012a）：整表覆盖写，持久化失败必须回滚。 */
@@ -421,6 +432,25 @@ export default function MusicSettings() {
             精简模式把窗口缩成屏幕右上角的小浮窗（频谱图 + 进度 + 上一曲/暂停/下一曲 +
             循环 + 音量），随时可点浮窗上的「还原」按钮恢复。播放中也可在底部音乐控制条
             点「精简」手动进入。
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">
+          <span className="text-sm">性能保护</span>
+          <label className="ml-auto flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={powerSave}
+              onChange={(e) => void changePowerSave(e.target.checked)}
+              className="accent-[var(--primary)]"
+              aria-label="性能保护"
+            />
+            <span className="text-xs text-muted-foreground">系统繁忙时降低频谱刷新</span>
+          </label>
+          <span className="text-xs text-muted-foreground w-full">
+            系统 CPU 紧张时自动降低频谱图的刷新帧率（音乐页与精简浮窗），把 CPU 让给
+            音频解码，减少播放卡顿；压力回落后自动恢复。只影响画面刷新，不影响播放本身。
+            精简浮窗右侧的仪表按钮可随手开关。
           </span>
         </div>
 
