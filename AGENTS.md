@@ -42,7 +42,7 @@
 │     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
-│     playback-engine/          音乐：引擎选择/audio-url 协议桥/歌单 IO/LRC 解析/均衡器/ReplayGain（ADR-0007）
+│     playback-engine/          音乐：引擎选择/audio-url 协议桥/qy-stream 认证流代理/歌单 IO/LRC 解析/均衡器/ReplayGain（ADR-0007）
 │     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
@@ -57,7 +57,7 @@
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
-- **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（服务器/WebDAV/转码/CUE/兼容性优先 → mpv；spectrum-first 且直连格式 → renderer 引擎）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 本地驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次）
+- **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（转码/CUE/兼容性优先/非直解格式 → mpv；spectrum-first 且直连格式 → renderer 引擎——QYP3-037 起服务器/WebDAV 音频经 `qy-stream://` 认证流代理也走 renderer 引擎，`sourceKind` 不再强制 mpv）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次；引擎队列**按需懒解析**单曲 URL，服务器整队预解析是 N 次网络请求）
 - **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId
 - **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）
 - **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默
@@ -117,31 +117,57 @@
   策略下上下文停在 `suspended`，整条图（source→analyser→…→destination）不
   运转：既无声、AnalyserNode 也只读全 0，拾音器频谱静止。起播前主动 resume
   （`web-audio-engine.ts` 的 `playCurrent`），暂停后的 `resume()` 已包含，勿
-  删。mpv 引擎（服务器/WebDAV/冷门格式）渲染层拿不到真实音频数据，**没有
-  真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 + 架构总览
-  音乐会话段）
-- **真实波形/频谱只能来自 renderer 内置引擎（Web Audio）**（QYP3-033）。渲染层
+  删。mpv 引擎（转码/CUE/兼容性优先/冷门格式）渲染层拿不到真实音频数据，
+  **没有真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 +
+  架构总览音乐会话段）
+- **真实波形/频谱只能来自 renderer 内置引擎（Web Audio）**（QYP3-033/037）。渲染层
   的 AnalyserNode 同时给频域（`getSpectrum`，`getByteFrequencyData`）与时域
   （`getWaveform`，`getByteTimeDomainData`）真实数据；拾音器据此画真波形/频谱。
-  mpv 0.32 **没有**暴露实时频谱/波形的 IPC 接口（`audio-fft` 是 0.34+ 才有），
-  升级 mpv 会破坏老系统兼容（见硬性约束 2），所以 mpv 解码的音源（服务器 /
-  WebDAV / CUE / 兜底冷门格式）**拿不到真实波形**——`Visualizer` 在无真实数据时
-  画一条静态进度线，**绝不画假跳动的正弦波**（改前就是假正弦，已被用户指出）。
-  想给某音源加真波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据。音乐页
-  顶部的**频谱图**（`components/SpectrumGraph`，QYP3-034：柱状/瀑布可切换）同此
-  约束——mpv 源显示"无法显示真实频谱"提示，绝不画假数据
-- **本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033）。
+  mpv 0.32 **没有**暴露实时频谱/波形的 IPC 接口（已用 `strings` 核实：只有
+  `af-metadata`，无 `audio-fft`；且不存在该属性名——勿凭文档假设），升级 mpv 会
+  破坏老系统兼容（见硬性约束 2）。QYP3-037 起服务器/WebDAV 音频经主进程
+  `qy-stream://` 认证流代理也走内置引擎（真频谱/真波形/均衡器与本地一致），
+  所以「拿不到真实波形」的只剩：转码 HLS、CUE、兼容性优先、非直解格式
+  （codec 不在 `DIRECT_CODECS`）——`Visualizer` 在无真实数据时画一条静态进度线，
+  **绝不画假跳动的正弦波**（改前就是假正弦，已被用户指出）。想给某音源加真
+  波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据。音乐页顶部的**频谱图**
+  （`components/SpectrumGraph`，QYP3-034：柱状/瀑布可切换）同此约束——mpv 源
+  显示"无法显示真实频谱"提示，绝不画假数据
+- **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`
   整文件失败，导致该 FLAC 走不了内置引擎（既无真波形、又会被兜底到 mpv 弹黑窗）；
   mpv 0.32 对同样的块只 warning。`music-playback-store.ts` 的 `onError` 在 mpv
-  兜底**前**先调 `WebAudioEngine.recoverFlac(track)`：经 `qy-file://audio` 协议
-  fetch 字节、用 `flac-strip.ts` 移除所有 type=6 封面块、重封装成 blob 在内置引擎
-  重播——音频帧原样保留（无损）。封面展示走 `covers` 缓存分区，与播放流内嵌封面
-  无关，剥离不影响封面。改相关逻辑前确认：本地 FLAC 仍能在内置引擎出真波形、
-  非法封面文件不再兜底 mpv、封面照常显示。**渲染层 CSP 的 `media-src` 必须放行
-  `blob:`**（`src/renderer/index.html`），否则剥离后的 blob 会被 CSP 拒载
-  （`Refused to load media from 'blob:...'`），自救失效并退到 mpv
+  兜底**前**先调 `WebAudioEngine.recoverFlac(track)`：fetch 字节（QYP3-037 起
+  服务器/WebDAV 的 `qy-stream://` 也可，但**只能靠 `codec === 'flac'` 判定**——
+  代理 URL 不带扩展名，`isFlacUrl` 对任意 qy-stream 都为真，会造成 mp3 白拉
+  整文件；本地 `qy-file://audio` 仍按扩展名兜底）、用 `flac-strip.ts` 移除所有
+  type=6 封面块、重封装成 blob 在内置引擎重播——音频帧原样保留（无损）。封面
+  展示走 `covers` 缓存分区，与播放流内嵌封面无关，剥离不影响封面。改相关逻辑
+  前确认：本地/服务器 FLAC 仍能在内置引擎出真波形、非法封面文件不再兜底 mpv、
+  封面照常显示。**渲染层 CSP 的 `media-src`/`connect-src` 必须放行 `blob:` 与
+  `qy-stream:`**（`src/renderer/index.html`），否则剥离后的 blob / 代理流会被
+  CSP 拒载（`Refused to load media from ...`），自救失效并退到 mpv
+- **服务器/WebDAV 音频的 `qy-stream://` 代理是安全边界，别拆**（QYP3-037）。
+  渲染层只见 `qy-stream://audio/<opaqueId>`；真实上游 URL 与认证头
+  （`X-Emby-Token` / Basic）在主进程 `StreamRouteCache`（可重复读取 + 滑动
+  TTL + LRU，**与单次消费的 `StreamHeaderCache` 是两套语义**）。代理用裸
+  `node:http(s)` 字节转发：上游强制 `Accept-Encoding: identity`、下游只透传
+  白名单头（Range/206 如实透传才有 seek）；**不要**换 axios/Electron net
+  （透明解压会让 Content-Length 与实体不符），也不要给 scheme 加
+  `corsEnabled`（可能破坏 `createMediaElementSource` 出频谱的既有事实）。
+  引擎队列**按需懒解析**单曲 URL：解析结果非 webaudio（NEEDS_MPV）→ 服务器
+  曲目直接兜底 mpv（`serverQueue/serverIndex` 已随 webaudio 会话记录，mpv 可
+  继续推进队列）；本地/WebDAV 先跳下一首、整队失败才兜底（防 repeat=all 空转）
+- **服务器音乐的进度/续播靠两条专用 IPC，别删**（QYP3-038）。webaudio 播放
+  不经 LOAD_FILE，`MUSIC.START_SERVER_SESSION`（起播报告 Sessions/Playing，
+  记 `playSessionId`）与 `MUSIC.REPORT_SERVER_PROGRESS`（节流 Progress /
+  收尾 Stopped + 本地续播键）补齐服务器侧；收尾一律 Stopped（Emby 仅在
+  Stopped 时把 PositionTicks 写入 UserData），是否标记看完由位置比率判定。
+  本地/WebDAV 走 `MUSIC.REPORT_PROGRESS`（WebDAV 带 `mediaType:'webdav'`，
+  键 `<sourceId>:<path>`——解析器的续播读取已同步修正，此前误读 'local' 域）。
+  队列条目的权威 `mediaId`/`mediaSourceId` 来自解析结果的 `mediaContext`
+  回填（懒解析曲子在 resolver 里回填），进度与 Sessions 回传都从这取
 - **mpv IPC 连接要容忍启动竞态**（QYP3-033）。`MpvProcessManager.start` 只等
   socket 文件出现，而文件由 `bind()` 创建、`listen()` 之后才可连接；两者之间
   connect 会 `ECONNREFUSED`（首个 loadfile 直接报错）。`MpvIpcClient.connect`

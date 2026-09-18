@@ -390,6 +390,8 @@ export function registerIpcHandlers(
       position: number;
       duration?: number;
       isFinished?: boolean;
+      /** QYP3-038：WebDAV webaudio 进度落 'webdav' 域（键 <sourceId>:<path>）。 */
+      mediaType?: 'local' | 'webdav';
     }) => {
       const mediaId =
         typeof args?.mediaId === 'string' && args.mediaId.length <= 1024 ? args.mediaId : null;
@@ -399,11 +401,30 @@ export function registerIpcHandlers(
       const position = Number(args.position);
       const duration = Number(args?.duration);
       const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : undefined;
-      storage.upsertLocalMedia({ path: mediaId, title: args?.title ?? extractTitleFromPath(mediaId) });
-      const localMedia = storage.getLocalMediaByPath(mediaId);
       const isFinished =
         args?.isFinished === true ||
         (safeDuration !== undefined && safeDuration > 0 && position / safeDuration > 0.9);
+      if (args?.mediaType === 'webdav') {
+        // WebDAV 音轨不是本地文件：不进 local_media；进度键与 mpv 引擎
+        // （PlaybackStateManager 落的 <sourceId>:<path>）保持一致
+        storage.addWatchHistory({
+          mediaType: 'webdav',
+          mediaId,
+          title: args?.title ?? mediaId,
+          position,
+          duration: safeDuration,
+        });
+        storage.saveProgress({
+          mediaType: 'webdav',
+          mediaId,
+          position,
+          duration: safeDuration,
+          isFinished,
+        });
+        return ok({ saved: true });
+      }
+      storage.upsertLocalMedia({ path: mediaId, title: args?.title ?? extractTitleFromPath(mediaId) });
+      const localMedia = storage.getLocalMediaByPath(mediaId);
       storage.addWatchHistory({
         mediaType: 'local',
         mediaId,
@@ -420,6 +441,124 @@ export function registerIpcHandlers(
         duration: safeDuration,
         isFinished,
       });
+      return ok({ saved: true });
+    }
+  );
+
+  // 服务器音乐会话（QYP3-038）：webaudio 播放不经 LOAD_FILE，Sessions/Playing
+  // 要在这里发起。playSessionId 返回给渲染层，Progress/Stopped 必须携带同一
+  // id（Emby 缺失 → 400，UserData 永不更新——实测教训）。严格按 serverId 路由。
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.START_SERVER_SESSION,
+    (_event, args: {
+      serverId?: number;
+      provider?: 'jellyfin' | 'emby';
+      itemId?: string;
+      mediaSourceId?: string;
+      title?: string;
+    }) => {
+      const serverId = Number(args?.serverId);
+      const itemId = typeof args?.itemId === 'string' && args.itemId ? args.itemId : null;
+      const provider = args?.provider === 'emby' ? 'emby' : 'jellyfin';
+      if (!Number.isInteger(serverId) || serverId <= 0 || !itemId) {
+        return err('VALIDATION_FAILED', '服务器音乐会话参数不合法');
+      }
+      const server = storage
+        .getServers()
+        .find((s) => s.id === serverId && s.type === provider && s.is_active && s.user_id);
+      if (!server) return err('NOT_FOUND', '服务器不存在或未激活');
+      const apiKey = resolveServerApiKey(server, secretStore);
+      if (!apiKey) return err('AUTH_REQUIRED', '服务器未登录，请先在媒体库中完成登录');
+      const playSessionId = randomUUID();
+      const client = createClient({
+        type: server.type as 'jellyfin' | 'emby',
+        baseUrl: server.base_url,
+        apiKey,
+        userId: server.user_id,
+      });
+      // fire-and-forget：报告失败只损失服务端会话展示，不阻塞起播
+      void client
+        .reportPlayingStart(itemId, args?.mediaSourceId || itemId, playSessionId, 'DirectPlay')
+        .catch(() => {});
+      return ok({ playSessionId });
+    }
+  );
+
+  // 服务器音乐进度（QYP3-038）：Progress/Stopped 回传服务器 + 本地续播键
+  // （mediaType = provider，键 = itemId，与 resolvePlayback 的续播读取一致）。
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.REPORT_SERVER_PROGRESS,
+    (_event, args: {
+      serverId?: number;
+      provider?: 'jellyfin' | 'emby';
+      itemId?: string;
+      mediaSourceId?: string;
+      title?: string;
+      position: number;
+      duration?: number;
+      isFinished?: boolean;
+      /** 收尾（跳曲/停止/换曲）：走 Stopped 端点落位，是否看完由比率另算。 */
+      isStopped?: boolean;
+      playSessionId?: string;
+    }) => {
+      const serverId = Number(args?.serverId);
+      const itemId = typeof args?.itemId === 'string' && args.itemId ? args.itemId : null;
+      const provider = args?.provider === 'emby' ? 'emby' : 'jellyfin';
+      const position = Number(args?.position);
+      if (!Number.isInteger(serverId) || serverId <= 0 || !itemId) {
+        return err('VALIDATION_FAILED', '服务器音乐进度参数不合法');
+      }
+      if (!Number.isFinite(position) || position < 0) {
+        return err('VALIDATION_FAILED', '进度参数不合法');
+      }
+      const duration = Number(args?.duration);
+      const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : undefined;
+      const isFinished =
+        args?.isFinished === true ||
+        (safeDuration !== undefined && safeDuration > 0 && position / safeDuration > 0.9);
+      // 本地续播键：离线也能续播；服务器端 UserData 是另一份
+      storage.addWatchHistory({
+        mediaType: provider,
+        mediaId: itemId,
+        title: args?.title ?? itemId,
+        position,
+        duration: safeDuration,
+      });
+      storage.saveProgress({
+        mediaType: provider,
+        mediaId: itemId,
+        position,
+        duration: safeDuration,
+        isFinished,
+      });
+      // 回传服务器：严格按 serverId 路由，失败静默。收尾一律 Stopped
+      //（Emby 仅在 Stopped 时把 PositionTicks 写入 UserData——实测教训）；
+      // 是否标记看完由位置比率决定，与 mpv 引擎的回传语义一致。
+      const server = storage
+        .getServers()
+        .find((s) => s.id === serverId && s.type === provider && s.is_active && s.user_id);
+      if (server) {
+        const apiKey = resolveServerApiKey(server, secretStore);
+        if (apiKey) {
+          const client = createClient({
+            type: server.type as 'jellyfin' | 'emby',
+            baseUrl: server.base_url,
+            apiKey,
+            userId: server.user_id,
+          });
+          void client
+            .reportProgress(
+              itemId,
+              args?.mediaSourceId || itemId,
+              Math.floor(position * 10000000),
+              isFinished || args?.isStopped === true,
+              false,
+              'DirectPlay',
+              args?.playSessionId
+            )
+            .catch(() => {});
+        }
+      }
       return ok({ saved: true });
     }
   );

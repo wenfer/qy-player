@@ -186,8 +186,14 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_FAVORITES, { limit }),
   setMusicFavorite: (trackId: number, favorite: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_FAVORITE, { trackId, favorite }),
-  reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean }) =>
+  reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean; mediaType?: 'local' | 'webdav' }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
+  // 服务器音乐会话与进度（QYP3-038）：webaudio 播放不经 LOAD_FILE，
+  // Sessions/Playing 系列由渲染层节流后经这两条通道上报
+  startMusicServerSession: (args: { serverId: number; provider: 'jellyfin' | 'emby'; itemId: string; mediaSourceId?: string; title?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.START_SERVER_SESSION, args),
+  reportMusicServerProgress: (args: { serverId: number; provider: 'jellyfin' | 'emby'; itemId: string; mediaSourceId?: string; title?: string; position: number; duration?: number; isFinished?: boolean; isStopped?: boolean; playSessionId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_SERVER_PROGRESS, args),
   // 歌单（QYP3-015/016/017）
   listPlaylists: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.LIST),
   createPlaylist: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.CREATE, { name }),

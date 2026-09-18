@@ -740,6 +740,73 @@
 - 待目标机验证：制造 CPU 压力时频谱帧率下降、压力回落恢复、关掉开关后不再降帧；
   降帧期间音频不卡（对比开关前后）。已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-037 服务器/WebDAV 音乐改走内置引擎（qy-stream 认证流代理）`[x]`
+- 诉求（用户）：「播放显示：此音源经 mpv 解码……我们没有别的手段获取频谱吗」
+  → 四选项里拍板「服务器/WebDAV 改走内置引擎」；两个子决策：codec 未知时仍
+  优先内置引擎（回退兜底）、进度/续播一起做保证不回归（拆 038）
+- 思路：mpv 0.32 无 IPC 音频采样接口（strings 核实只有 `af-metadata`，且
+  `audio-fft` 这个属性名不存在——先前的"0.34+"说法是凭空假设，已当面纠正），
+  拿真频谱的唯一路径是让音源进 renderer 引擎；认证与跨源静音两个阻断点用
+  主进程代理一次解决（顺带修掉 api_key 进渲染层 URL 的泄漏）
+- 内容：
+  - `security/stream-route-cache.ts`（新增）：可重复读取路由表（滑动 TTL 8h
+    + LRU 64；**与单次消费的 StreamHeaderCache 是两套语义**，take 未动）
+  - `playback-engine/stream-protocol.ts`（新增）：`qy-stream://audio/<id>`
+    处理器——裸 node:http(s) 字节转发、Range/206 如实透传、上游强制
+    `Accept-Encoding: identity`、下游白名单头、客户端中止销毁上游 socket；
+    未命中一律 error -6 不区分原因
+  - main/index.ts：`registerSchemesAsPrivileged` 加 qy-stream（standard/
+    secure/supportFetchAPI/**stream**，刻意不加 corsEnabled）；路由表与
+    `registerIpcHandlers` 共享同一实例
+  - `engine-selector.ts`：删 `server-stream`/`webdav-auth` 两条提前返回，
+    `sourceKind` 退出判定（reason 联合收敛，表驱动测试同步重写）
+  - `playback-resolver.ts`：`ResolverDeps.streamRoutes`；WebDAV 音乐直解 →
+    qy-stream（续播键同步修正为 `getProgress('webdav', '<sourceId>:<path>')`，
+    此前误读 'local' 域 = WebDAV 音乐续播从不生效）；服务器 Audio 直解 →
+    qy-stream + `X-Emby-Token` 入路由，codec 缺失按乐观直解；`engineForce`
+    逃生口（PROBE_ITEM 也用它避开代理）
+  - jellyfin/emby client：`getItemDetails` Fields 加 `MediaStreams`（视频路径
+    无感，video 分支从不读 engine）
+  - `web-audio-engine.ts`：`playQueue` 第 5 参 `urlResolver` + `startPosition`，
+    `playCurrent` 懒解析并写回快照、失败走 `onResolveError` 不设 src
+  - `music-playback-store.ts`：整队不再逐曲预解析（服务器 500 首 = N 次网络
+    请求不可接受）；队列 id `queueIdFor`（服务器恒为 0 的 trackId 改负数合成
+    id，兜底/自救标记改按队列 id 认领，防服务器曲目互相认领）；NEEDS_MPV →
+    服务器曲直接兜底（mpv 能续队列）、本地/WebDAV 先跳下一首（整队失败才兜底，
+    防 repeat=all 空转）；`fallbackToMpv` 解析 ref 按来源分支；FLAC 自救门
+    `codec === 'flac' || isLocalFlacUrl`（isFlacUrl 对任意 qy-stream 都真，
+    会造成 mp3 白拉整文件）；`PLAYER.RESOLVE` 补透传被丢的 `engineForce`
+  - CSP：`media-src`/`connect-src` 加 `qy-stream:`
+- Evidence: 新增 `tests/main/playback/stream-route-cache.test.ts` 7 例、
+  `tests/main/playback/stream-proxy.test.ts` 7 例（真上游 server 验 Range
+  透传/认证注入/identity/中止断上游）、resolver +6 例（服务器三态 + WebDAV
+  两态 + engineForce 逃生口）、engine +5 例（懒解析/写回/NEEDS_MPV/续播位）、
+  direct-fallback +3 例（服务器兜底 ref/队列 id 不撞/serverIndex 对齐）、
+  flac-strip +2 例；typecheck 双配置 + 全量 927/927 绿
+- 待目标机验证：qy-stream 实播（stream:true 的 Range 行为本机验不了），
+  已记入 `docs/TARGET-VERIFY.md`
+
+### QYP3-038 内置引擎服务器音乐进度/续播对齐 `[x]`
+- 诉求：037 的回归防线——webaudio 播放不经 LOAD_FILE，Sessions/Playing 系列、
+  服务器续播位置会整体丢失（用户拍板「一起做，保证不回归」）
+- 内容：
+  - IPC 四件套：`MUSIC.START_SERVER_SESSION`（严格按 serverId 找活跃服务器，
+    `randomUUID` 生成 playSessionId，fire-and-forget reportPlayingStart，回传
+    id）+ `MUSIC.REPORT_SERVER_PROGRESS`（本地续播键 addWatchHistory/
+    saveProgress（mediaType=provider，键=itemId，与解析器续播读取一致）+ 回传
+    服务器；`isStopped` 收尾走 Stopped 端点（Emby 仅 Stopped 落 PositionTicks
+    ——实测教训），是否标记看完由位置比率另算）
+  - `REPORT_PROGRESS` 加 `mediaType?: 'local' | 'webdav'`：WebDAV webaudio 进度
+    落 'webdav' 域且不进 local_media（键与 mpv 引擎一致）
+  - store：`beginServerSession`（webaudio 首播/`syncFromEngine` 换曲发起，
+    本地清空）；`reportProgress` 按来源分流（服务器 → 新通道带 playSessionId，
+    WebDAV → mediaType:'webdav'，本地原样）；`stop()` 在清状态**前**收尾上报；
+    懒解析/首曲解析回填权威 `mediaId`/`mediaSourceId`（Sessions 回传要用）
+- Evidence: 新增 `tests/renderer/music/server-progress.test.ts` 4 例（服务器
+  会话+进度带 playSessionId / 本地不开会话 / WebDAV 落对键 / stop 收尾
+  Stopped）；direct-fallback 的 electronAPI mock 补两条新通道（缺了会同步抛错
+  中断 playQueue——测试抓出来的真坑）；typecheck 双配置 + 全量 927/927 绿
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→

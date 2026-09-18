@@ -30,6 +30,13 @@ export const IPC_CHANNELS = {
     SET_FAVORITE: 'music:set-favorite',
     /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
     REPORT_PROGRESS: 'music:report-progress',
+    /**
+     * renderer 引擎服务器音乐会话（QYP3-038）：起播报告 Sessions/Playing，
+     * 返回 playSessionId（Progress/Stopped 必须携带同一 id，Emby 才认）。
+     */
+    START_SERVER_SESSION: 'music:start-server-session',
+    /** renderer 引擎服务器音乐进度上报（QYP3-038）：Progress/Stopped + 本地续播键。 */
+    REPORT_SERVER_PROGRESS: 'music:report-server-progress',
     GET_LYRICS: 'music:get-lyrics',
     /** 服务器曲目歌词（QYP3-020b）：Jellyfin 端点，Emby 无词。 */
     GET_SERVER_LYRICS: 'music:get-server-lyrics',

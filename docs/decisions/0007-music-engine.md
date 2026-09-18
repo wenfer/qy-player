@@ -45,3 +45,45 @@ UI 不得复制算法）：
 - renderer 引擎：`AnalyserNode`（fftSize ≤ 2048，帧率 ≤ 30fps）。
 - mpv 引擎：播放波形（纯绘制）；"离线频谱缓存"列为 spike（PHASE3-PLAN
   §5），spike 失败不阻塞、不引入新依赖。
+
+## 修订（QYP3-037，2026-09-18）：服务器/WebDAV 音频改走 renderer 引擎
+
+### 背景
+
+初版把「服务器音频 → mpv」当成硬规则，理由有二：流需要认证头，渲染层无法
+注入；跨源媒体经 `createMediaElementSource` 非 CORS-clean 时输出静音。代价是
+服务器/WebDAV 音乐只有降级波形，频谱图永远显示「mpv 0.32 没有实时频谱接口」。
+mpv 0.32 已核实无任何 IPC 音频采样接口，该限制无解——唯一出路是让这些音源
+进 renderer 引擎。
+
+### 决策
+
+新增主进程认证流代理 `qy-stream://audio/<opaqueId>`（`registerStreamProtocol`，
+特权元组 `standard/secure/supportFetchAPI/stream`，**不加** corsEnabled）：
+
+- 路由表 `StreamRouteCache`（可重复读取 + 滑动 TTL + LRU）：渲染层只见
+  不透明 id，真实上游 URL 与 token（X-Emby-Token / Basic）永不跨 IPC——
+  顺带修掉了 `api_key` 拼在直链 query 里进渲染层的泄漏。
+- 代理用裸 `node:http(s)` 字节转发：强制上游 `Accept-Encoding: identity`，
+  下游只透传白名单头（content-type/length/range、accept-ranges 等），
+  Range/206 如实透传支撑 seek；客户端中止即销毁上游 socket。
+- `selectAudioEngine` 收敛：`sourceKind` 不再参与判定（`server-stream`/
+  `webdav-auth` 两个 reason 删除），转码/CUE/兼容性优先/非直解仍 → mpv。
+  服务器条目 codec 缺失时**乐观直解**（用户决策：真频谱优先），解码失败
+  由既有的 direct → mpv 一次性回退兜底。
+- 引擎队列改**按需懒解析**单曲 URL（整队预解析对服务器是 N 次网络请求）；
+  解析结果非 webaudio（NEEDS_MPV）→ 服务器曲目直接兜底 mpv（队列可继续），
+  本地/WebDAV 先跳下一首、跳不动才兜底。
+- 服务器音乐的进度/续播补齐（QYP3-038）：`MUSIC.START_SERVER_SESSION` /
+  `MUSIC.REPORT_SERVER_PROGRESS` 两条 IPC 复用既有 playSessionId 语义
+  （Emby 要求 Playing/Progress/Stopped 同 id）；WebDAV 续播键修正为
+  `<sourceId>:<path>`（原先误读 'local' 域，WebDAV 音乐续播从不生效）。
+
+### 安全与兼容边界
+
+- `qy-file://audio` 语义不变：只服务 local 包含校验内的文件；服务器/WebDAV
+  永不在该协议解析。
+- mpv 引擎路径（转码 HLS、非直解格式、兼容性优先）原样保留；mpv 子进程
+  红线（drain、静默、--hwdec=no）不变。
+- 实机行为（Range 流式经 `stream: true` scheme、服务器 seek、FLAC 自救
+  走代理）列入 `docs/TARGET-VERIFY.md` 待目标机验证。

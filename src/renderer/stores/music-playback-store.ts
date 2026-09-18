@@ -125,6 +125,8 @@ const resolveFailedIds = new Set<number>();
 /** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
 let currentLyrics: string | null = null;
 let lastDeskPushAt = 0;
+/** 服务器音乐会话 id（QYP3-038）：Progress/Stopped 必须携带同一 id。 */
+let serverPlaySessionId: string | null = null;
 
 /** 桌面歌词推送（≤10Hz；窗口未开时 main 侧直接丢弃）。 */
 function pushDeskLyrics(position: number, isPlaying: boolean): void {
@@ -235,7 +237,7 @@ function getEngine(): WebAudioEngine {
       const now = Date.now();
       if (now - lastReportAt >= 10_000) {
         lastReportAt = now;
-        reportProgress(false);
+        reportProgress();
       }
     };
     engineSingleton.onEnded = () => {
@@ -306,15 +308,65 @@ function getEngine(): WebAudioEngine {
   return engineSingleton;
 }
 
-function reportProgress(final: boolean): void {
+/**
+ * 服务器音乐会话（QYP3-038）：起播时报告 Sessions/Playing，记下
+ * playSessionId（Progress/Stopped 必须携带同一 id）。本地曲目清空。
+ */
+function beginServerSession(track: EngineExtTrack | null): void {
+  if (!track || !(track.serverId && track.itemId)) {
+    serverPlaySessionId = null;
+    return;
+  }
+  serverPlaySessionId = null;
+  void window.electronAPI
+    .startMusicServerSession({
+      serverId: track.serverId,
+      provider: track.provider ?? 'jellyfin',
+      itemId: track.itemId,
+      mediaSourceId: track.mediaSourceId,
+      title: track.title,
+    })
+    .then((res) => {
+      const data = (res as { data?: { playSessionId?: string } } | undefined)?.data;
+      serverPlaySessionId = typeof data?.playSessionId === 'string' ? data.playSessionId : null;
+    })
+    .catch(() => {
+      serverPlaySessionId = null;
+    });
+}
+
+/**
+ * 进度上报（QYP3-038 分流）：服务器曲目走 REPORT_SERVER_PROGRESS（回传
+ * Sessions/Playing 系列 + 落本地续播键）；本地/WebDAV 走 REPORT_PROGRESS，
+ * WebDAV（qy-stream URL 且非服务器）带 mediaType:'webdav' 落对续播键。
+ * final = 收尾（跳曲/停止/自然结束）：服务器走 Stopped 端点落位，
+ * 是否标记看完由位置比率在主进程判定。
+ */
+function reportProgress(opts: { final?: boolean } = {}): void {
   const s = useMusicPlaybackStore.getState();
   if (s.engine !== 'webaudio' || !s.current) return;
+  const ext = s.current as EngineExtTrack;
+  if (ext.serverId && ext.itemId) {
+    void window.electronAPI.reportMusicServerProgress({
+      serverId: ext.serverId,
+      provider: ext.provider ?? 'jellyfin',
+      itemId: ext.itemId,
+      mediaSourceId: ext.mediaSourceId,
+      title: ext.title,
+      position: s.position,
+      duration: s.duration,
+      isStopped: opts.final === true ? true : undefined,
+      playSessionId: serverPlaySessionId ?? undefined,
+    });
+    return;
+  }
   void window.electronAPI.reportMusicProgress({
-    mediaId: (s.current as EngineExtTrack).mediaId,
-    title: s.current.title,
+    mediaId: ext.mediaId,
+    title: ext.title,
     position: s.position,
     duration: s.duration,
-    isFinished: final,
+    // FLAC 自救成功后 url 变 blob:，但那只会发生在本地曲目上
+    mediaType: ext.url.startsWith('qy-stream://') ? 'webdav' : 'local',
   });
 }
 
@@ -579,6 +631,13 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           };
         });
         const idx = startIndex;
+        // 首曲的上下文里带权威 mediaId（WebDAV 是 <sourceId>:<path>）与
+        // mediaSourceId（服务器 Sessions 回传要用），回填进队列条目
+        const startCtx = mediaContext as { mediaId?: string; mediaSourceId?: string } | undefined;
+        if (queue[idx]) {
+          if (startCtx?.mediaId) queue[idx].mediaId = startCtx.mediaId;
+          if (startCtx?.mediaSourceId) queue[idx].mediaSourceId = startCtx.mediaSourceId;
+        }
         if (token !== playToken) return;
         const engineInstance = getEngine();
         // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
@@ -607,14 +666,17 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           serverQueue: start.serverId ? tracks : [],
           serverIndex: start.serverId ? startIndex : -1,
         });
+        // QYP3-038：服务器曲目起播先开 Sessions/Playing 会话（本地清空）
+        beginServerSession(queue[idx] ?? null);
         await engineInstance.playQueue(
           queue,
           idx,
           get().repeat,
           get().shuffle,
           async (track) => {
+            const ext = track as EngineExtTrack;
             const r = (await window.electronAPI.resolvePlayback(
-              refOfTrack((track as EngineExtTrack).musicInput)
+              refOfTrack(ext.musicInput)
             )) as typeof resolution;
             if (!r.ok || !r.data) {
               throw new Error(r.error?.message ?? '解析播放地址失败');
@@ -622,6 +684,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
             if (r.data.engine?.engine !== 'webaudio') {
               throw new Error('NEEDS_MPV');
             }
+            // 回填权威键：进度上报与 Sessions 回传都从这里取
+            const ctx = r.data.mediaContext as { mediaId?: string; mediaSourceId?: string } | undefined;
+            if (ctx?.mediaId) ext.mediaId = ctx.mediaId;
+            if (ctx?.mediaSourceId) ext.mediaSourceId = ctx.mediaSourceId;
             return { url: r.data.url, startPosition: r.data.startPosition };
           },
           startPosition
@@ -687,7 +753,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     const s = get();
     if (s.engine === 'webaudio') {
       engineSingleton?.pause();
-      reportProgress(false);
+      reportProgress();
       pushDeskLyrics(get().position, false);
       set({ isPlaying: false });
       void window.electronAPI.setMusicEngineActive(false); // 暂停时媒体键还给视频（若无视频则无操作）
@@ -710,7 +776,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   next: async () => {
     const s = get();
     if (s.engine === 'webaudio') {
-      reportProgress(false);
+      // 离曲收尾：服务器曲目走 Stopped 落位（是否看完由比率判定），
+      // 本地/WebDAV 落最终进度
+      reportProgress({ final: true });
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
       await engineInstance.next(false);
@@ -836,6 +904,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     flacRecoveringQueueId = null;
     directFallbackQueueId = null;
     resolveFailedIds.clear();
+    // 收尾上报要在状态清空**之前**（reportProgress 读的是当前状态）：
+    // 服务器曲目由此走 Stopped 落位（QYP3-038）
+    reportProgress({ final: true });
+    serverPlaySessionId = null;
     engineSingleton?.pause();
     currentLyrics = null;
     pushDeskLyrics(get().position, false);
@@ -874,5 +946,9 @@ function syncFromEngine(engineInstance: WebAudioEngine): void {
     position: 0,
     isPlaying: st.currentTrackId !== null,
   });
-  if (track) loadLyricsFor(sourceOfTrack(track.musicInput));
+  if (track) {
+    loadLyricsFor(sourceOfTrack(track.musicInput));
+    // 换曲重开服务器会话（QYP3-038）；本地曲目顺带清空
+    beginServerSession(track);
+  }
 }
