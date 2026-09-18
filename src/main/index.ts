@@ -35,6 +35,9 @@ function createWindow(): BrowserWindow {
     title: 'QY Player',
     darkTheme: true,
     show: false,
+    // 无边框（QYP3-042）：标题栏与缩放热区由渲染层自绘，见
+    // components/TitleBar；最小化/最大化/关闭走 WINDOW.* IPC
+    frame: false,
     webPreferences: {
       preload: resolve(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -121,6 +124,16 @@ function createWindow(): BrowserWindow {
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
+
+  // 无边框（QYP3-042）：最大化状态由主进程推送，自绘标题栏才能切换
+  // 最大化/还原图标（WM 也可能用快捷键/双击标题栏触发最大化）
+  const pushMaximizeState = (maximized: boolean): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.WINDOW.ON_MAXIMIZE_CHANGE, maximized);
+    }
+  };
+  mainWindow.on('maximize', () => pushMaximizeState(true));
+  mainWindow.on('unmaximize', () => pushMaximizeState(false));
 
   // Closing the window quits the app. The tray icon is only a shortcut for
   // show/hide while running - on DEs without appindicator support the tray

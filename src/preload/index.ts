@@ -325,6 +325,20 @@ const electronAPI = {
   setFullscreen: (fullscreen: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_FULLSCREEN, fullscreen),
 
+  // 无边框窗口（QYP3-042）：标题栏按钮 + 自绘缩放热区
+  minimizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.MINIMIZE),
+  toggleMaximizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.TOGGLE_MAXIMIZE),
+  closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.CLOSE),
+  isWindowMaximized: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.IS_MAXIMIZED),
+  /** 边/角缩写：n/s/e/w/ne/nw/se/sw；dx/dy 为屏幕像素位移增量。 */
+  resizeWindowBy: (edge: string, dx: number, dy: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW.RESIZE_DELTA, { edge, dx, dy }),
+  onWindowMaximizeChange: (cb: (maximized: boolean) => void) => {
+    const handler = (_event: unknown, maximized: boolean) => cb(maximized);
+    ipcRenderer.on(IPC_CHANNELS.WINDOW.ON_MAXIMIZE_CHANGE, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW.ON_MAXIMIZE_CHANGE, handler);
+  },
+
   // Shortcuts
   applyShortcuts: (overrides: Record<string, string>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY, overrides),

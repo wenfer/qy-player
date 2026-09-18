@@ -53,7 +53,7 @@ export default function CompactPlayer() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col gap-2 p-3 bg-background text-foreground overflow-hidden">
+    <div className="h-full w-full flex flex-col gap-2 p-3 bg-background text-foreground overflow-hidden">
       <SpectrumGraph
         engine={playback.engine}
         getSpectrum={playback.getSpectrum}

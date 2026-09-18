@@ -204,6 +204,9 @@ function describeNetworkError(err: unknown): string {
   return e?.message ? `连接失败: ${e.message}` : '无法连接到服务器';
 }
 
+/** 自绘缩放热区允许的边/角缩写（QYP3-042）。 */
+const RESIZE_EDGES = new Set(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);
+
 export interface IpcHandlerDeps {
   /**
    * qy-stream 路由表（QYP3-037）：与主进程入口注册的协议处理器共用同一实例。
@@ -601,6 +604,67 @@ export function registerIpcHandlers(
   // 系统资源压力（QYP3-036）：性能保护据此降帧。取值为主进程最近一次采样，
   // 变化时由主进程主动推送（ON_PRESSURE）。
   ipcMain.handle(IPC_CHANNELS.RESOURCE.GET_PRESSURE, () => ok(getResourcePressure()));
+
+  // ---- 无边框窗口控制（QYP3-042）----------------------------------------
+  // 窗口没有系统边框后，最小化/最大化/关闭与"拖边缘缩放"都得自己来。
+  // 关闭按钮走 win.close()：window-all-closed → app.quit()（关闭主窗口=退出
+  // 应用，托盘不可靠，见 AGENTS.md 硬性约束 5）。
+  ipcMain.handle(IPC_CHANNELS.WINDOW.MINIMIZE, () => {
+    const win = getMainWindow?.();
+    if (win && !win.isDestroyed()) win.minimize();
+    return ok(true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW.TOGGLE_MAXIMIZE, () => {
+    const win = getMainWindow?.();
+    if (win && !win.isDestroyed()) {
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    }
+    return ok(true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW.CLOSE, () => {
+    const win = getMainWindow?.();
+    if (win && !win.isDestroyed()) win.close();
+    return ok(true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW.IS_MAXIMIZED, () => {
+    const win = getMainWindow?.();
+    return ok(Boolean(win && !win.isDestroyed() && win.isMaximized()));
+  });
+
+  /**
+   * 自绘缩放热区（QYP3-042）：渲染层只报"鼠标位移增量"，真实 bounds 由主进程
+   * 从当前窗口几何算——渲染层拿不到窗口在屏幕上的位置，坐标换算会漂。
+   * 最大化状态下忽略（此时不应改尺寸）。
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.WINDOW.RESIZE_DELTA,
+    (_event, args: { edge?: string; dx?: number; dy?: number }) => {
+      const edge = String(args?.edge ?? '');
+      if (!RESIZE_EDGES.has(edge)) return err('VALIDATION_FAILED', '缩放方向不合法');
+      const dx = Number(args?.dx) || 0;
+      const dy = Number(args?.dy) || 0;
+      const win = getMainWindow?.();
+      if (!win || win.isDestroyed() || win.isMaximized()) return ok(false);
+      const [minW, minH] = win.getMinimumSize();
+      const b = win.getBounds();
+      let { x, y, width, height } = b;
+      if (edge.includes('e')) width = b.width + dx;
+      if (edge.includes('s')) height = b.height + dy;
+      if (edge.includes('w')) width = b.width - dx;
+      if (edge.includes('n')) height = b.height - dy;
+      width = Math.max(minW, Math.round(width));
+      height = Math.max(minH, Math.round(height));
+      // 被最小尺寸夹住时，左/上边不能跟着鼠标继续漂（否则窗口会"跑"）
+      if (edge.includes('w')) x = b.x + (b.width - width);
+      if (edge.includes('n')) y = b.y + (b.height - height);
+      win.setBounds({ x, y, width, height });
+      return ok(true);
+    }
+  );
 
   // ------------------------------------------------------------------
   // 歌单（QYP3-015/016/017）

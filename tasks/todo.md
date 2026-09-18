@@ -897,6 +897,30 @@
   音乐用例改走 `makeSource('music')` + driver `purpose:'music'`；四份夹具补
   `purpose:'video'`；typecheck 双配置 + 全量 945/945 绿
 
+### QYP3-042 主窗口改无边框（自绘标题栏 + 缩放热区）`[x]`
+- 诉求（用户）：窗口改成 frameless 模式
+- 决策（用户选择）：顶部独立 36px 细条（左侧应用名、右侧三按钮、整条可拖、
+  双击最大化）；Linux 无边框没有系统边框可拖 → 自绘四边 + 四角热区
+- 内容：
+  - `createWindow` 加 `frame: false`；主进程监听 maximize/unmaximize 并推
+    `WINDOW.ON_MAXIMIZE_CHANGE`（WM 快捷键也能触发最大化，渲染层自记会不同步）
+  - IPC 四件（都在既有 `WINDOW` 组）：MINIMIZE / TOGGLE_MAXIMIZE / CLOSE /
+    IS_MAXIMIZED + RESIZE_DELTA；preload 同名包装；renderer 类型自动跟随
+  - `RESIZE_DELTA` 只吃「边/角缩写 + 鼠标位移增量」：真实 bounds 由主进程从
+    `getBounds()` 算（渲染层拿不到窗口屏幕坐标），夹在 `getMinimumSize()`
+    之上；被下限夹住时左/上边不跟着漂（否则窗口会"跑"）；最大化时忽略
+  - 渲染层 `components/TitleBar`：`-webkit-app-region: drag` + 按钮 `no-drag`，
+    紧凑变体（28px，带「还原窗口」）给精简浮窗用；`WindowResizeHandles` 8 个
+    透明热区，容器从标题栏下沿开始（右上角热区不能压住关闭按钮）
+  - 布局：`App.tsx` 改 `h-screen flex flex-col`，内容区 `overflow-y-auto`；
+    Navigation `top-9`、Toast `top-12` 让开标题栏；CompactPlayer 根
+    `h-screen w-screen` → `h-full w-full`（外层接管高度）
+- Evidence: 新增 `tests/renderer/titlebar.test.tsx` 6 例（三按钮走新通道 /
+  最大化图标随推送切换 / 紧凑变体无最大化按钮 / 热区按边报增量 / pointerup
+  后停报 / 八向齐全）；typecheck 双配置 + 全量 951/951 绿，三构建通过
+- 待目标机验证：拖动/双击最大化/八向缩放的手感与最小尺寸夹取、GNOME 与
+  Deepin 下观感、精简浮窗可拖动还原——已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

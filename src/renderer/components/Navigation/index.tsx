@@ -80,7 +80,7 @@ export default function Navigation() {
 
   return (
     <nav
-      className="fixed left-0 top-0 bottom-0 w-60 bg-card border-r border-border flex flex-col z-40"
+      className="fixed left-0 top-9 bottom-0 w-60 bg-card border-r border-border flex flex-col z-40"
       aria-label="主导航"
     >
       {/* Logo */}

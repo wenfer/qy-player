@@ -116,6 +116,15 @@ export const IPC_CHANNELS = {
     /** 精简模式浮窗（QYP3-035）：主窗口原地缩小/复原。 */
     SET_COMPACT_MODE: 'window:set-compact-mode',
     SET_FULLSCREEN: 'window:set-fullscreen',
+    /** 无边框窗口（QYP3-042）：自绘标题栏的三个按钮。 */
+    MINIMIZE: 'window:minimize',
+    TOGGLE_MAXIMIZE: 'window:toggle-maximize',
+    CLOSE: 'window:close',
+    IS_MAXIMIZED: 'window:is-maximized',
+    /** 自绘缩放热区（QYP3-042）：按边/角 + 位移增量改 bounds。 */
+    RESIZE_DELTA: 'window:resize-delta',
+    /** main → renderer：最大化状态变化（按钮图标随之切换）。 */
+    ON_MAXIMIZE_CHANGE: 'window:on-maximize-change',
   },
   /** 系统资源压力（QYP3-036）：主进程采样 loadavg，推送/查询压力档。 */
   RESOURCE: {

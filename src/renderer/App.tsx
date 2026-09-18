@@ -15,6 +15,7 @@ import History from './pages/History';
 import Shortcuts from './pages/Shortcuts';
 import DeskLyrics from './pages/DeskLyrics';
 import Navigation from './components/Navigation';
+import TitleBar, { WindowResizeHandles } from './components/TitleBar';
 import PlayerControls from './components/PlayerControls';
 import MusicMiniBar from './components/MusicMiniBar';
 import CompactPlayer from './components/CompactPlayer';
@@ -122,20 +123,26 @@ function Shell() {
   const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
   if (isDeskLyrics) return <DeskLyrics />;
 
-  // 精简模式（QYP3-035）：整个窗口只渲染浮窗界面
+  // 精简模式（QYP3-035）：整个窗口只渲染浮窗界面（无边框后仍需一条自绘
+  // 标题栏来拖动/还原，QYP3-042）
   if (compact) {
     return (
-      <>
-        <CompactPlayer />
+      <div className="h-screen flex flex-col bg-background text-foreground">
+        <TitleBar compact />
+        <div className="flex-1 min-h-0">
+          <CompactPlayer />
+        </div>
         <ToastContainer />
-      </>
+      </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex">
-      <Navigation />
-      <main className="flex-1 ml-60 min-h-screen">
+    <div className="h-screen bg-background text-foreground flex flex-col">
+      <TitleBar />
+      <div className="flex-1 min-h-0 flex">
+        <Navigation />
+        <main className="flex-1 ml-60 min-h-0 overflow-y-auto">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/detail/:type/:serverId/:id" element={<Detail />} />
@@ -144,7 +151,7 @@ function Shell() {
             <Route path="/browse/:sourceId/item/:itemId" element={<LibraryBrowse />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/media-sources" element={<MediaSources />} />
-            {/* 音乐模式媒体库（QYP3-040）：只显示非「仅视频」来源 */}
+            {/* 音乐模式媒体库（QYP3-040/041）：只显示音乐来源 */}
             <Route path="/music-sources" element={<MediaSourcesPage mode="music" />} />
             <Route path="/scrape-jobs" element={<Libraries />} />
             <Route path="/search" element={<Search />} />
@@ -156,12 +163,15 @@ function Shell() {
             <Route path="/desk-lyrics" element={<DeskLyrics />} />
           </Routes>
         </main>
-        <PlayerControls />
-        <MusicMiniBar />
-        <ToastContainer />
-        <AutoNextHost />
-        <SleepTimerHost />
       </div>
+      <PlayerControls />
+      <MusicMiniBar />
+      <ToastContainer />
+      <AutoNextHost />
+      <SleepTimerHost />
+      {/* 无边框窗口的缩放热区（QYP3-042） */}
+      <WindowResizeHandles />
+    </div>
   );
 }
 
