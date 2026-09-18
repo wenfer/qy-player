@@ -112,10 +112,11 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
     }
   }, [addToast]);
 
-  // QYP3-040：模式过滤——视频模式不显示仅音乐来源，反之亦然。
+  // QYP3-041：来源按域严格分离——一个来源只属于一个模式，不做交叉显示。
+  const ownPurpose: SourcePurpose = mode === 'video' ? 'video' : 'music';
   const visibleSources = useMemo(
-    () => (mode === 'video' ? sources.filter((s) => s.purpose !== 'music') : sources.filter((s) => s.purpose !== 'video')),
-    [mode, sources]
+    () => sources.filter((s) => s.purpose === ownPurpose),
+    [ownPurpose, sources]
   );
 
   useEffect(() => {
@@ -195,24 +196,6 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
       } finally {
         setSavingSource(false);
       }
-    },
-    [addToast, loadSources]
-  );
-
-  // 用途修改（QYP3-039）：主进程在收窄用途时清理超出范围的索引
-  const handleUpdatePurpose = useCallback(
-    async (source: SourceListEntry, purpose: SourcePurpose) => {
-      if (source.purpose === purpose) return;
-      const res = (await window.electronAPI.updateSourcePurpose(source.id, purpose)) as {
-        ok: boolean;
-        error?: { message: string };
-      };
-      if (res.ok) {
-        addToast('用途已更新，超出范围的索引已清理', 'success');
-      } else {
-        addToast(res.error?.message ?? '用途更新失败', 'error');
-      }
-      await loadSources();
     },
     [addToast, loadSources]
   );
@@ -409,17 +392,21 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           <Library size={22} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">媒体库</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {mode === 'video' ? '媒体库' : '音乐媒体库'}
+          </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {mode === 'video'
-              ? '管理媒体服务器（Jellyfin / Emby）与媒体来源（本地目录 / WebDAV）；浏览与播放请到「本地」或「首页」。'
-              : '管理音乐服务器与音乐来源（本地目录 / WebDAV）；浏览与播放请到「音乐」。'}
+              ? '管理媒体服务器（Jellyfin / Emby）与影视来源（本地目录 / WebDAV）；浏览与播放请到「本地」或「首页」。'
+              : '管理音乐来源（本地目录 / WebDAV）；浏览与播放请到「音乐」。音乐与影视不共用一个目录——影视来源请到影视模式的「媒体库」添加。'}
           </p>
         </div>
       </header>
 
-      {/* Media servers (Jellyfin / Emby) */}
-      <section className="mb-12" aria-label="媒体服务器">
+      {/* Media servers (Jellyfin / Emby) — 只在影视模式管理（QYP3-041）：
+          同一个服务器同时提供影视与音乐，配置入口保留一份即可。 */}
+      {mode === 'video' ? (
+        <section className="mb-12" aria-label="媒体服务器">
         <SectionHeader
           icon={<ServerIcon size={17} />}
           title="媒体服务器"
@@ -523,13 +510,18 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           )}
         </div>
       </section>
+      ) : (
+        <p className="mb-10 -mt-2 text-xs text-muted-foreground">
+          媒体服务器（Jellyfin / Emby）在影视模式的「媒体库」里管理，这里只管音乐来源。
+        </p>
+      )}
 
       {/* Media sources (local + WebDAV) */}
       <section className="mb-12" aria-label="媒体来源">
         <SectionHeader
           icon={<FolderOpen size={17} />}
-          title="媒体来源"
-          count={sources.length}
+          title={mode === 'video' ? '媒体来源' : '音乐来源'}
+          count={visibleSources.length}
           actionLabel="添加来源"
           actionOpen={showSourceForm}
           onAction={() => setShowSourceForm((v) => !v)}
@@ -538,7 +530,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
         {showSourceForm && (
           <SourceForm
             key={mode}
-            defaultPurpose={mode === 'video' ? 'video' : 'music'}
+            purpose={ownPurpose}
             saving={savingSource}
             testing={testingSource}
             formError={sourceFormError}
@@ -559,12 +551,15 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           liveProgress={liveProgress}
           onScanToggle={handleScanToggle}
           onRemove={handleSourceRemove}
-          onUpdatePurpose={handleUpdatePurpose}
         />
         {visibleSources.length === 0 && !showSourceForm && (
           <EmptyState
             icon={<Globe size={20} />}
-            text="暂无来源。点击上方「添加来源」，可选择本地目录，或填写 WebDAV 服务器地址（支持 Nextcloud / Alist 等）。"
+            text={
+              mode === 'video'
+                ? '暂无来源。点击上方「添加来源」，可选择本地目录，或填写 WebDAV 服务器地址（支持 Nextcloud / Alist 等）。'
+                : '暂无音乐来源。点击上方「添加来源」，把只放音乐的目录或 WebDAV 目录加进来（不要与影视混放）。'
+            }
           />
         )}
       </section>

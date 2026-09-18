@@ -1,6 +1,6 @@
 import { Loader2, RefreshCw, Trash2, X, Lock, Unlock, Globe, AlertTriangle, HeartPulse, HardDrive } from 'lucide-react';
 import { urlLooksPlaintextHttp } from './WebDavFields';
-import type { SourceListEntry, SourcePurpose } from '../../../shared/types';
+import type { SourceListEntry } from '../../../shared/types';
 
 export interface SourceListProps {
   sources: SourceListEntry[];
@@ -9,15 +9,7 @@ export interface SourceListProps {
   liveProgress: Record<number, { state: string; processed?: number; total?: number; message?: string }>;
   onScanToggle: (source: SourceListEntry) => void;
   onRemove: (source: SourceListEntry) => void;
-  /** 用途修改（QYP3-039）；缺省不显示用途控件（单用途页面里无需改）。 */
-  onUpdatePurpose?: (source: SourceListEntry, purpose: SourcePurpose) => void;
 }
-
-const PURPOSE_LABEL: Record<SourcePurpose, string> = {
-  all: '两者',
-  music: '仅音乐',
-  video: '仅视频',
-};
 
 const NON_TERMINAL = new Set(['queued', 'discovering', 'indexing', 'enriching']);
 
@@ -44,7 +36,7 @@ function Badge({ tone, children }: { tone: 'neutral' | 'warn' | 'ok'; children: 
 }
 
 /** Source rows for 本地 + WebDAV sources (plan §7/§8, QYP2-008/013). */
-export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove, onUpdatePurpose }: SourceListProps) {
+export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove }: SourceListProps) {
   return (
     <div className="space-y-2">
       {sources.map((source) => {
@@ -77,21 +69,6 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
                   {isWebdav ? <Globe size={10} /> : null}
                   {isWebdav ? 'WebDAV' : '本地'}
                 </Badge>
-                {onUpdatePurpose ? (
-                  <select
-                    value={source.purpose}
-                    onChange={(e) => onUpdatePurpose(source, e.target.value as SourcePurpose)}
-                    aria-label={`用途 ${source.name}`}
-                    title="收窄用途会清理超出范围的索引"
-                    className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-secondary text-secondary-foreground border border-border focus-ring"
-                  >
-                    <option value="all">两者</option>
-                    <option value="music">仅音乐</option>
-                    <option value="video">仅视频</option>
-                  </select>
-                ) : (
-                  <Badge tone="neutral">{PURPOSE_LABEL[source.purpose]}</Badge>
-                )}
                 {source.readOnly && <span className="text-[10px] text-muted-foreground">只读</span>}
                 {isWebdav && urlLooksPlaintextHttp(source.root) && (
                   <Badge tone="warn">

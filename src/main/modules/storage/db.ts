@@ -350,6 +350,14 @@ const MIGRATIONS = [
   `
   ALTER TABLE library_sources ADD COLUMN purpose TEXT NOT NULL DEFAULT 'all';
   `,
+
+  // 010（QYP3-041）：来源不再支持"混放"——一个来源只能属于音乐域或视频域。
+  // 存量来源一律当作视频来源（历史媒体库本来就是影视库）；音乐目录需要在
+  // 音乐模式的媒体库里重新添加一次。已扫出的音乐索引不删，只是不再由这些
+  // 来源管理/重扫。
+  `
+  UPDATE library_sources SET purpose = 'video' WHERE purpose <> 'music';
+  `,
 ];
 
 

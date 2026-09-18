@@ -10,8 +10,8 @@ import { createLocalScanDriver, walkSourceTree } from '../../../src/main/modules
 import type Database from 'better-sqlite3';
 
 /**
- * 来源用途的扫描过滤（QYP3-039）：'music' 只索引音频、'video' 只索引视频，
- * 'all'（缺省）与旧行为一致；'video' 的收尾清理必须跳过音轨删除
+ * 来源用途的扫描过滤（QYP3-039/041）：'music' 只索引音频、'video' 只索引视频，
+ * 不再有"混放"模式——缺省按视频处理。'video' 的收尾清理必须跳过音轨删除
  * （批次里没有音频路径，跑了会把存量音轨全删）。
  */
 
@@ -90,13 +90,14 @@ const MIXED_TREE = {
   '音乐/串烧.cue': { size: 30, mtime: 4 },
 };
 
-describe('scan filter by source purpose (QYP3-039)', () => {
-  it("purpose 'all' (default) indexes both domains like before", async () => {
-    const sourceId = repo.createSource({ kind: 'local', name: '混合', root: '/fake-root' });
+describe('scan filter by source purpose (QYP3-039/041)', () => {
+  it('defaults to video: indexes video/nfo, never audio', async () => {
+    const sourceId = repo.createSource({ kind: 'local', name: '未标记', root: '/fake-root' });
+    expect(repo.getSource(sourceId)?.purpose).toBe('video');
     const driver = createLocalScanDriver({ repo, sourceId });
     await runScan(scanningAdapterOf(makeTreeAdapter(MIXED_TREE)), driver, sourceId);
-    expect(repo.listMusicTracks(sourceId).length).toBe(1);
     expect(repo.listItemsBySource(sourceId).length).toBeGreaterThan(0);
+    expect(repo.listMusicTracks(sourceId)).toHaveLength(0);
   });
 
   it("purpose 'music' skips video and nfo, still indexes audio", async () => {

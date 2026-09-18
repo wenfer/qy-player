@@ -61,9 +61,8 @@ import type {
   ScanProgressEvent,
   SourceCapabilities,
   SourceListEntry,
-  SourcePurpose,
 } from '../../shared/types';
-import { isMediaRef, isSourcePurpose } from '../../shared/types';
+import { isMediaRef } from '../../shared/types';
 import {
   bindServerById,
   injectAttachedSubtitles,
@@ -2118,38 +2117,6 @@ function registerCatalogHandlers(
     }
   });
 
-  // 用途标记修改（QYP3-039）：收窄用途时清理超出范围的索引——
-  // →'music' 清视频域（catalog_items 级联带走文件/元数据/用户状态）、
-  // →'video' 清音乐域（music_tracks 级联带走 CUE）；→'all' 不清。
-  // 收窄后再扫描会按用途过滤，清域与过滤语义一致、幂等无害。
-  ipcMain.handle(
-    IPC_CHANNELS.CATALOG.SOURCE_UPDATE,
-    (_event, args: { sourceId?: number; purpose?: unknown }): ActionResult<true> => {
-      const sourceId = Number(args?.sourceId);
-      if (!Number.isInteger(sourceId) || sourceId <= 0) {
-        return err('VALIDATION_FAILED', '来源 ID 不合法');
-      }
-      if (!isSourcePurpose(args?.purpose)) {
-        return err('VALIDATION_FAILED', '用途取值不合法');
-      }
-      const purpose = args.purpose as SourcePurpose;
-      const source = repo.getSource(sourceId);
-      if (!source) return err('NOT_FOUND', '来源不存在');
-      const previous = source.purpose;
-      try {
-        repo.updateSource(sourceId, { purpose });
-        if (purpose === 'music' && previous !== 'music') {
-          repo.purgeVideoContentBySource(sourceId);
-        } else if (purpose === 'video' && previous !== 'video') {
-          repo.purgeMusicTracksBySource(sourceId);
-        }
-        return ok(true);
-      } catch (e) {
-        return err('UNAVAILABLE', e instanceof Error ? e.message : '用途更新失败');
-      }
-    }
-  );
-
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
     if (!Number.isInteger(sourceId) || sourceId <= 0) {
       return err('VALIDATION_FAILED', '来源 ID 不合法');
@@ -2192,8 +2159,8 @@ function registerCatalogHandlers(
       ...adapter,
       list: (path: string, signal: AbortSignal) => walkSourceTree(adapter, path, signal),
     };
-    // 用途过滤（QYP3-039）：来源标记 'music'/'video' 时扫描只索引对应域
-    const purpose = repo.getSource(sourceId)?.purpose ?? 'all';
+    // 用途过滤（QYP3-039/041）：来源按域扫描，音乐源只索引音频，视频源只索引视频
+    const purpose = repo.getSource(sourceId)?.purpose ?? 'video';
     const driver =
       adapter.kind === 'webdav'
         ? createWebDavScanDriver({ repo, sourceId, adapter, purpose })

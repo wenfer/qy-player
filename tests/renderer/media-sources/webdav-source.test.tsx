@@ -62,6 +62,7 @@ describe('WebDAV source form', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
         onPick={vi.fn()}
         onTest={testSource}
         onSave={onSave}
@@ -98,6 +99,7 @@ describe('WebDAV source form', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
         onPick={vi.fn()}
         onTest={testSource}
         onSave={vi.fn(async () => true)}
@@ -119,6 +121,7 @@ describe('WebDAV source form', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
         onPick={vi.fn()}
         onTest={onTest}
         onSave={vi.fn(async () => true)}
@@ -138,6 +141,7 @@ describe('WebDAV source form', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
         onPick={vi.fn()}
         onTest={vi.fn(async () => ({
           ok: true,
@@ -162,6 +166,7 @@ describe('WebDAV source form', () => {
         testing={false}
         formError={null}
         persistentSecrets={false}
+        purpose="video"
         onPick={vi.fn()}
         onTest={testSource}
         onSave={vi.fn(async () => true)}
@@ -184,6 +189,7 @@ describe('MediaSources page: WebDAV source rows', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true },
         hasCredential: true,
+        purpose: 'video',
       },
     ]);
     render(

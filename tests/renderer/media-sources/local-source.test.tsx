@@ -66,6 +66,7 @@ describe('SourceForm (add local source)', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
 
         onPick={pickDirectory}
         onTest={testSource}
@@ -81,7 +82,7 @@ describe('SourceForm (add local source)', () => {
     fireEvent.click(screen.getByRole('button', { name: /添加来源/ }));
 
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith({ kind: 'local', root: '/data/movies', name: '电影收藏', purpose: 'all' })
+      expect(onSave).toHaveBeenCalledWith({ kind: 'local', root: '/data/movies', name: '电影收藏', purpose: 'video' })
     );
     // 1280x800 no-horizontal-scroll policy: action rows wrap instead.
     expect(document.querySelector('[data-testid="source-form"] .flex-wrap')).toBeTruthy();
@@ -95,6 +96,7 @@ describe('SourceForm (add local source)', () => {
         testing={false}
         formError={null}
         persistentSecrets={true}
+        purpose="video"
 
         onPick={pickDirectory}
         onTest={testSource}
@@ -120,6 +122,7 @@ describe('MediaSources page sources section', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
         hasCredential: false,
+        purpose: 'video',
         lastRun: { status: 'completed', processed: 12, total: 12, at: Date.now() },
       },
     ]);
@@ -142,6 +145,7 @@ describe('MediaSources page sources section', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
         hasCredential: false,
+        purpose: 'video',
       },
     ]);
     render(<MemoryRouter><MediaSources /></MemoryRouter>);
@@ -167,6 +171,7 @@ describe('MediaSources page sources section', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
         hasCredential: false,
+        purpose: 'video',
       },
     ]);
     render(<MemoryRouter><MediaSources /></MemoryRouter>);
@@ -186,6 +191,7 @@ describe('MediaSources page sources section', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
         hasCredential: false,
+        purpose: 'video',
       },
     ]);
     render(<MemoryRouter><MediaSources /></MemoryRouter>);

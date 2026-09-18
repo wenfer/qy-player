@@ -6,9 +6,9 @@ import Navigation from '../../../src/renderer/components/Navigation';
 import { useAppModeStore } from '../../../src/renderer/stores/app-mode-store';
 
 /**
- * 顶层模式切换（QYP3-040）：默认视频模式；侧栏分段切换 影视/音乐，
- * 切换时导航到该模式默认页，导航项随模式整组更换。
- * 导航项断言用 role=button（模式切换按钮是 role=radio，不会混淆）。
+ * 顶层模式切换（QYP3-040/041）：默认视频模式；音乐是可选功能，入口是侧栏
+ * 底部一个低调按钮（不是和影视并列的大分段控件），切换时导航到该模式默认页，
+ * 导航项随模式整组更换。
  */
 
 vi.stubGlobal('electronAPI', {
@@ -37,34 +37,34 @@ beforeEach(() => {
 describe('app mode navigation (QYP3-040)', () => {
   it('defaults to video mode with video-only nav items', () => {
     renderShell();
-    expect(screen.getByRole('radio', { name: '影视', checked: true })).toBeTruthy();
+    // 音乐入口是底部一个小按钮，不是导航项；音乐域导航此时不可见
+    expect(screen.getByRole('button', { name: '音乐模式' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '首页' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '本地' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '历史' })).toBeTruthy();
-    // 音乐域入口在视频模式不可见（模式切换按钮是 radio，不算导航项）
-    expect(screen.queryByRole('button', { name: '音乐' })).toBeNull();
     expect(screen.queryByRole('button', { name: '歌单' })).toBeNull();
+    // 顶部不再有并列的模式分段控件
+    expect(screen.queryByRole('radiogroup', { name: '模式切换' })).toBeNull();
   });
 
   it('switching to music mode swaps the nav group and navigates to /music', () => {
     renderShell();
-    fireEvent.click(screen.getByRole('radio', { name: '音乐' }));
-    expect(screen.getByRole('radio', { name: '音乐', checked: true })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '音乐' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '音乐模式' }));
     expect(screen.getByRole('button', { name: '歌单' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '媒体库' })).toBeTruthy();
     // 视频域入口不可见
     expect(screen.queryByRole('button', { name: '首页' })).toBeNull();
     expect(screen.queryByRole('button', { name: '本地' })).toBeNull();
-    // 落到音乐模式默认页
+    // 落到音乐模式默认页，入口变成返回
     expect(screen.getByTestId('location').textContent).toBe('/music');
+    expect(screen.getByRole('button', { name: '返回影视' })).toBeTruthy();
   });
 
   it('switching back to video navigates to the video home', () => {
     useAppModeStore.setState({ mode: 'music' });
     renderShell();
     expect(screen.getByRole('button', { name: '歌单' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: '影视' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回影视' }));
     expect(screen.getByTestId('location').textContent).toBe('/');
     expect(screen.getByRole('button', { name: '首页' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '歌单' })).toBeNull();

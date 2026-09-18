@@ -33,11 +33,6 @@ const MUSIC_NAV: NavItem[] = [
 
 const NAV_BY_MODE: Record<AppMode, NavItem[]> = { video: VIDEO_NAV, music: MUSIC_NAV };
 
-const MODE_TABS: Array<{ value: AppMode; label: string; icon: typeof Music }> = [
-  { value: 'video', label: '影视', icon: Clapperboard },
-  { value: 'music', label: '音乐', icon: Music },
-];
-
 /** 窗口标题随页面内容变化（GNOME 任务栏可辨识当前所在页面）。 */
 function pageTitleFor(pathname: string): string {
   if (pathname.startsWith('/detail/')) return '详情';
@@ -100,32 +95,6 @@ export default function Navigation() {
           </div>
           <span className="font-semibold text-lg tracking-tight">QY Player</span>
         </button>
-        {/* 模式切换（QYP3-040）：视频模式与音乐模式完全隔离 */}
-        <div
-          className="mt-3 flex items-center gap-1 p-1 bg-secondary rounded-lg"
-          role="radiogroup"
-          aria-label="模式切换"
-        >
-          {MODE_TABS.map((tab) => {
-            const TabIcon = tab.icon;
-            const active = mode === tab.value;
-            return (
-              <button
-                key={tab.value}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                onClick={() => handleModeChange(tab.value)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-sm rounded-md transition-all focus-ring ${
-                  active ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <TabIcon size={14} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Nav Items（按当前模式切换，QYP3-040） */}
@@ -149,6 +118,19 @@ export default function Navigation() {
             </button>
           );
         })}
+      </div>
+
+      {/* 模式入口（QYP3-041）：影视是主场景，音乐属于可选功能——入口放侧栏
+          底部、小号弱化，不跟主导航抢视觉重心 */}
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          onClick={() => handleModeChange(mode === 'video' ? 'music' : 'video')}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring"
+        >
+          {mode === 'video' ? <Music size={13} /> : <Clapperboard size={13} />}
+          {mode === 'video' ? '音乐模式' : '返回影视'}
+        </button>
       </div>
 
       {/* Footer */}

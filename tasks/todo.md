@@ -867,6 +867,36 @@
   （两模式页签集 / 快捷键共用 / 切模式页签复位）；typecheck 双配置 + 全量
   945/945 绿
 
+### QYP3-041 来源按域彻底分离（去掉"混放"）+ 音乐入口降权 `[x]`
+- 诉求（用户）：① 媒体库没真分开——实际不支持音乐与视频放同一目录，039 的
+  'all' 档位是多余的；② 音乐模式入口太显眼（绝大多数人用影视，音乐是可选
+  功能）；③ 扫描要按媒体库类型决定，视频扫描的 NFO 归类逻辑跟音乐混在一起
+  效果很差
+- 决策（用户选择）：入口放**侧栏底部小号按钮**；存量 'all' 来源**全部归为
+  视频来源**；媒体服务器**只在影视模式**的媒体库页管理
+- 内容：
+  - `purpose` 收成两值 `'music' | 'video'`（`isSourcePurpose` 不再接受 'all'）；
+    migration 010（只追加）`UPDATE library_sources SET purpose='video'
+    WHERE purpose<>'music'`；`createSource` 缺省 'video'
+  - 因不再允许就地改用途而成为死代码的，一并删除：`SOURCE_UPDATE` 通道与
+    处理器、preload `updateSourcePurpose`、`updateSource` 的 purpose 分支、
+    `purgeVideoContentBySource` / `purgeMusicTracksBySource`
+  - 扫描：driver 缺省从 'all' 变 'video'（音乐/CUE 与 NFO 的过滤逻辑不变）
+  - UI：`SourceForm` 去掉用途单选（用途由所在模式决定，改必传 prop）、
+    `SourceList` 去掉用途下拉/badge、`MediaSourcesPage` 严格按 `purpose ===`
+    过滤且音乐模式不渲染服务器区块（给一句"服务器在影视模式管理"的提示）、
+    `Local` 页只列 `purpose === 'video'`
+  - 导航：顶部大分段控件 → 侧栏底部小号弱化按钮（「音乐模式」/「返回影视」），
+    `MODE_TABS` 常量随之删除
+- Evidence: `tests/main/storage/source-purpose.test.ts` 重写（版本 10 /
+  缺省 video / 白名单拒 'all'）；`catalog-migrations.test.ts` 版本断言 9→10 +
+  新增 migration 010 用例（造停在 009 的库：all→video、music 不动）；
+  `purpose-filter.test.ts` 首例改为"缺省按视频扫"；`purpose.test.tsx` 重写为
+  域分离 4 例（两页互不显示 / 音乐模式无服务器区块 / 影视模式有）+
+  SourceForm 2 例（无用途选择器 / payload 带页面给的用途）；local-scan 的
+  音乐用例改走 `makeSource('music')` + driver `purpose:'music'`；四份夹具补
+  `purpose:'video'`；typecheck 双配置 + 全量 945/945 绿
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

@@ -197,7 +197,7 @@ export function createCatalogRepository(db: Database.Database) {
           input.secretRef ?? null,
           input.readOnly === false ? 0 : 1, // sources default to read-only (plan §14.2)
           input.options ? JSON.stringify(input.options) : null,
-          input.purpose ?? 'all'
+          input.purpose ?? 'video'
         );
       return Number(result.lastInsertRowid);
     },
@@ -220,7 +220,6 @@ export function createCatalogRepository(db: Database.Database) {
         name?: string;
         readOnly?: boolean;
         options?: Record<string, string | number | boolean> | null;
-        purpose?: SourcePurpose;
       }
     ): void {
       // Dynamic SET from constants only; values stay parameterized.
@@ -238,10 +237,6 @@ export function createCatalogRepository(db: Database.Database) {
         sets.push('options = ?');
         values.push(patch.options === null ? null : JSON.stringify(patch.options));
       }
-      if (patch.purpose !== undefined) {
-        sets.push('purpose = ?');
-        values.push(patch.purpose);
-      }
       if (sets.length === 0) return;
       sets.push('updated_at = unixepoch()');
       db
@@ -258,16 +253,6 @@ export function createCatalogRepository(db: Database.Database) {
 
     deleteSource(id: number): void {
       db.prepare('DELETE FROM library_sources WHERE id = ?').run(id);
-    },
-
-    /** 用途收窄为 'music' 时清掉视频域索引（QYP3-039；外键级联带走文件/元数据）。 */
-    purgeVideoContentBySource(sourceId: number): void {
-      db.prepare('DELETE FROM catalog_items WHERE source_id = ?').run(sourceId);
-    },
-
-    /** 用途收窄为 'video' 时清掉音乐域索引（QYP3-039；cue 条目级联删除）。 */
-    purgeMusicTracksBySource(sourceId: number): void {
-      db.prepare('DELETE FROM music_tracks WHERE source_id = ?').run(sourceId);
     },
 
     // -- Items --------------------------------------------------------------

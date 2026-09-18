@@ -48,6 +48,7 @@ describe('Local page: 本地媒体库 section', () => {
         readOnly: true,
         capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
         hasCredential: false,
+        purpose: 'video',
         lastRun: { status: 'completed', processed: 42, total: 42, at: Date.now() },
       },
     ]);

@@ -100,8 +100,8 @@ export function createWebDavScanDriver(deps: {
   sourceId: number;
   /** The stored webdav adapter (credentials resolved at construction). */
   adapter: SourceAdapter;
-  /** 来源用途标记（QYP3-039），透传给底层 driver。 */
-  purpose?: 'all' | 'music' | 'video';
+  /** 来源用途标记（QYP3-039/041），透传给底层 driver。 */
+  purpose?: 'music' | 'video';
 }): LocalScanDriver {
   if (deps.adapter.kind !== 'webdav') {
     throw new Error('createWebDavScanDriver 需要 WebDAV adapter');

@@ -24,19 +24,16 @@ interface SourceFormProps {
   formError: string | null;
   /** True when secrets survive restarts (drives the storage hint). */
   persistentSecrets: boolean;
-  /** 用途预选（QYP3-039）：视频模式的媒体库预选 'video'，音乐模式 'music'。 */
-  defaultPurpose?: SourcePurpose;
+  /**
+   * 用途由所在模式的媒体库页决定（QYP3-041）：影视模式建视频来源、
+   * 音乐模式建音乐来源。不支持音乐与视频混放在同一目录，故不再给用户选。
+   */
+  purpose: SourcePurpose;
   onPick: () => Promise<string | null>;
   onTest: (payload: SourceFormPayload) => Promise<{ ok: boolean; capabilities?: SourceFormCaps; error?: string } | null>;
   onSave: (payload: SourceFormPayload) => Promise<boolean>;
   onCancel: () => void;
 }
-
-const PURPOSE_OPTIONS: Array<{ value: SourcePurpose; label: string }> = [
-  { value: 'all', label: '两者' },
-  { value: 'music', label: '仅音乐' },
-  { value: 'video', label: '仅视频' },
-];
 
 export interface SourceFormCaps {
   canSeek: boolean;
@@ -54,14 +51,13 @@ export default function SourceForm({
   testing,
   formError,
   persistentSecrets,
-  defaultPurpose = 'all',
+  purpose,
   onPick,
   onTest,
   onSave,
   onCancel,
 }: SourceFormProps) {
   const [mode, setMode] = useState<SourceFormMode>('local');
-  const [purpose, setPurpose] = useState<SourcePurpose>(defaultPurpose);
   const [root, setRoot] = useState('');
   const [name, setName] = useState('');
   const [webdav, setWebdav] = useState<WebDavFieldValues>({
@@ -164,33 +160,10 @@ export default function SourceForm({
         </button>
       </div>
 
-      {/* 用途（QYP3-039）：决定该来源被哪个模式的媒体库管理与扫描范围 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">用途</span>
-        <div className="flex items-center gap-1 p-1 bg-secondary rounded-lg" role="radiogroup" aria-label="来源用途">
-          {PURPOSE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="radio"
-              aria-checked={purpose === opt.value}
-              onClick={() => setPurpose(opt.value)}
-              className={`px-2.5 py-1 text-xs rounded-md transition-all focus-ring ${
-                purpose === opt.value
-                  ? 'bg-background text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        {purpose !== 'all' && (
-          <span className="text-[11px] text-muted-foreground">
-            {purpose === 'music' ? '扫描时只索引音频文件' : '扫描时只索引视频文件'}
-          </span>
-        )}
-      </div>
+      {/* 用途（QYP3-041）：由所在模式决定，音乐源只索引音频，视频源只索引视频 */}
+      <p className="text-[11px] text-muted-foreground">
+        {purpose === 'music' ? '作为音乐来源：扫描时只索引音频与分轨文件' : '作为影视来源：扫描时按视频与 NFO 归类，不索引音频'}
+      </p>
 
       {mode === 'local' ? (
         <>

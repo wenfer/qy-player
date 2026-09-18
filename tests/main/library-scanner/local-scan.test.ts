@@ -233,8 +233,8 @@ async function runScan(adapter: SourceAdapter, driver: ScanDriver, sourceId: num
   return controller.start();
 }
 
-function makeSource(): number {
-  return repo.createSource({ kind: 'local', name: '测试库', root: '/fake-root' });
+function makeSource(purpose: 'music' | 'video' = 'video'): number {
+  return repo.createSource({ kind: 'local', name: '测试库', root: '/fake-root', purpose });
 }
 
 describe('classifier audio (QYP3-002)', () => {
@@ -268,7 +268,7 @@ describe('classifier audio (QYP3-002)', () => {
 
 describe('music ingest (QYP3-003)', () => {
   it('ingests audio with tags into music_tracks (local driver, readAudio hook)', async () => {
-    const sourceId = makeSource();
+    const sourceId = makeSource('music');
     const adapter = makeTreeAdapter({
       '周杰伦/叶惠美/03 - 晴天.mp3': { size: 4000, mtime: 1 },
       '周杰伦/叶惠美/04 - 懦夫.flac': { size: 4000, mtime: 2 },
@@ -277,6 +277,7 @@ describe('music ingest (QYP3-003)', () => {
     const driver = createLocalScanDriver({
       repo,
       sourceId,
+      purpose: 'music',
       readAudio: async (entry) => {
         // 用真实 fixture 字节走完整解析链
         const { readFile } = await import('node:fs/promises');
@@ -320,13 +321,14 @@ describe('music ingest (QYP3-003)', () => {
   });
 
   it('writes embedded lyrics into lyricsDir during scan (QYP3-019)', async () => {
-    const sourceId = makeSource();
+    const sourceId = makeSource('music');
     const lyricsOut = mkdtempSync(join(tmpdir(), 'qy-lyrics-'));
     try {
       const adapter = makeTreeAdapter({ '周杰伦/叶惠美/03 - 晴天.mp3': { size: 4000, mtime: 1 } });
       const driver = createLocalScanDriver({
         repo,
         sourceId,
+        purpose: 'music',
         lyricsDir: lyricsOut,
         readAudio: async () => {
           const { readFile } = await import('node:fs/promises');
@@ -346,11 +348,11 @@ describe('music ingest (QYP3-003)', () => {
   });
 
   it('falls back to filename heuristics when readAudio is absent (WebDAV 模式)', async () => {
-    const sourceId = makeSource();
+    const sourceId = makeSource('music');
     const adapter = makeTreeAdapter({
       '周杰伦/叶惠美/07 - 退后.mp3': { size: 100, mtime: 1 },
     });
-    const driver = createLocalScanDriver({ repo, sourceId });
+    const driver = createLocalScanDriver({ repo, sourceId, purpose: 'music' });
     await runScan(scanningAdapterOf(adapter), driver, sourceId);
     const db = new Database(dbPath, { readonly: true });
     const rows = db
@@ -365,7 +367,7 @@ describe('music ingest (QYP3-003)', () => {
 
 describe('cue ingest (QYP3-006)', () => {
   it('splits a CUE into cue entries when the audio file exists', async () => {
-    const sourceId = makeSource();
+    const sourceId = makeSource('music');
     const cueContent = [
       'TITLE "叶惠美"',
       'FILE "叶惠美.flac" WAVE',
@@ -383,6 +385,7 @@ describe('cue ingest (QYP3-006)', () => {
     const driver = createLocalScanDriver({
       repo,
       sourceId,
+      purpose: 'music',
       readText: async () => Buffer.from(cueContent, 'utf8'),
     });
     await runScan(scanningAdapterOf(adapter), driver, sourceId);

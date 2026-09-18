@@ -37,8 +37,8 @@ export default function Local() {
     setSourcesError(null);
     try {
       const result = (await window.electronAPI.listSources()) as Array<SourceListEntry>;
-      // 仅音乐来源不在视频侧展示（QYP3-039）
-      setSources(result.filter((s) => s.purpose !== 'music'));
+      // 只列影视来源（QYP3-041）：音乐来源在音乐模式的媒体库里管
+      setSources(result.filter((s) => s.purpose === 'video'));
     } catch (err) {
       setSourcesError(err instanceof Error ? err.message : '加载来源失败');
     } finally {

@@ -94,13 +94,14 @@ export interface SourceCapabilities {
 }
 
 /**
- * 来源用途标记（QYP3-039，音乐/视频模式隔离）。
- * 'all' = 音乐与视频都索引（存量默认）；'music' / 'video' 只索引对应域，
- * 扫描与用途收窄清理都按此语义（见 SOURCE_UPDATE 与扫描过滤器）。
+ * 来源用途标记（QYP3-039/041，音乐/视频模式隔离）。
+ * 一个来源只能属于一个域：不支持音乐与视频混放在同一目录——视频源要读 NFO、
+ * 按剧集/电影归类，混在一起两边效果都差。'music' 只索引音频与 CUE，
+ * 'video' 只索引视频与 NFO。存量 'all' 由 migration 010 归一为 'video'。
  */
-export type SourcePurpose = 'all' | 'music' | 'video';
+export type SourcePurpose = 'music' | 'video';
 
-export const SOURCE_PURPOSES: readonly SourcePurpose[] = ['all', 'music', 'video'];
+export const SOURCE_PURPOSES: readonly SourcePurpose[] = ['music', 'video'];
 
 export function isSourcePurpose(value: unknown): value is SourcePurpose {
   return typeof value === 'string' && (SOURCE_PURPOSES as readonly string[]).includes(value);
@@ -155,7 +156,7 @@ export interface CreateLocalSourceInput {
   /** Directory path from the Electron picker; canonicalized main-side. */
   root: string;
   name?: string;
-  /** 用途标记（QYP3-039）；缺省 'all'。 */
+  /** 用途标记（QYP3-041）：由所在模式的媒体库页决定，缺省 'video'。 */
   purpose?: SourcePurpose;
 }
 
@@ -172,7 +173,7 @@ export interface CreateWebDavSourceInput {
    * transport for http:// (plan §8.1). Required for http URLs at save.
    */
   confirmHttpPlaintext?: boolean;
-  /** 用途标记（QYP3-039）；缺省 'all'。 */
+  /** 用途标记（QYP3-041）：由所在模式的媒体库页决定，缺省 'video'。 */
   purpose?: SourcePurpose;
 }
 

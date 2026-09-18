@@ -214,13 +214,13 @@ export function createLocalScanDriver(deps: {
   /** CUE 文本读取（QYP3-006）：本地=fs；WebDAV=bounded GET。缺省则 CUE 跳过。 */
   readText?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
   /**
-   * 来源用途标记（QYP3-039）：'music' 只索引音频（跳过视频/NFO），
-   * 'video' 只索引视频（跳过音频/CUE）；缺省 'all' 与旧行为一致。
+   * 来源用途标记（QYP3-039/041）：'music' 只索引音频（跳过视频/NFO），
+   * 'video' 只索引视频（跳过音频/CUE）。不支持混放，缺省按视频处理。
    */
-  purpose?: 'all' | 'music' | 'video';
+  purpose?: 'music' | 'video';
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
-  const purpose = deps.purpose ?? 'all';
+  const purpose = deps.purpose ?? 'video';
   // Existing files snapshot: cheap in-driver change detection without extra
   // repository queries per entry.
   const filesIndex = new Map<string, Pick<CatalogFileRow, 'fingerprint'>>(
