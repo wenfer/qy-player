@@ -820,6 +820,53 @@
   （默认只挂播放板块 / 切到音乐后影视项消失 / 插件板块与 tabpanel 关联 /
   切回播放）；`tests/renderer/settings/` 5 文件 21/21 绿（子组件单测未受影响）
 
+### QYP3-039 媒体来源用途标记（音乐/视频两域拆分）`[x]`
+- 诉求（用户）：音乐模式与视频模式完全隔离，媒体库也要分开管
+- 决策（用户选择）：**来源加用途标记**——一个来源带 `purpose =
+  all|music|video`，扫描按用途过滤，媒体库页按模式只显示本域来源；
+  而不是建两套来源表。理由：同一台 Jellyfin/同一个 NAS 目录往往两域共用，
+  拆表会让用户重复配置
+- 内容：
+  - migration 009（只追加）：`ALTER TABLE library_sources ADD COLUMN purpose
+    TEXT NOT NULL DEFAULT 'all'`（老库升级后存量为 'all'，行为不变；
+    校验放应用层 `isSourcePurpose`，不用 CHECK——老 SQLite 风险）
+  - 扫描过滤：`createLocalScanDriver` / `createWebDavScanDriver` 吃 `purpose`，
+    nfo 在 music 域跳过、audio/audio-cue 在 video 域跳过、video 在 music 域
+    跳过；两个「误删」陷阱同步堵住——`cleanupMissingMusic` 在 video 域不跑，
+    `markAvailabilityAfterScan` 在 music 域不跑
+  - 收窄用途即清理：`SOURCE_UPDATE` 里 purpose 变窄后 `purgeVideoContentBySource`
+    / `purgeMusicTracksBySource` 清掉另一域索引（FK 级联带走了子行）
+  - UI：`MediaSourcesPage({ mode })`——视频模式 `/media-sources`（默认新来源
+    purpose=video）、音乐模式 `/music-sources`（默认 music）；表单加
+    「两者/仅音乐/仅视频」分段控件，列表可就地改用途（改完 Toast 提示索引已清理）
+- Evidence: 新增 `tests/main/storage/source-purpose.test.ts`、
+  `tests/main/library-scanner/purpose-filter.test.ts`、
+  `tests/renderer/media-sources/purpose.test.tsx`；catalog-migrations 版本断言
+  8→9；local-source 用例补 payload `purpose:'all'`；typecheck 双配置 + 全量
+  940/940 绿
+
+### QYP3-040 应用顶层双模式（影视 / 音乐）`[x]`
+- 诉求（用户）：默认打开是视频模式，按钮切到音乐模式，保留音乐全部功能，
+  把设置与媒体库也按模式分开
+- 内容：
+  - `stores/app-mode-store`：`mode: 'video' | 'music'`，**不持久化**（每次
+    启动都是视频模式，符合"默认打开是视频模式"）；`MODE_HOME` 定义各模式落地页
+  - `Navigation`：影视/音乐分段切换（`role=radiogroup`）→ 切模式即导航到该模式
+    首页；两套导航表——影视（首页/本地/搜索/历史/刮削任务/媒体库/设置）、
+    音乐（音乐/歌单/媒体库 `/music-sources`/设置）；页标题先精确匹配再最长前缀
+    （否则 `/music-sources` 会被判成"音乐"）
+  - 设置页按模式分页签：影视=播放/插件/快捷键，音乐=音乐/快捷键；快捷键是
+    应用级配置，抽出 `ShortcutsContent` 两模式共用同一份，页面壳只留 h1
+  - 模式切换时页签复位：`key={mode}` 不会重置组件自己的 useState（测试抓出来），
+    改渲染期比对 `renderedMode` 再复位
+- 决策：模式只做**入口与配置的隔离**，不碰播放链路——迷你条/精简浮窗由音乐
+  会话门禁（而非页面门禁），跨模式保留；直达 hash 路由不做模式推断
+- Evidence: 新增 `tests/renderer/navigation/app-mode.test.tsx` 4 例
+  （默认影视导航 / 切音乐后换表并落到 /music / 音乐模式无"本地"入口 /
+  `/music-sources` 标题正确）；重写 `tests/renderer/settings/settings-tabs.test.tsx`
+  （两模式页签集 / 快捷键共用 / 切模式页签复位）；typecheck 双配置 + 全量
+  945/945 绿
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

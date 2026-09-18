@@ -55,7 +55,11 @@ function formatAccelerator(acc: string): string {
 
 type Recording = { scope: 'global' | 'mpv'; id: string } | null;
 
-export default function ShortcutsPage() {
+/**
+ * 可嵌入的快捷键内容（QYP3-040）：设置页按模式嵌入（视频/音乐页签共用）。
+ * 逻辑零改动；页头由默认导出的页面壳提供。
+ */
+export function ShortcutsContent() {
   const addToast = useToastStore((s) => s.addToast);
   const [globalOverrides, setGlobalOverrides] = useState<Overrides>({});
   const [mpvOverrides, setMpvOverrides] = useState<Overrides>({});
@@ -218,15 +222,8 @@ export default function ShortcutsPage() {
   );
 
   return (
-    <div className="p-8 max-w-3xl">
-      <header className="mb-8 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Keyboard size={22} className="text-muted-foreground" />
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">快捷键</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">查看与自定义播放控制快捷键</p>
-          </div>
-        </div>
+    <div className="max-w-3xl">
+      <div className="mb-6 flex justify-end">
         <button
           onClick={handleResetAll}
           disabled={loading}
@@ -235,7 +232,7 @@ export default function ShortcutsPage() {
           <RotateCcw size={14} />
           恢复默认
         </button>
-      </header>
+      </div>
 
       {/* Global shortcuts - editable */}
       <section className="mb-10" aria-label="全局快捷键">
@@ -359,6 +356,22 @@ export default function ShortcutsPage() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+/** /shortcuts 独立页（深链兼容，QYP3-040）：导航入口已并入设置页页签。 */
+export default function ShortcutsPage() {
+  return (
+    <div className="p-8 max-w-3xl">
+      <header className="mb-8 flex items-center gap-3">
+        <Keyboard size={22} className="text-muted-foreground" />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">快捷键</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">查看与自定义播放控制快捷键</p>
+        </div>
+      </header>
+      <ShortcutsContent />
     </div>
   );
 }

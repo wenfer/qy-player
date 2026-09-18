@@ -5,6 +5,7 @@ import Detail from './pages/Detail';
 import Settings from './pages/Settings';
 import Libraries from './pages/Libraries';
 import MediaSources from './pages/MediaSources';
+import MediaSourcesPage from './pages/MediaSources/MediaSourcesPage';
 import Search from './pages/Search';
 import Local from './pages/Local';
 import MusicPage from './pages/Music';
@@ -143,6 +144,8 @@ function Shell() {
             <Route path="/browse/:sourceId/item/:itemId" element={<LibraryBrowse />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/media-sources" element={<MediaSources />} />
+            {/* 音乐模式媒体库（QYP3-040）：只显示非「仅视频」来源 */}
+            <Route path="/music-sources" element={<MediaSourcesPage mode="music" />} />
             <Route path="/scrape-jobs" element={<Libraries />} />
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />
