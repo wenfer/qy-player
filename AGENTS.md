@@ -86,6 +86,14 @@
   漏传就是 mpv 静默 401——失败不上报，连 toast 都没有。类型上是 optional，
   所以漏了不报错（这正是它能活到 1.2.0 之后的原因），三处调用点
   （`playQueue` mpv 分支 / `playServerAt` / 内置引擎回退）都要带
+- **direct 引擎失败兜底按「失败的那一首」重播，不读 `store.current`**。
+  `error` 事件先于 `play()` 的 rejection 到达，而 current 是在
+  `await playQueue()` 之后才写入的：读 current 会在首播时读到 null（兜底
+  直接放弃）、换曲后读到上一首（把上一首喂给 mpv）。同理，已交给兜底的
+  那次 rejection 不能再报错（`directFallbackTrackId` 负责认领），否则用户
+  会看到"放不了"的假消息。内置引擎比 mpv 严格得多：FLAC 内嵌图片块的
+  `picture.type` 非法（-1）时 Chromium 打开容器就失败，而 mpv 只当警告
+  —— 这类文件全靠兜底救回
 - **封面文件名不能硬编码扩展名**。落盘名按内嵌图片真实格式生成
   （`<trackId>.jpg` 占真实世界绝大多数），渲染层无从得知格式，请求
   `<id>.png` 必须经 `resolveCoverFileName`（`cover-service.ts`）按

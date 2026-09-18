@@ -521,6 +521,44 @@
   会留在 coversDir，精确命中会拿到旧图；covers 是"可清扫的派生缓存"，
   触发条件罕见，未纳入本次范围
 
+### QYP3-030 内置引擎解不了的文件兜底失效 `[x]`
+- 触发：用户报「`张心杰 - 嘲笑.flac` 为什么无法播放」
+- 排查：文件在库里（id 13，来源 5 = /home/qiuyuan/Music，flac 284.87s，
+  有封面有歌词）；用应用同款 Electron/Chromium + 同款 `qy-file://audio`
+  协议做探针（`/tmp/qy-probe/main.js`，**注意探针页面必须从 http 源加载，
+  `about:blank` 是不透明源、媒体加载一律被拒**）：
+  - 该文件 `<audio>` 报 `DEMUXER_ERROR_COULD_NOT_OPEN: FFmpegDemuxer:
+    open context failed`（code 4）
+  - 同目录另一首 flac、两个 mp3 全部正常 → 不是协议桥/扫描/路径问题
+  - 根因：该文件 FLAC `METADATA_BLOCK_PICTURE` 的 `picture.type = -1`
+    （0xFFFFFFFF，非法；正常是 3=front cover）。**把该 4 字节改成 3 后
+    同一文件立刻能播**（284.87s 可 seek），根因确认
+  - mpv 0.32 对该块只报警告（`Invalid picture type: -1.`）继续播 → 两个
+    引擎宽容度不同，本可兜底救回
+- 兜底为何没生效（两个 bug）：
+  - `error` 事件先于 `play()` 的 rejection 到达（探针实测），而 store 的
+    `current` 是在 `await playQueue()` **之后**才写入的 → 兜底读 current：
+    首播读到 null 直接 return；换曲后读到上一首会喂错曲子
+  - 随后 playQueue 的 catch 写下的 `errorMessage`，页面读的是点击那一刻
+    闭包里的快照（`const playback = useMusicPlaybackStore()` +
+    `useCallback([playback])`）→ 旧值 null → Toast 不显示 → 用户看到
+    「点了没反应」
+- 修法：兜底改签名 `fallbackToMpv(track)`（按失败的那首重播）；失败事件里
+  同步把引擎切成 mpv 并记 `directFallbackTrackId`，playQueue 的 catch 据此
+  认领这次 rejection（不报错）；webaudio 分支改为**状态先落再起播**；三处
+  页面改读 `useMusicPlaybackStore.getState().errorMessage`；兜底自身失败
+  才报中文错误
+- 兼容性结论：这类"内置引擎打不开、mpv 能打开"的文件现在**无需改文件即可
+  播放**（自动切 mpv）；用户想彻底消除首次失败的那一瞬间，可
+  `ffmpeg -i in.flac -c copy -map 0 -y out.flac` 重封装（音频流 bit-copy、
+  标签保留、picture 块归一化，实测可播）
+- Evidence: 新增 `tests/renderer/music/direct-fallback.test.ts` 4/4（失败那首
+  交给 mpv / 不喂上一首 / 兜底也失败才报错 / 无人认领的失败照常报错）+
+  `tests/renderer/music/play-error-toast.test.tsx` 1/1；两者在 stash 掉源码
+  改动后分别 3/4、1/1 失败（证明用例非空转）；typecheck 双配置 + 全量 842/842
+- 未做（记录在案）：兜底失败后不记忆（每次播放该曲都会先失败一次，约
+  100ms）；mpv 自身解码失败无法上报（mpv 日志按硬性约束静音）
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→
