@@ -227,7 +227,7 @@ export default function PluginSettings() {
                         if (Number.isInteger(value)) handlePriority(plugin, value);
                       }}
                       disabled={busy === plugin.id}
-                      className="w-16 px-2 py-1 bg-secondary border border-border rounded-md text-xs focus:outline-none focus:border-primary/50"
+                      className="w-16 px-2 py-1 bg-secondary border border-border rounded-md text-xs focus-ring"
                       aria-label={`${plugin.name} 优先级`}
                     />
                   </label>
@@ -254,7 +254,7 @@ export default function PluginSettings() {
                   placeholder={hasSecret ? '已设置（输入可更换）' : 'API Token'}
                   autoComplete="new-password"
                   aria-label={`${plugin.name} API Token`}
-                  className="flex-1 min-w-[200px] px-3 py-1.5 bg-secondary border border-border rounded-md text-xs focus:outline-none focus:border-primary/50"
+                  className="flex-1 min-w-[200px] px-3 py-1.5 bg-secondary border border-border rounded-md text-xs focus-ring"
                 />
                 <button
                   type="button"

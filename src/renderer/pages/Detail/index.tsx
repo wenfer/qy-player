@@ -551,10 +551,10 @@ export default function Detail() {
             {/* Cast */}
             {details.People && details.People.length > 0 && (
               <div className="mt-8">
-                <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+                <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
                   <Users size={14} className="text-muted-foreground" />
                   演职员
-                </h3>
+                </h2>
                 <div className="flex flex-wrap gap-3">
                   {details.People.slice(0, 10).map((person) => (
                     <div key={person.Name} className="flex-shrink-0 text-center w-16">
@@ -572,7 +572,7 @@ export default function Detail() {
             {/* Seasons */}
             {details.Type === 'Series' && seasons.length > 0 && (
               <div className="mt-8">
-                <h3 className="text-sm font-semibold mb-3">季</h3>
+                <h2 className="text-sm font-semibold mb-3">季</h2>
                 <div className="flex flex-wrap gap-2 mb-4">
                   {seasons.map((season) => (
                     <button

@@ -216,6 +216,11 @@
 - Tailwind + 深色主题语义 token（`bg-card`/`border-border`/`text-muted-foreground`/`focus-ring`）
 - 异步操作必须有 Toast 反馈（`stores/toast-store`）；列表操作用乐观更新 + 失败回滚
 - 面向用户的文案用中文；技术内部术语（accelerator、mpv 属性名）不得出现在 UI
+- **列表页必须区分「加载中 / 空 / 失败」**（前端审查）：`null` 不能同时表示"在加载"和"失败了"——失败要显式呈现可重试的错误态（`role="alert"` + 「重试」），否则会落成"暂无记录"这种误导性空态（History / Music / Playlists 都踩过）
+- **自绘控件要补齐键盘路径**：`div` 画的进度条/滑块必须能 Tab 聚焦并响应方向键（见 `PlayerControls` 的 `onKeyDown`）；`opacity-0 group-hover:opacity-100` 的悬浮操作区要加 `group-focus-within`，否则键盘过去是隐形的
+- **焦点样式统一用 `focus-ring`**（`index.css` 里的 `focus-visible:ring-2`），不要在各处自造 `focus:border-primary/50` / `focus:ring-2`
+- **每页一个 h1，标题不跳级**（h1→h2→h3）；子视图（如 `ServerMusicBrowser`）用 h2，不要自己造 h1
+- 组件超过 ~500 行就把自洽的一块抽成 hook/子组件（如 `MediaSources` 的 `use-servers`），页面只留编排
 
 ## 构建与发版
 

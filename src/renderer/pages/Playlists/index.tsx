@@ -249,6 +249,8 @@ export default function PlaylistsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      <h1 className="text-2xl font-bold tracking-tight mb-4">歌单</h1>
+
       {/* 来源切换（P2）：本地歌单可增删改，服务器歌单只读 */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button
@@ -302,8 +304,14 @@ export default function PlaylistsPage() {
       </div>
 
       {openId === null ? (
-        /* 歌单列表 */
-        current.length === 0 && playlists !== null ? (
+        /* 歌单列表：playlists === null 是加载中，此前会渲染成一块空白 */
+        playlists === null ? (
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label="加载歌单">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-16 bg-card border border-border rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : current.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <ListMusic size={32} className="mb-3 opacity-40" />
             <p className="text-xs">还没有歌单</p>

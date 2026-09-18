@@ -97,3 +97,19 @@ describe('Music page views (QYP3-008a)', () => {
     await waitFor(() => expect(api.setMusicFavorite).toHaveBeenCalledWith(1, true));
   });
 });
+
+/** 加载失败必须显式呈现（前端审查）：此前只弹 Toast，页面渲染成空网格。 */
+describe('Music page load failure', () => {
+  it('shows a retryable error state instead of an empty grid', async () => {
+    api.getMusicAlbums.mockResolvedValue({ ok: false });
+    render(<MusicPage />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.getByText('没能加载音乐库')).toBeTruthy();
+    // 不是"没有音乐"——那条文案会让人以为库真的是空的
+    expect(screen.queryByText('没有音乐')).toBeNull();
+
+    api.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(screen.getByText('没有音乐')).toBeTruthy());
+  });
+});

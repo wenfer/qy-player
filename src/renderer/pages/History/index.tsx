@@ -51,9 +51,15 @@ export default function HistoryPage() {
   const addToast = useToastStore((s) => s.addToast);
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * 加载失败要显式呈现（不再把失败显示成"暂无观看记录"——那会让人以为
+   * 历史真的被清空了）。
+   */
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [data, serverMap] = await Promise.all([
         window.electronAPI.getRecentlyPlayed(100),
@@ -74,7 +80,9 @@ export default function HistoryPage() {
       });
       setRecords(mapped);
     } catch (err) {
-      addToast(`加载历史记录失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+      const message = err instanceof Error ? err.message : '未知错误';
+      setLoadError(message);
+      addToast(`加载历史记录失败: ${message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -177,7 +185,20 @@ export default function HistoryPage() {
         )}
       </header>
 
-      {loading ? (
+      {loadError ? (
+        <div role="alert" className="flex flex-col items-center justify-center py-20 text-center">
+          <X size={40} className="text-destructive mb-4" />
+          <h2 className="text-lg font-semibold mb-1">没能加载观看历史</h2>
+          <p className="text-sm text-muted-foreground mb-4">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void loadHistory()}
+            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 focus-ring"
+          >
+            重试
+          </button>
+        </div>
+      ) : loading ? (
         <div className="space-y-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-card border border-border animate-pulse">
@@ -266,11 +287,12 @@ export default function HistoryPage() {
                   )}
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Actions：键盘聚焦时也要显形（group-focus-within） */}
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                   <button
                     onClick={() => handlePlay(record)}
                     className="p-2 rounded-lg hover:bg-accent transition-colors focus-ring"
+                    aria-label={`播放 ${record.title}`}
                     title="播放"
                   >
                     <Play size={14} />
@@ -278,6 +300,7 @@ export default function HistoryPage() {
                   <button
                     onClick={() => handleDelete(record)}
                     className="p-2 rounded-lg hover:bg-accent text-muted-foreground hover:text-destructive transition-colors focus-ring"
+                    aria-label={`删除记录 ${record.title}`}
                     title="删除记录"
                   >
                     <X size={14} />

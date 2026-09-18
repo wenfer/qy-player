@@ -126,7 +126,7 @@ export default function ServerMusicBrowser({ library }: { library: MusicLibraryR
                 key={t.id}
                 type="button"
                 onClick={() => void playFrom(tracks ?? [], t.id)}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-left w-full"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors text-left w-full focus-ring"
               >
                 <span className="text-xs text-muted-foreground w-6 text-right">{t.index ?? '–'}</span>
                 <Music2 size={14} className="text-muted-foreground" />

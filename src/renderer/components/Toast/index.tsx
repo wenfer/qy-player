@@ -35,7 +35,7 @@ export default function ToastContainer() {
             <p className="text-sm leading-snug flex-1">{toast.message}</p>
             <button
               onClick={() => removeToast(toast.id)}
-              className="flex-shrink-0 p-0.5 hover:bg-white/20 rounded transition-colors"
+              className="flex-shrink-0 p-0.5 hover:bg-white/20 rounded transition-colors focus-ring"
               aria-label="关闭通知"
             >
               <X size={14} />

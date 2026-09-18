@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Disc3, Heart, ListMusic, Music2, User } from 'lucide-react';
+import { Disc3, Heart, ListMusic, Music2, User, AlertTriangle } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
 import ServerMusicBrowser from './ServerMusicBrowser';
 import SpectrumGraph from '../../components/SpectrumGraph';
+import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
 import { pickMusicLibraries, type MusicLibraryRef, type ServerLibraryGroup } from '../../utils/server-music';
 
 /**
@@ -121,6 +122,44 @@ function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: strin
   );
 }
 
+/**
+ * 加载失败要显式呈现：此前失败只弹 Toast，页面拿 `?? []` 渲染出空网格，
+ * 看着像"真的没有音乐"。
+ */
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex flex-col items-center justify-center py-20 text-center">
+      <AlertTriangle size={32} className="text-destructive mb-3 opacity-80" />
+      <p className="text-sm mb-1">没能加载音乐库</p>
+      <p className="text-[11px] text-muted-foreground mb-4">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 focus-ring"
+      >
+        重试
+      </button>
+    </div>
+  );
+}
+
+/** 曲目列表的骨架（曲目行是竖排列表，不能复用海报网格的骨架）。 */
+function TrackListSkeleton() {
+  return (
+    <div className="flex flex-col gap-1" aria-busy="true" aria-label="加载曲目">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2">
+          <div className="w-8 h-8 rounded bg-muted animate-pulse flex-shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 bg-muted rounded animate-pulse w-1/3" />
+            <div className="h-2.5 bg-muted rounded animate-pulse w-1/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function MusicPage() {
   const addToast = useToastStore((s) => s.addToast);
   const playback = useMusicPlaybackStore();
@@ -134,6 +173,8 @@ export default function MusicPage() {
   const [openAlbum, setOpenAlbum] = useState<{ albumartist: string; album: string } | null>(null);
   const [albumTracks, setAlbumTracks] = useState<MusicTrackRow[] | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
+  /** 当前视图的加载失败信息（null = 正常）。 */
+  const [loadError, setLoadError] = useState<string | null>(null);
   // 服务器音乐库（QYP3-025）：null = 本地库
   const [serverLibs, setServerLibs] = useState<MusicLibraryRef[]>([]);
   const [activeLib, setActiveLib] = useState<MusicLibraryRef | null>(null);
@@ -203,9 +244,11 @@ export default function MusicPage() {
         data?: { albums: MusicAlbumRow[] };
       };
       setAlbums(res.ok ? res.data?.albums ?? [] : null);
+      setLoadError(res.ok ? null : '加载专辑失败');
       if (!res.ok) addToast('加载专辑失败', 'error');
     } catch {
       setAlbums(null);
+      setLoadError('加载专辑失败');
       addToast('加载专辑失败', 'error');
     }
   }, [addToast]);
@@ -217,9 +260,11 @@ export default function MusicPage() {
         data?: { artists: MusicArtistRow[] };
       };
       setArtists(res.ok ? res.data?.artists ?? [] : null);
+      setLoadError(res.ok ? null : '加载歌手失败');
       if (!res.ok) addToast('加载歌手失败', 'error');
     } catch {
       setArtists(null);
+      setLoadError('加载歌手失败');
       addToast('加载歌手失败', 'error');
     }
   }, [addToast]);
@@ -232,9 +277,11 @@ export default function MusicPage() {
           data?: { albums: MusicAlbumRow[] };
         };
         setArtistAlbums(res.ok ? res.data?.albums ?? [] : null);
+        setLoadError(res.ok ? null : '加载专辑失败');
         if (!res.ok) addToast('加载专辑失败', 'error');
       } catch {
         setArtistAlbums(null);
+        setLoadError('加载专辑失败');
         addToast('加载专辑失败', 'error');
       }
     },
@@ -248,9 +295,11 @@ export default function MusicPage() {
         data?: { tracks: MusicTrackRow[] };
       };
       setTracks(res.ok ? res.data?.tracks ?? [] : null);
+      setLoadError(res.ok ? null : '加载曲目失败');
       if (!res.ok) addToast('加载曲目失败', 'error');
     } catch {
       setTracks(null);
+      setLoadError('加载曲目失败');
       addToast('加载曲目失败', 'error');
     }
   }, [addToast]);
@@ -262,9 +311,11 @@ export default function MusicPage() {
         data?: { tracks: MusicTrackRow[] };
       };
       setFavorites(res.ok ? res.data?.tracks ?? [] : null);
+      setLoadError(res.ok ? null : '加载收藏失败');
       if (!res.ok) addToast('加载收藏失败', 'error');
     } catch {
       setFavorites(null);
+      setLoadError('加载收藏失败');
       addToast('加载收藏失败', 'error');
     }
   }, [addToast]);
@@ -319,6 +370,26 @@ export default function MusicPage() {
     loadFavorites,
   ]);
 
+  /** 错误态的「重试」：重跑当前视图那一个加载器。 */
+  const reloadCurrent = useCallback(async (): Promise<void> => {
+    if (activeLib) return;
+    if (view === 'albums') await loadAlbums();
+    else if (view === 'artists') {
+      if (selectedArtist) await loadArtistAlbums(selectedArtist);
+      else await loadArtists();
+    } else if (view === 'all') await loadAllTracks();
+    else await loadFavorites();
+  }, [
+    activeLib,
+    view,
+    selectedArtist,
+    loadAlbums,
+    loadArtists,
+    loadArtistAlbums,
+    loadAllTracks,
+    loadFavorites,
+  ]);
+
   const tabClass = (active: boolean): string =>
     `px-3 py-1.5 text-xs rounded-lg border transition-colors focus-ring flex items-center gap-1.5 ${
       active ? 'bg-secondary border-border text-foreground' : 'border-border text-muted-foreground hover:bg-accent'
@@ -347,6 +418,8 @@ export default function MusicPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      <h1 className="text-2xl font-bold tracking-tight mb-4">音乐</h1>
+
       {/* 播放频谱图（QYP3-034）：有音乐会话时常驻顶部，随音调实时跳动 */}
       {playback.engine && playback.current && (
         <SpectrumGraph
@@ -402,7 +475,9 @@ export default function MusicPage() {
         </button>
       </div>
 
-      {openAlbum ? (
+      {loadError ? (
+        <LoadError message={loadError} onRetry={() => void reloadCurrent()} />
+      ) : openAlbum ? (
         /* 专辑详情（曲目列表） */
         <div>
           <button
@@ -427,8 +502,10 @@ export default function MusicPage() {
             title="没有音乐"
             hint="在媒体库页添加音乐目录后扫描"
           />
+        ) : albums === null ? (
+          <PosterSkeleton count={10} />
         ) : (
-          <AlbumGrid albums={albums ?? []} onOpen={(a, b) => void openAlbumTracks(a, b)} />
+          <AlbumGrid albums={albums} onOpen={(a, b) => void openAlbumTracks(a, b)} />
         )
       ) : view === 'artists' && selectedArtist ? (
         <div>
@@ -440,10 +517,12 @@ export default function MusicPage() {
             ← 返回歌手
           </button>
           <h2 className="text-sm font-semibold mb-4">{selectedArtist || '未知歌手'}</h2>
-          {artistAlbums && artistAlbums.length === 0 ? (
+          {artistAlbums === null ? (
+            <PosterSkeleton count={6} />
+          ) : artistAlbums.length === 0 ? (
             <EmptyState icon={<Disc3 size={32} className="opacity-40" />} title="该歌手没有专辑" />
           ) : (
-            <AlbumGrid albums={artistAlbums ?? []} onOpen={(a, b) => void openAlbumTracks(a, b)} />
+            <AlbumGrid albums={artistAlbums} onOpen={(a, b) => void openAlbumTracks(a, b)} />
           )}
         </div>
       ) : view === 'artists' ? (
@@ -485,19 +564,23 @@ export default function MusicPage() {
           </div>
         )
       ) : view === 'all' ? (
-        tracks && tracks.length === 0 ? (
+        tracks === null ? (
+          <TrackListSkeleton />
+        ) : tracks.length === 0 ? (
           <EmptyState icon={<ListMusic size={32} className="opacity-40" />} title="没有曲目" />
         ) : (
-          trackList(tracks ?? [])
+          trackList(tracks)
         )
-      ) : favorites && favorites.length === 0 ? (
+      ) : favorites === null ? (
+        <TrackListSkeleton />
+      ) : favorites.length === 0 ? (
         <EmptyState
           icon={<Heart size={32} className="opacity-40" />}
           title="还没有收藏"
           hint="在曲目列表点爱心即可收藏"
         />
       ) : (
-        trackList(favorites ?? [])
+        trackList(favorites)
       )}
       </>
       )}

@@ -324,7 +324,7 @@ function CatalogItemDetailView({
 
       {seriesItem && seasons.length > 0 && (
         <div className="mt-8">
-          <h3 className="text-sm font-semibold mb-3">季与集</h3>
+          <h2 className="text-sm font-semibold mb-3">季与集</h2>
           {seasons.map((season) => (
             <div key={season.ref.itemId} className="mb-5">
               <div className="text-sm font-medium text-muted-foreground mb-2">

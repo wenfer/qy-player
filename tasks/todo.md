@@ -921,6 +921,28 @@
 - 待目标机验证：拖动/双击最大化/八向缩放的手感与最小尺寸夹取、GNOME 与
   Deepin 下观感、精简浮窗可拖动还原——已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-043 前端审查整改（按 frontend-ui-engineering 规范）`[x]`
+- 诉求（用户）：加载 `/home/qiuyuan/.agents/skills/frontend-ui-engineering/SKILL.md`，
+  审查前端设计与实现并按意见优化
+- 审查结论（AI 味一项基本免检：全仓无紫/靛色、无 gradient 滥用、无 rounded-2xl/3xl、
+  阴影仅 6 处单层；`[]` 任意值集中在 `text-[10px]/[11px]` 这类小字号，属项目既有刻度）
+- 本轮改的（高收益低风险）：
+  - 加载/错误态：History / Music / Playlists 区分「加载中=骨架、空=空态、
+    失败=可重试错误态」——此前 `null` 同时表示加载中与失败，失败落成
+    "暂无记录/空网格"这种误导性呈现
+  - 键盘可达：PlayerControls 进度条加 tabIndex + ←/→ ±5s（Shift ±30s）、
+    Home/End；History 悬浮操作区加 `group-focus-within`
+  - 焦点样式收敛：Search / PluginSettings / ServerMusicBrowser / Toast 的自造
+    focus 样式统一为 `focus-ring`
+  - 标题层级：Music / Playlists 补 h1；LibraryBrowse「季与集」与 Detail
+    「演职员」「季」h3 → h2
+  - 拆分：`MediaSourcesPage` 的服务器区块抽成 `use-servers.ts`（568 → 414 行）
+- 未改（有意为之，勿当遗漏）：`ReplayGain` 是行业标准术语保留；`PosterCard`
+  的 `role=button` 嵌套与歌单拖拽排序是既有交互，改动风险大于收益
+- Evidence: 新增 `tests/renderer/history/load-error.test.tsx` 1 例、
+  `music-views.test.tsx` 增 1 例（失败态 → 重试后回到空态）；typecheck 双配置
+  + 全量 953/953 绿，三构建通过
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

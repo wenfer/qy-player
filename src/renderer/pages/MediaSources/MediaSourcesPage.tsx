@@ -5,36 +5,11 @@ import {
   CheckCircle2, XCircle, Library, ChevronLeft, FolderOpen, Globe,
 } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
-import ServerForm, { ServerForm as ServerFormValues } from './ServerForm';
+import ServerForm from './ServerForm';
+import { useServers } from './use-servers';
 import SourceForm, { type SourceFormCaps, type SourceFormPayload } from './SourceForm';
 import SourceList from './SourceList';
 import type { SourceListEntry, ScanProgressEvent, SourcePurpose } from '../../../shared/types';
-
-interface AuthResult {
-  ok: boolean;
-  userId?: string;
-  error?: string;
-}
-
-interface SavedServer {
-  id: number;
-  type: string;
-  name: string;
-  base_url: string;
-  /** True when a usable credential exists in the main-process SecretStore. */
-  hasCredential?: boolean;
-  username?: string;
-  user_id?: string;
-  is_active: number;
-}
-
-const EMPTY_SERVER_FORM: ServerFormValues = {
-  type: 'jellyfin',
-  name: '',
-  baseUrl: '',
-  username: '',
-  password: '',
-};
 
 /** Shared section header: icon chip + title + count + primary action. */
 function SectionHeader({
@@ -87,14 +62,23 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
   const [scanningIds, setScanningIds] = useState<Set<number>>(new Set());
   const [liveProgress, setLiveProgress] = useState<Record<number, ScanProgressEvent>>({});
 
-  // ---- Media servers (Jellyfin / Emby) — migrated from Settings (U-002) ----
-  const [servers, setServers] = useState<SavedServer[]>([]);
-  const [showServerForm, setShowServerForm] = useState(false);
-  const [editingServer, setEditingServer] = useState<SavedServer | null>(null);
-  const [testingServer, setTestingServer] = useState(false);
-  const [savingServer, setSavingServer] = useState(false);
-  const [serverForm, setServerForm] = useState<ServerFormValues>(EMPTY_SERVER_FORM);
-  const [serverFormError, setServerFormError] = useState<string | null>(null);
+  // ---- Media servers (Jellyfin / Emby) — 状态与行为在 useServers ----
+  const {
+    servers,
+    editing: editingServer,
+    form: serverForm,
+    formError: serverFormError,
+    showForm: showServerForm,
+    saving: savingServer,
+    testing: testingServer,
+    setForm: setServerForm,
+    edit: handleServerEdit,
+    remove: handleServerRemove,
+    save: handleServerSave,
+    test: handleServerTest,
+    toggleForm: handleServerToggleForm,
+    closeForm: handleServerCloseForm,
+  } = useServers(addToast);
 
   useEffect(() => {
     window.electronAPI
@@ -239,133 +223,6 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
     [scanningIds, addToast, loadSources]
   );
 
-  const loadServers = useCallback(async () => {
-    try {
-      const data = await window.electronAPI.getServers();
-      setServers(data as SavedServer[]);
-    } catch {
-      addToast('加载服务器列表失败', 'error');
-    }
-  }, [addToast]);
-
-  useEffect(() => {
-    loadServers();
-  }, [loadServers]);
-
-  const resetServerForm = useCallback(() => {
-    setServerForm(EMPTY_SERVER_FORM);
-    setServerFormError(null);
-    setEditingServer(null);
-  }, []);
-
-  const handleServerAdd = () => {
-    if (showServerForm) {
-      setShowServerForm(false);
-      resetServerForm();
-    } else {
-      resetServerForm();
-      setShowServerForm(true);
-    }
-  };
-
-  const handleServerEdit = (server: SavedServer) => {
-    setServerForm({
-      type: server.type as 'jellyfin' | 'emby',
-      name: server.name,
-      baseUrl: server.base_url,
-      username: server.username || '',
-      password: '',
-    });
-    setEditingServer(server);
-    setServerFormError(null);
-    setShowServerForm(true);
-  };
-
-  const handleServerTest = async () => {
-    if (!serverForm.baseUrl.trim()) {
-      setServerFormError('请输入服务器地址');
-      return;
-    }
-    setTestingServer(true);
-    setServerFormError(null);
-    try {
-      const result = (await window.electronAPI.testServer({
-        type: serverForm.type,
-        baseUrl: serverForm.baseUrl.trim(),
-        username: serverForm.username || undefined,
-        password: serverForm.password || undefined,
-      })) as AuthResult;
-
-      if (result?.ok) {
-        addToast(serverForm.username ? '连接成功，登录凭证有效' : '服务器可达', 'success');
-      } else {
-        setServerFormError(result?.error || '连接失败');
-      }
-    } catch (err) {
-      setServerFormError(`连接错误: ${err instanceof Error ? err.message : '未知错误'}`);
-    } finally {
-      setTestingServer(false);
-    }
-  };
-
-  const authenticateServer = async (): Promise<AuthResult> => {
-    const result = (await window.electronAPI.testServer({
-      type: serverForm.type,
-      baseUrl: serverForm.baseUrl,
-      username: serverForm.username || undefined,
-      password: serverForm.password || undefined,
-    })) as AuthResult;
-    return result;
-  };
-
-  const handleServerSave = async () => {
-    if (!serverForm.name || !serverForm.baseUrl) {
-      setServerFormError('请填写名称和服务器地址');
-      return;
-    }
-
-    setSavingServer(true);
-    setServerFormError(null);
-    try {
-      // QYP2-015: the password (never a token) goes to saveServer; the
-      // main process authenticates and keeps the token in the SecretStore.
-      if (serverForm.username && serverForm.password) {
-        // Verify first so a typo surfaces here instead of a stored dud.
-        const auth = await authenticateServer();
-        if (!auth?.ok) {
-          setServerFormError(auth?.error || '认证失败，请检查用户名和密码');
-          setSavingServer(false);
-          return;
-        }
-      } else if (!(editingServer?.user_id && editingServer?.hasCredential)) {
-        // Either new server without credentials, or editing a server that
-        // has no stored credentials - a password is required to log in
-        setServerFormError('该服务器尚未登录，请填写用户名和密码以完成登录');
-        setSavingServer(false);
-        return;
-      }
-
-      await window.electronAPI.saveServer({
-        id: editingServer?.id,
-        type: serverForm.type,
-        name: serverForm.name,
-        baseUrl: serverForm.baseUrl,
-        username: serverForm.username || undefined,
-        password: serverForm.password || undefined,
-        userId: editingServer?.user_id,
-        isActive: true,
-      });
-      addToast(editingServer ? '服务器已更新' : '服务器已保存', 'success');
-      setShowServerForm(false);
-      resetServerForm();
-      loadServers();
-    } catch (err) {
-      setServerFormError(`保存失败: ${err instanceof Error ? err.message : '未知错误'}`);
-    } finally {
-      setSavingServer(false);
-    }
-  };
-
   /** Shared empty state: icon circle + text + CTA (a11y: role=status). */
   const EmptyState = ({ icon, text }: { icon: React.ReactNode; text: string }) => (
     <div role="status" className="text-center py-12">
@@ -413,7 +270,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           count={servers.length}
           actionLabel="添加"
           actionOpen={showServerForm}
-          onAction={handleServerAdd}
+          onAction={handleServerToggleForm}
         />
 
         {showServerForm && (
@@ -422,10 +279,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
             onChange={setServerForm}
             onTest={handleServerTest}
             onSave={handleServerSave}
-            onCancel={() => {
-              setShowServerForm(false);
-              resetServerForm();
-            }}
+            onCancel={handleServerCloseForm}
             testing={testingServer}
             saving={savingServer}
             formError={serverFormError}
@@ -485,15 +339,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
                   <Pencil size={15} />
                 </button>
                 <button
-                  onClick={async () => {
-                    try {
-                      await window.electronAPI.saveServer({ ...server, isActive: false });
-                      loadServers();
-                      addToast('服务器已删除', 'success');
-                    } catch {
-                      addToast('删除失败', 'error');
-                    }
-                  }}
+                  onClick={() => void handleServerRemove(server)}
                   className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
                   aria-label={`删除 ${server.name}`}
                 >

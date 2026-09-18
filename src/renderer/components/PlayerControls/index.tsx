@@ -75,6 +75,26 @@ export default function PlayerControls() {
     handleSeek(Math.max(0, Math.min(1, ratio)));
   }, [handleSeek]);
 
+  /**
+   * 进度条是 div（要画缓冲/已播两段 + 拖动把手），所以键盘行为得自己接：
+   * ←/→ ±5s，Home/End 到头尾。不能只留鼠标，否则键盘完全 seek 不了。
+   */
+  const handleProgressKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (duration <= 0) return;
+      const step = e.shiftKey ? 30 : 5;
+      const at = isDragging ? dragValue : currentTime;
+      const clamp = (v: number) => Math.max(0, Math.min(duration, v));
+      if (e.key === 'ArrowLeft') handleSeek(clamp(at - step) / duration);
+      else if (e.key === 'ArrowRight') handleSeek(clamp(at + step) / duration);
+      else if (e.key === 'Home') handleSeek(0);
+      else if (e.key === 'End') handleSeek(1);
+      else return;
+      e.preventDefault();
+    },
+    [currentTime, dragValue, duration, handleSeek, isDragging]
+  );
+
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseInt(e.target.value, 10);
     window.electronAPI?.playerControl('volume', vol);
@@ -131,13 +151,16 @@ export default function PlayerControls() {
       {/* Progress bar */}
       <div
         ref={progressRef}
-        className="relative h-1.5 bg-muted rounded-full cursor-pointer group mb-3"
+        className="relative h-1.5 bg-muted rounded-full cursor-pointer group mb-3 focus-ring"
         onClick={handleProgressClick}
+        onKeyDown={handleProgressKeyDown}
         role="slider"
+        tabIndex={0}
         aria-valuemin={0}
         aria-valuemax={duration}
         aria-valuenow={currentTime}
-        aria-label="播放进度"
+        aria-valuetext={`${formatTime(currentTime)} / ${formatTime(duration)}`}
+        aria-label="播放进度（左右方向键快退快进，Home/End 到头尾）"
       >
         <div
           className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-75"
