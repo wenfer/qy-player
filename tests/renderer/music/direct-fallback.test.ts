@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   engine: { instance: null as unknown as Record<string, unknown> },
   /** 引擎行为开关：引擎单例在 playQueue 内部懒建，测试不能提前替换实例方法。 */
-  behavior: { unsupported: false, otherError: false },
+  behavior: { unsupported: false, otherError: false, flacRecover: false, decodeErrorNoEvent: false },
 }));
 
 vi.mock('../../../src/renderer/player/web-audio-engine', () => {
@@ -35,6 +35,10 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
         this.onError?.(new Event('error'));
         throw new DOMException('Failed to load because no supported source was found.', 'NotSupportedError');
       }
+      if (h.behavior.decodeErrorNoEvent) {
+        // 没有 error 事件、只有 play() rejection 的边角场景（映射中文用）
+        throw new DOMException('Failed to load because no supported source was found.', 'NotSupportedError');
+      }
       if (h.behavior.otherError) throw new Error('解析播放地址失败');
       return undefined;
     });
@@ -45,7 +49,7 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
     seek = vi.fn();
     getSpectrum = vi.fn(() => null);
     getWaveform = vi.fn(() => null);
-    recoverFlac = vi.fn(async () => false);
+    recoverFlac = vi.fn(async () => h.behavior.flacRecover);
     constructor() {
       h.engine.instance = this as unknown as Record<string, unknown>;
     }
@@ -140,6 +144,8 @@ beforeEach(() => {
   }
   h.behavior.unsupported = false;
   h.behavior.otherError = false;
+  h.behavior.flacRecover = false;
+  h.behavior.decodeErrorNoEvent = false;
 });
 
 describe('direct → mpv fallback (QYP3-030)', () => {
@@ -211,6 +217,31 @@ describe('direct → mpv fallback (QYP3-030)', () => {
     const state = useMusicPlaybackStore.getState();
     expect(api.playerLoadFile).not.toHaveBeenCalled();
     expect(state.engine).toBeNull();
+  });
+
+  it('keeps webaudio and surfaces no error when FLAC cover-strip recovery succeeds (QYP3-033)', async () => {
+    resolveDirectThenMpv();
+    failLikeUnsupportedFormat();
+    h.behavior.flacRecover = true;
+
+    await useMusicPlaybackStore.getState().playQueue([flacTrack(13, '嘲笑')], 0);
+
+    // 自救成功：保持内置引擎、不兜底 mpv、不把浏览器原文当失败弹出来
+    await vi.waitFor(() => expect(useMusicPlaybackStore.getState().engine).toBe('webaudio'));
+    expect(useMusicPlaybackStore.getState().errorMessage).toBeNull();
+    expect(api.playerLoadFile).not.toHaveBeenCalled();
+  });
+
+  it('maps a raw decoder error to a Chinese message when no recovery/fallback owns it', async () => {
+    resolveDirectThenMpv();
+    // 没有 error 事件的自救/兜底 → 这次 rejection 无人认领，必须中文化上报
+    h.behavior.decodeErrorNoEvent = true;
+
+    await useMusicPlaybackStore.getState().playQueue([flacTrack(13, '嘲笑')], 0);
+
+    await vi.waitFor(() =>
+      expect(useMusicPlaybackStore.getState().errorMessage).toBe('这首曲目无法解码播放')
+    );
   });
 
   it('still reports failures that no fallback picked up', async () => {

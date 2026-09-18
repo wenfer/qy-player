@@ -643,6 +643,14 @@
     `MpvProcessManager.start` 只轮询 socket 文件是否存在，`bind()` 建文件、
     `listen()` 后才可连，窗口期 connect 被拒。`MpvIpcClient.connect` 加有界重试
     （默认约 1.2s），失败尝试不派发 `disconnect`
+- 真机复盘补修 2（用户实测「播放音频总是弹窗 Failed to load because no supported
+  source was found.」）：QYP3-033 自救是异步的，`onError` 不再同步置
+  `directFallbackTrackId` → `playQueue` 的 catch 把紧随 error 事件的 `play()`
+  rejection 当失败抛出。修法：自救期间以 `flacRecoveringTrackId` 认领该曲目的
+  rejection（marker 刻意不在 .then 里清，避免 .then 先于 catch 跑导致误报，
+  改为下一次 playQueue/stop 重置）；未被认领的真实解码失败经 `decodeErrorMessage`
+  统一中文化为「这首曲目无法解码播放」。新增 2 例测试（自救成功零报错、无认领
+  时中文报错）
 - Evidence: 新增 `tests/renderer/player/flac-strip.test.ts`（剥离 PICTURE /
   保留 STREAMINFO 与音频帧 / 末块标志重算 / 截断返回 null / isLocalFlacUrl）；
   `web-audio-engine.test.ts` 增 `getWaveform` 与 `recoverFlac` 用例；

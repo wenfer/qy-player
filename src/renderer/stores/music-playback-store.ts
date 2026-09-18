@@ -75,8 +75,21 @@ let playToken = 0;
  * 「谁失败了」，playQueue 的 catch 据此判断这次 rejection 是否已被兜底接管。
  */
 let directFallbackTrackId: number | null = null;
-/** FLAC 封面剥离自救进行中：期间忽略错误事件，决策交给 recoverFlac 的 .then。 */
-let flacRecovering = false;
+/**
+ * 正在做 FLAC 封面剥离自救的那一首（QYP3-033）。
+ *
+ * 与 `directFallbackTrackId` 同理：自救是异步的（fetch + 重封装 29MB 级别），
+ * 而 `error` 事件先到、`play()` 的 rejection 紧随其后——若 catch 不认领这次
+ * rejection，就会把浏览器原文「Failed to load because no supported source was
+ * found.」当成播放失败弹给用户，即便自救随后成功。这里记下「谁在自救」，catch
+ * 据此跳过；同一首的后续错误事件也被忽略，最终决策交给 recoverFlac 的 .then。
+ *
+ * 刻意**不在 .then 里清除**：recoverFlac 可能非常快地 resolve（比如非 flac 直接
+ * 返回 false），若 .then 先于 catch 跑，marker 被清掉后 catch 又会把原始英文
+ * 错误弹出来。改为在下一次 playQueue / stop 时重置，让 catch 的判定与异步顺序
+ * 无关。
+ */
+let flacRecoveringTrackId: number | null = null;
 /** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
 let currentLyrics: string | null = null;
 let lastDeskPushAt = 0;
@@ -209,14 +222,15 @@ function getEngine(): WebAudioEngine {
       if (!failed || typeof failed.trackId !== 'number' || typeof failed.sourceId !== 'number') return;
       // QYP3-033：本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，先剥离封面
       // 在内置引擎重播——保留真频谱/真波形，且不必兜底 mpv（也避免黑窗）。
-      // 自救进行中：忽略这次（及后续）错误，最终决策交给 recoverFlac 的 .then
-      if (flacRecovering) return;
+      // 自救进行中：忽略这一首的后续错误，最终决策交给 recoverFlac 的 .then
+      if (flacRecoveringTrackId === failed.trackId) return;
       if (isLocalFlacUrl(failed.url)) {
-        flacRecovering = true;
+        flacRecoveringTrackId = failed.trackId;
         void getEngine()
           .recoverFlac(failed)
           .then((recovered) => {
-            flacRecovering = false;
+            // 期间用户换了曲：这次自救/兜底不再适用于当前会话
+            if (useMusicPlaybackStore.getState().current !== failed) return;
             if (recovered) {
               // 自救成功：保持 webaudio 引擎（真频谱/真波形都在这里）
               useMusicPlaybackStore.setState({ engine: 'webaudio', isPlaying: true, errorMessage: null });
@@ -329,6 +343,23 @@ export interface MusicTrackInput {
 }
 
 /**
+ * 浏览器解码失败的原文是英文（"Failed to load because no supported source
+ * was found."），不该直接亮给用户；统一成中文。其余错误按原文展示。
+ */
+function decodeErrorMessage(e: unknown): string {
+  if (e instanceof DOMException && e.name === 'NotSupportedError') {
+    return '这首曲目无法解码播放';
+  }
+  if (e instanceof Error) {
+    if (/no supported source|DEMUXER_ERROR|failed to load/i.test(e.message)) {
+      return '这首曲目无法解码播放';
+    }
+    return e.message;
+  }
+  return '播放失败';
+}
+
+/**
  * 兜底到 mpv 的统一入口（QYP3-033 抽取）：标记「谁失败了」+ 同步切到 mpv
  * 状态面 + 实际触发 mpv loadfile。先前的 onError 内联逻辑迁移至此，供
  * FLAC 自救失败后的兜底复用。
@@ -411,6 +442,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   playQueue: async (tracks, startIndex) => {
     const start = tracks[startIndex];
     if (!start) return;
+    // 新的播放请求：上一首的 FLAC 自救标记作废（见 flacRecoveringTrackId 注释）
+    flacRecoveringTrackId = null;
     const token = ++playToken;
     try {
       const resolution = (await window.electronAPI.resolvePlayback(
@@ -526,7 +559,11 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         directFallbackTrackId = null;
         return;
       }
-      set({ errorMessage: e instanceof Error ? e.message : '播放失败' });
+      // 正在做 FLAC 封面剥离自救：同理，结果由 recoverFlac 的 .then 定，
+      // 这里不能把浏览器原文（Failed to load because no supported source
+      // was found.）当成失败弹出来——即便自救随后成功
+      if (flacRecoveringTrackId === start.trackId) return;
+      set({ errorMessage: decodeErrorMessage(e) });
     }
   },
 
@@ -661,6 +698,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   stop: () => {
     // 幂等：视频状态事件会高频到达，已无音乐会话时直接返回（不 set）
     if (get().engine === null) return;
+    flacRecoveringTrackId = null; // 音乐会话结束，自救标记作废
     engineSingleton?.pause();
     currentLyrics = null;
     pushDeskLyrics(get().position, false);

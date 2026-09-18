@@ -63,6 +63,12 @@
   保留、重封装成 blob）在内置引擎重播——保留真频谱/真波形，也顺带避开了 mpv
   黑窗。封面展示走 covers 缓存分区，与播放流内嵌封面无关，不受影响。渲染层
   CSP 的 `media-src` 需放行 `blob:`（否则剥离后的 blob 会被 CSP 拒载）。
+- **播放本地 FLAC 每次都弹英文报错 "Failed to load because no supported source
+  was found."**：QYP3-033 引入封面剥离自救后，`onError` 不再同步置
+  `directFallbackTrackId`，于是 `playQueue` 的 catch 把紧随 `error` 事件而来的
+  `play()` rejection 当成失败抛了出来——即便自救随后成功。现在自救期间该曲目的
+  rejection 被认领（`flacRecoveringTrackId`），不再误报；无自救/兜底认领的真实
+  解码失败统一中文化为「这首曲目无法解码播放」（浏览器英文原文不再直接亮给用户）。
 - **首个 loadfile 偶发 `ECONNREFUSED mpv-*.sock`**：`MpvProcessManager.start`
   只轮询 socket 文件是否存在，而文件由 `bind()` 创建、`listen()` 之后才可连接，
   两者之间 connect 会被拒。`MpvIpcClient.connect` 现做有界重试（默认约 1.2s），
