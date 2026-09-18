@@ -120,7 +120,14 @@
   fetch 字节、用 `flac-strip.ts` 移除所有 type=6 封面块、重封装成 blob 在内置引擎
   重播——音频帧原样保留（无损）。封面展示走 `covers` 缓存分区，与播放流内嵌封面
   无关，剥离不影响封面。改相关逻辑前确认：本地 FLAC 仍能在内置引擎出真波形、
-  非法封面文件不再兜底 mpv、封面照常显示
+  非法封面文件不再兜底 mpv、封面照常显示。**渲染层 CSP 的 `media-src` 必须放行
+  `blob:`**（`src/renderer/index.html`），否则剥离后的 blob 会被 CSP 拒载
+  （`Refused to load media from 'blob:...'`），自救失效并退到 mpv
+- **mpv IPC 连接要容忍启动竞态**（QYP3-033）。`MpvProcessManager.start` 只等
+  socket 文件出现，而文件由 `bind()` 创建、`listen()` 之后才可连接；两者之间
+  connect 会 `ECONNREFUSED`（首个 loadfile 直接报错）。`MpvIpcClient.connect`
+  做有界重试（默认约 1.2s），只吞连接建立前的错误；`connectOnce` 里失败的尝试
+  不派发 `disconnect`，只有真正建立过连接的套接字关闭才算断开
 - **音乐经 mpv 解码时绝不能让 mpv 弹窗**（QYP3-032）。mpv 共享实例由
   `playerLoadFile` 懒启动；音频文件（含内嵌封面，mpv 当成一条 mjpeg video
   轨）若不压窗会露出黑屏。修复路径：启动参数 `--force-window=no`，音乐加载

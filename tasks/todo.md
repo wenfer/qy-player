@@ -635,11 +635,21 @@
     blob 在内置引擎重播；`music-playback-store.ts.onError` 在 mpv 兜底**前**先调
     `recoverFlac`，成功则保持 webaudio 引擎（真波形），失败再走原 mpv 兜底
     （用 `flacRecovering` 标志吞掉自救期间的错误事件，避免重复兜底）
-- Evidence（待跑）：新增 `tests/renderer/player/flac-strip.test.ts`（剥离 PICTURE /
+- 真机复盘补修（用户实测「还是报错」）：
+  - `Refused to load media from 'blob:...'`——渲染层 CSP `media-src` 未放行
+    `blob:`，剥离后的 blob 被拒载 → 自救失效并退到 mpv。已在
+    `src/renderer/index.html` 的 `media-src` 加 `blob:`
+  - 首个 loadfile 报 `connect ECONNREFUSED /tmp/qy-player/mpv-*.sock`——
+    `MpvProcessManager.start` 只轮询 socket 文件是否存在，`bind()` 建文件、
+    `listen()` 后才可连，窗口期 connect 被拒。`MpvIpcClient.connect` 加有界重试
+    （默认约 1.2s），失败尝试不派发 `disconnect`
+- Evidence: 新增 `tests/renderer/player/flac-strip.test.ts`（剥离 PICTURE /
   保留 STREAMINFO 与音频帧 / 末块标志重算 / 截断返回 null / isLocalFlacUrl）；
   `web-audio-engine.test.ts` 增 `getWaveform` 与 `recoverFlac` 用例；
   `visualizer.test.tsx` 重写（真实波形/静态进度线断言，去掉 `waveformAmplitude`）；
-  typecheck 双配置 + 全量测试 + 构建三产物
+  新增 `tests/main/playback/mpv-ipc-client.test.ts` 3 例（已监听即连 / 延迟
+  listen 靠重试成功 / 耗尽重试后 reject）；typecheck 双配置 + 全量 861/861 +
+  构建三产物绿
 - 目标机验证：本地普通音轨（mp3/正常 flac）拾音器出**真波形/真频谱**；嘲笑.flac
   类非法封面 FLAC 不再兜底 mpv、在内置引擎出真波形且不弹窗；服务器/WebDAV/CUE 音源
   拾音器显示静态进度线（诚实告知无真实波形）。已记入 `docs/TARGET-VERIFY.md`

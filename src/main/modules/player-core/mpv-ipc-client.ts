@@ -27,30 +27,64 @@ export class MpvIpcClient extends EventEmitter {
     this.socketPath = socketPath;
   }
 
-  async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.socket = createConnection(this.socketPath);
+  /**
+   * 连接 mpv 的 IPC 套接字（带短重试）。
+   *
+   * socket 文件由 bind() 创建、listen() 之后才可连接；`MpvProcessManager.start`
+   * 只轮询文件是否存在，因此 mpv 尚未 listen()（或仍在初始化脚本/配置）时首批
+   * connect 会拿到 ECONNREFUSED，直接放弃会让首个 loadfile 报错。这里做有界
+   * 重试（默认 ~1.2s），只吞连接建立前的错误。
+   */
+  async connect(retries = 12, retryDelayMs = 100): Promise<void> {
+    let lastErr: Error | undefined;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        await this.connectOnce();
+        return;
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        }
+      }
+    }
+    throw lastErr ?? new Error('MPV IPC connect failed');
+  }
 
-      this.socket.on('connect', () => {
+  /** 单次连接尝试：失败时销毁套接字并 reject（不派发 disconnect）。 */
+  private connectOnce(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const socket = createConnection(this.socketPath);
+      this.socket = socket;
+
+      socket.on('connect', () => {
+        if (settled) return;
+        settled = true;
         this.connected = true;
         this.emit('connect');
         resolve();
       });
 
-      this.socket.on('data', (data) => {
+      socket.on('data', (data) => {
         this.handleData(data.toString());
       });
 
-      this.socket.on('error', (err) => {
-        if (!this.connected) {
+      socket.on('error', (err) => {
+        if (!this.connected && !settled) {
+          settled = true;
+          socket.destroy();
           reject(err);
+          return;
         }
         this.emit('error', err);
       });
 
-      this.socket.on('close', () => {
+      socket.on('close', () => {
+        const wasConnected = this.connected;
         this.connected = false;
-        this.emit('disconnect');
+        // 只有真正建立过连接的套接字关闭才算断开；重试期间的失败尝试不派发
+        if (settled && wasConnected) this.emit('disconnect');
       });
     });
   }

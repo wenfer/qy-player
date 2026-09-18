@@ -54,7 +54,12 @@
   Chromium 在打开容器阶段就整文件失败（此前只能兜底 mpv、既无真波形又弹黑窗）。
   现解码失败时先剥离内嵌封面（`flac-strip.ts` 移除所有 type=6 块、音频帧原样
   保留、重封装成 blob）在内置引擎重播——保留真频谱/真波形，也顺带避开了 mpv
-  黑窗。封面展示走 covers 缓存分区，与播放流内嵌封面无关，不受影响。
+  黑窗。封面展示走 covers 缓存分区，与播放流内嵌封面无关，不受影响。渲染层
+  CSP 的 `media-src` 需放行 `blob:`（否则剥离后的 blob 会被 CSP 拒载）。
+- **首个 loadfile 偶发 `ECONNREFUSED mpv-*.sock`**：`MpvProcessManager.start`
+  只轮询 socket 文件是否存在，而文件由 `bind()` 创建、`listen()` 之后才可连接，
+  两者之间 connect 会被拒。`MpvIpcClient.connect` 现做有界重试（默认约 1.2s），
+  只吞连接建立前的错误；真正断开仍照常派发 `disconnect`。
 
 ## 1.2.0（三期：音乐播放）
 
