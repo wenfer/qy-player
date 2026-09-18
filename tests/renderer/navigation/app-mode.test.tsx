@@ -43,6 +43,9 @@ describe('app mode navigation (QYP3-040)', () => {
     expect(screen.getByRole('button', { name: '本地' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '历史' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '歌单' })).toBeNull();
+    // 侧栏不再重复应用标识：标题栏已有 logo 与名称（QYP3-042）
+    expect(screen.queryByRole('button', { name: '返回首页' })).toBeNull();
+    expect(screen.queryByText('QY Player')).toBeNull();
     // 顶部不再有并列的模式分段控件
     expect(screen.queryByRole('radiogroup', { name: '模式切换' })).toBeNull();
   });

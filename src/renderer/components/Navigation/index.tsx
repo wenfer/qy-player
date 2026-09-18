@@ -83,19 +83,7 @@ export default function Navigation() {
       className="fixed left-0 top-9 bottom-0 w-60 bg-card border-r border-border flex flex-col z-40"
       aria-label="主导航"
     >
-      {/* Logo */}
-      <div className="px-5 py-3.5 border-b border-border">
-        <button
-          onClick={() => navigate(MODE_HOME[mode])}
-          className="flex items-center gap-3 focus-ring rounded-lg"
-          aria-label="返回首页"
-        >
-          <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center flex-shrink-0">
-            <span className="text-primary-foreground font-bold text-sm">Q</span>
-          </div>
-          <span className="font-semibold text-lg tracking-tight">QY Player</span>
-        </button>
-      </div>
+      {/* 侧栏不再重复应用标识：标题栏已有 logo 与名称（QYP3-042） */}
 
       {/* Nav Items（按当前模式切换，QYP3-040） */}
       <div className="flex-1 px-3 py-4 space-y-1">

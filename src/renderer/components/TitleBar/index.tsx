@@ -19,10 +19,15 @@ const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties;
 export const TITLE_BAR_HEIGHT = 36;
 export const COMPACT_TITLE_BAR_HEIGHT = 28;
 
+// 右上角按钮：40×36 的点击区（比图标本身大得多，老机触摸板也好点）
 const BTN =
-  'h-full aspect-square flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring';
+  'h-full w-10 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring';
+const BTN_SMALL =
+  'h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring';
 const CLOSE_BTN =
-  'h-full aspect-square flex items-center justify-center text-muted-foreground hover:text-white hover:bg-red-500 transition-colors focus-ring';
+  'h-full w-10 flex items-center justify-center text-muted-foreground hover:text-white hover:bg-red-500 transition-colors focus-ring';
+const CLOSE_BTN_SMALL =
+  'h-full w-8 flex items-center justify-center text-muted-foreground hover:text-white hover:bg-red-500 transition-colors focus-ring';
 
 export default function TitleBar({ compact = false }: { compact?: boolean }) {
   const [maximized, setMaximized] = useState(false);
@@ -66,7 +71,7 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
       </div>
       <div className="flex items-stretch" style={NO_DRAG}>
         {compact ? (
-          <button type="button" className={BTN} onClick={exitCompact} aria-label="还原窗口" title="还原窗口">
+          <button type="button" className={BTN_SMALL} onClick={exitCompact} aria-label="还原窗口" title="还原窗口">
             <Maximize2 size={13} />
           </button>
         ) : (
@@ -77,26 +82,26 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
             aria-label={maximized ? '还原' : '最大化'}
             title={maximized ? '还原' : '最大化'}
           >
-            {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         )}
         <button
           type="button"
-          className={BTN}
+          className={compact ? BTN_SMALL : BTN}
           onClick={() => void window.electronAPI.minimizeWindow()}
           aria-label="最小化"
           title="最小化"
         >
-          <Minus size={14} />
+          <Minus size={compact ? 13 : 16} />
         </button>
         <button
           type="button"
-          className={CLOSE_BTN}
+          className={compact ? CLOSE_BTN_SMALL : CLOSE_BTN}
           onClick={() => void window.electronAPI.closeWindow()}
           aria-label="关闭"
           title="关闭"
         >
-          <X size={14} />
+          <X size={compact ? 13 : 16} />
         </button>
       </div>
     </div>
