@@ -28,6 +28,13 @@
   （`streamSessionId`），WebDAV 直链不带凭据，mpv 因此拿不到 Basic 认证头
   且失败不上报。`playQueue` / `playServerAt` / 内置引擎回退三处全部补上
   透传。
+- **本地音轨（mp3/flac 等）拾音器不随音调跳**：内置引擎在起播路径
+  （`playCurrent`）从不调 `AudioContext.resume()`，而该调用不在用户手势的
+  同步栈内（`playQueue` 之前有 `resolvePlayback` 的 IPC await），浏览器自动
+  播放策略下构造出的上下文停在 `suspended`——整条图
+  （source→analyser→…→destination）不运转，既听不到声音、AnalyserNode 也只
+  读到全 0，频谱静止。现起播前主动 resume。mpv 引擎（服务器/WebDAV/冷门格式）
+  仍无真实频谱，降级波形改为随播放节拍轻微起伏，至少「活」起来。
 
 ## 1.2.0（三期：音乐播放）
 

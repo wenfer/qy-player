@@ -559,6 +559,31 @@
 - 未做（记录在案）：兜底失败后不记忆（每次播放该曲都会先失败一次，约
   100ms）；mpv 自身解码失败无法上报（mpv 日志按硬性约束静音）
 
+### QYP3-031 拾音器不随音调跳（本地音轨频谱静止）`[x]`
+- 触发：用户报「播放音频没有拾音器效果，界面的线条没有跟随音调跳动」
+- 确认场景（用户）：走**本地普通音轨**（mp3/flac → 内置 webaudio 引擎），
+  本应有实时频谱；mpv 引擎（服务器/WebDAV/冷门格式）按架构无真实频谱
+- 根因：内置引擎起播路径 `playCurrent` 从不调 `AudioContext.resume()`。引擎
+  在 `playQueue` 里构造（`new AudioContext()`），而该调用不在用户手势同步栈
+  内（`resolvePlayback` 的 IPC await 在其前）→ 自动播放策略下上下文停在
+  `suspended` → 整条图（source→analyser→…→destination）不运转：既无声、
+  AnalyserNode 也只读全 0 → 频谱静止（若完全无声则是同一根的更重表现）
+- 修法：
+  - `web-audio-engine.ts` 的 `playCurrent` 起播前 `if (ctx.state==='suspended') await ctx.resume()`；暂停后的 `resume()` 已含，勿删
+  - `Visualizer/index.tsx`：频谱全 0（mpv 引擎下渲染层 AnalyserNode 只接静音
+    元素）视为无数据 → 退化波形，避免画出一排静止的 1px 细条；降级波形改为
+    播放中按时间相位轻微起伏（**非真实频谱**，仅供 mpv/降级观感）
+- mpv 真实频谱（用户选「尽量做真实频谱」）：**目标机 mpv 0.32 不支持 IPC 频谱
+  输出**（`audio-fft` 属性 0.34+ 才有；老机软件解码也不宜每帧走 IPC）。故
+  0.32 上真实 FFT 不可得，当前以随节拍起伏的波形作为「尽量」的降级；若日后
+  放宽 mpv 版本下限（≥0.34），可在 main 轮询 `audio-fft` 并经状态事件回传
+  renderer——届时再加，不现在上未测的 IPC 路径
+- Evidence: 新增 `tests/renderer/player/web-audio-engine.test.ts` 2 例（suspended
+  起播会 resume / running 不重复 resume）+ `tests/renderer/music/visualizer.test.tsx`
+  2 例（全 0 频谱走波形降级 / 非零频谱画 bars）；stash 源码后引擎 resume 2 例
+  中 1 例（state 断言）失败、visualizer 全 0 用例失败（证明非空转）；typecheck
+  双配置 + 全量 846/846；构建三产物绿
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→

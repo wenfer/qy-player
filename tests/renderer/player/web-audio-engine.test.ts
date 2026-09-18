@@ -221,4 +221,35 @@ describe('WebAudioEngine (QYP3-010)', () => {
       | undefined;
     expect(gain?.gain.value).toBe(0.5);
   });
+
+  it('resumes a suspended AudioContext on initial play (QYP3-031)', async () => {
+    const audio = fakeAudio();
+    const ctx = fakeCtx();
+    // 自动播放策略下构造出的上下文常为 suspended
+    (ctx as unknown as { state: string }).state = 'suspended';
+    // 让 resume 真正把状态切到 running（mock 默认不改 state）
+    const resume = vi.fn(async () => {
+      (ctx as unknown as { state: string }).state = 'running';
+    });
+    (ctx as unknown as { resume: ReturnType<typeof vi.fn> }).resume = resume;
+    const engine = new WebAudioEngine({
+      createElement: () => audio,
+      createContext: () => ctx,
+    });
+    await engine.playQueue([makeTrack(1)], 0, 'off', false);
+    expect(resume).toHaveBeenCalled();
+    expect((ctx as unknown as { state: string }).state).toBe('running');
+  });
+
+  it('does not call resume when the context is already running', async () => {
+    const audio = fakeAudio();
+    const ctx = fakeCtx(); // 默认 running
+    const resume = ctx.resume as ReturnType<typeof vi.fn>;
+    const engine = new WebAudioEngine({
+      createElement: () => audio,
+      createContext: () => ctx,
+    });
+    await engine.playQueue([makeTrack(1)], 0, 'off', false);
+    expect(resume).not.toHaveBeenCalled();
+  });
 });

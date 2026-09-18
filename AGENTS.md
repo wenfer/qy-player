@@ -94,6 +94,15 @@
   会看到"放不了"的假消息。内置引擎比 mpv 严格得多：FLAC 内嵌图片块的
   `picture.type` 非法（-1）时 Chromium 打开容器就失败，而 mpv 只当警告
   —— 这类文件全靠兜底救回
+- **内置引擎起播必须 `AudioContext.resume()`**。`WebAudioEngine` 在
+  `playQueue` 路径里构造（构造时 `new AudioContext()`），而该调用不在用户
+  手势的同步栈内（`resolvePlayback` 的 IPC await 在它之前）——浏览器自动播放
+  策略下上下文停在 `suspended`，整条图（source→analyser→…→destination）不
+  运转：既无声、AnalyserNode 也只读全 0，拾音器频谱静止。起播前主动 resume
+  （`web-audio-engine.ts` 的 `playCurrent`），暂停后的 `resume()` 已包含，勿
+  删。mpv 引擎（服务器/WebDAV/冷门格式）渲染层拿不到真实音频数据，**没有
+  真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 + 架构总览
+  音乐会话段）
 - **封面文件名不能硬编码扩展名**。落盘名按内嵌图片真实格式生成
   （`<trackId>.jpg` 占真实世界绝大多数），渲染层无从得知格式，请求
   `<id>.png` 必须经 `resolveCoverFileName`（`cover-service.ts`）按

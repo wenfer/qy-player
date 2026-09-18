@@ -214,6 +214,18 @@ export class WebAudioEngine {
   private async playCurrent(): Promise<void> {
     const track = this.queue.current;
     if (!track) return;
+    // 起播前必须确保 AudioContext 处于 running：构造时创建的上下文在浏览器
+    // 自动播放策略下常为 suspended，且本调用不在用户手势的同步栈内
+    // （playQueue 之前有 resolvePlayback 的 IPC await），若不主动 resume，
+    // 整条图（source→analyser→…→destination）不运转——既听不到声音，
+    // 拾音器 AnalyserNode 也只读到全 0，频谱静止。
+    if (this.ctx && this.ctx.state === 'suspended') {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // resume 失败不阻断换源；部分环境无声但可继续，交由上层处理
+      }
+    }
     this.audio.src = track.url;
     await this.audio.play?.();
   }

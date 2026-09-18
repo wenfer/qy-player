@@ -18,6 +18,14 @@ export function waveformAmplitude(index: number, total: number): number {
   return Math.max(0.08, Math.min(1, envelope * (0.55 + 0.45 * ripple)));
 }
 
+/** 频谱全 0（mpv 引擎下渲染层 AnalyserNode 只接到静音元素）视为无数据。 */
+function isAllZero(data: Uint8Array): boolean {
+  for (let i = 0; i < data.length; i += 1) {
+    if (data[i] !== 0) return false;
+  }
+  return true;
+}
+
 interface VisualizerProps {
   mode: VisualizerMode;
   /** 频谱数据源（renderer 引擎快照；无则自动画波形）。 */
@@ -68,7 +76,7 @@ export default function Visualizer({
 
       if (mode === 'spectrum') {
         const data = isPlaying ? getSpectrum() : null;
-        if (data && data.length > 0) {
+        if (data && data.length > 0 && !isAllZero(data)) {
           const step = Math.max(1, Math.floor(data.length / BARS));
           const barW = w / BARS;
           for (let i = 0; i < BARS; i += 1) {
@@ -83,13 +91,16 @@ export default function Visualizer({
           }
           return;
         }
-        // 无频谱数据（mpv 引擎/未起播）→ 退化成波形，绝不空白闪烁
+        // 无频谱数据（mpv 引擎静音元素全 0 / 未起播）→ 退化成波形，绝不空白闪烁
       }
 
       const progress = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
       const barW = w / BARS;
       for (let i = 0; i < BARS; i += 1) {
-        const amp = waveformAmplitude(i, BARS);
+        // 播放中按时间相位轻微起伏，让降级波形“活”起来（非真实频谱，仅供
+        // mpv / 降级观感；真实音调频谱只在 webaudio 引擎下由 AnalyserNode 提供）。
+        const lively = isPlaying ? 0.6 + 0.4 * Math.sin(now / 170 + i * 0.55) : 1;
+        const amp = waveformAmplitude(i, BARS) * lively;
         const barH = Math.max(1, amp * h * 0.9);
         const played = i / BARS <= progress;
         ctx.fillStyle = played ? 'rgba(255, 209, 102, 0.95)' : 'rgba(148, 163, 184, 0.45)';
