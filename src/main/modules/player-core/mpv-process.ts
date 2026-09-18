@@ -81,7 +81,10 @@ export class MpvProcessManager extends EventEmitter {
     const args = [
       '--input-ipc-server=' + this.socketPath,
       '--idle',
-      '--force-window=immediate',
+      // 不在启动时强制开窗：音频经 mpv 解码（服务器 / WebDAV / 冷门格式 /
+      // 本地兜底）若任由 mpv 开窗会露黑屏（内嵌封面被当成 video 轨）。窗口
+      // 由 playerLoadFile 按媒体类型决定（视频=yes，音乐=no，见 QYP3-032）。
+      '--force-window=no',
       '--keep-open',
       '--save-position-on-quit=no',
       '--sub-auto=fuzzy',

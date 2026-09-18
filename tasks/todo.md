@@ -584,6 +584,31 @@
   中 1 例（state 断言）失败、visualizer 全 0 用例失败（证明非空转）；typecheck
   双配置 + 全量 846/846；构建三产物绿
 
+### QYP3-032 音乐经 mpv 解码弹黑屏窗口 `[x]`
+- 触发：用户报「嘲笑.flac 还是无法播放，而且播放会拉起一个窗口，只有黑屏」
+- 排查：
+  - 该 flac 经 QYP3-030 兜底到 mpv（内置引擎打不开）；mpv 0.32 在本机实测可解
+    码（`--no-video --ao=null --end=2` 退出码 0，报 `Invalid picture type: -1`
+    仅是警告；`Video --vid=1 [P] (mjpeg 300x300)` 即内嵌封面被当成 video 轨，
+    `(+) Audio --aid=1 (flac 2ch 44100Hz)` 音频正常）——所以音频其实能放，黑屏
+    是 mpv 把封面当 video 轨显示的窗口
+  - 根因：`mpv-process.ts` 启动参数 `--force-window=immediate` 强制开窗；音频
+    文件带封面 → 即便不改 force-window 也会开窗，且覆盖/冷门格式的音乐都走 mpv
+  - 该 mpv 实例由 `playerLoadFile` 懒启动（首次播放才起），所以连走内置引擎
+    （webaudio）的本地音乐也会顺带启动它 → 之前连普通本地音乐都会闪黑窗
+- 修法：
+  - 启动参数 `--force-window=immediate` → `--force-window=no`（idle 不再开窗）
+  - `PlayerCore.setVideoWindowForMusic(isMusic)`：音乐 `vid=no` + `force-window=no`，
+    视频 `force-window=yes` + `vid=auto`；在 `ipc/index.ts` 的 `playerLoadFile`
+    里 audioChain 分支调 true、else（视频）分支调 false
+  - 关键：必须 `vid=no` 关掉封面 video 轨，否则仅改 force-window 仍会开窗
+- Evidence: 新增 `tests/main/playback/mpv-process.test.ts` 1 例（启动参数含
+  `--force-window=no`、不含 `immediate`）；stash 掉改动后该例失败（证明非空转）；
+  typecheck 双配置 + 全量 847/847；构建三产物绿
+- 待目标机验证（无显示器环境无法验窗口显隐）：音乐（本地冷门格式 / 服务器 /
+  WebDAV / 内置兜底）播放无弹窗且音频出声；视频播放仍有 mpv 窗口；音乐→视频
+  →音乐切换窗口状态正确。已记入 `docs/TARGET-VERIFY.md`
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→

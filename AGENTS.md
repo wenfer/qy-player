@@ -103,6 +103,13 @@
   删。mpv 引擎（服务器/WebDAV/冷门格式）渲染层拿不到真实音频数据，**没有
   真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 + 架构总览
   音乐会话段）
+- **音乐经 mpv 解码时绝不能让 mpv 弹窗**（QYP3-032）。mpv 共享实例由
+  `playerLoadFile` 懒启动；音频文件（含内嵌封面，mpv 当成一条 mjpeg video
+  轨）若不压窗会露出黑屏。修复路径：启动参数 `--force-window=no`，音乐加载
+  时 `setVideoWindowForMusic(true)`（`vid=no` + `force-window=no`），视频加载
+  时 `setVideoWindowForMusic(false)`（`force-window=yes` + `vid=auto`）。
+  改相关逻辑前确认：音乐（本地冷门格式 / 服务器 / WebDAV / 内置引擎兜底）无
+  弹窗、视频仍有窗口
 - **封面文件名不能硬编码扩展名**。落盘名按内嵌图片真实格式生成
   （`<trackId>.jpg` 占真实世界绝大多数），渲染层无从得知格式，请求
   `<id>.png` 必须经 `resolveCoverFileName`（`cover-service.ts`）按

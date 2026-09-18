@@ -236,6 +236,26 @@ export class PlayerCore extends EventEmitter {
     }
   }
 
+  /**
+   * 音乐（音频）播放时隐藏 mpv 窗口（QYP3-032）：经 mpv 解码的音频（服务器 /
+   * WebDAV / 冷门格式，以及内置引擎解不开的本地文件兜底到 mpv）若任由 mpv
+   * 弹窗，会露出一块黑屏——音频文件常带内嵌封面，mpv 把它当成一条 video
+   * 轨道（mjpeg），即便没有 --force-window 也会开窗。故音乐必须关掉视频轨
+   * （vid=no）并撤销强制窗口（force-window=no）。视频则恢复。该 mpv 实例是
+   * 懒启动的（首次播放才起），即使是 webaudio 引擎的音乐也会顺带启动它，
+   * 所以音乐路径一律压窗，不能只压 mpv 直解的那种。
+   */
+  async setVideoWindowForMusic(isMusic: boolean): Promise<void> {
+    if (!this.ipc) return;
+    if (isMusic) {
+      await this.ipc.setProperty('vid', 'no').catch(() => {});
+      await this.ipc.setProperty('force-window', 'no').catch(() => {});
+    } else {
+      await this.ipc.setProperty('force-window', 'yes').catch(() => {});
+      await this.ipc.setProperty('vid', 'auto').catch(() => {});
+    }
+  }
+
   /** Show an OSD message on the video (no-op when no media loaded). */
   async showText(text: string, durationMs = 1500): Promise<void> {
     if (!this.ipc) return;

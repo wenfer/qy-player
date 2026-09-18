@@ -1031,6 +1031,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
       );
       mpvAfWasSet = true;
       setMpvMusicActive(true); // QYP3-026：音乐会话（媒体键/状态转发按音乐走）
+      // QYP3-032：音乐经 mpv 解码时压掉 mpv 窗口（含内嵌封面 video 轨）
+      void player.setVideoWindowForMusic(true);
     } else {
       if (mpvAfWasSet) {
         void player.applyMusicAudioChain('', null);
@@ -1044,6 +1046,8 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
           _event.sender.send(IPC_CHANNELS.MUSIC.ON_SESSION_END);
         }
       }
+      // QYP3-032：视频恢复 mpv 窗口（音乐路径压过，这里复位）
+      void player.setVideoWindowForMusic(false);
     }
 
     // Real headers never cross the IPC boundary: the renderer hands back the

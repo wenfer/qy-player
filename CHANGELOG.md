@@ -35,6 +35,14 @@
   （source→analyser→…→destination）不运转，既听不到声音、AnalyserNode 也只
   读到全 0，频谱静止。现起播前主动 resume。mpv 引擎（服务器/WebDAV/冷门格式）
   仍无真实频谱，降级波形改为随播放节拍轻微起伏，至少「活」起来。
+- **音乐经 mpv 解码时弹出黑屏窗口**：mpv 由 `playerLoadFile` 按媒体类型决定是否
+  开窗——视频保持窗口，音乐关掉视频轨（`vid=no`）并撤销强制窗口
+  （`force-window=no`）。音频文件常带内嵌封面，mpv 把它当成一条 video 轨
+  （mjpeg），即便不改 `force-window` 也会开窗，故必须同时关掉视频轨。该 mpv
+  实例是懒启动的（首次播放才起），所以连走内置引擎（webaudio）的音乐也会顺带
+  启动它——音乐路径一律压窗，不能只压 mpv 直解的那一类。启动参数由
+  `--force-window=immediate` 改为 `--force-window=no`（视频分支再显式置
+  `yes`），避免音乐首发时先闪一下黑窗再压掉。
 
 ## 1.2.0（三期：音乐播放）
 
