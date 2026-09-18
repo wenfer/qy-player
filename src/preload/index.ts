@@ -307,8 +307,8 @@ const electronAPI = {
   testServer: (server: unknown) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS.TEST_SERVER, server),
 
   // Window
-  enterPlayerMode: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.ENTER_PLAYER_MODE),
-  exitPlayerMode: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.EXIT_PLAYER_MODE),
+  setCompactMode: (enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_COMPACT_MODE, enabled),
   setFullscreen: (fullscreen: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_FULLSCREEN, fullscreen),
 

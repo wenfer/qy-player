@@ -1,5 +1,5 @@
 import { HashRouter, Routes, Route } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import Home from './pages/Home';
 import Detail from './pages/Detail';
 import Settings from './pages/Settings';
@@ -16,10 +16,13 @@ import DeskLyrics from './pages/DeskLyrics';
 import Navigation from './components/Navigation';
 import PlayerControls from './components/PlayerControls';
 import MusicMiniBar from './components/MusicMiniBar';
+import CompactPlayer from './components/CompactPlayer';
 import ToastContainer from './components/Toast';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
+import { useCompactModeStore } from './stores/compact-mode-store';
+import { useMusicPlaybackStore } from './stores/music-playback-store';
 
 /**
  * Auto-next host (QYP2-035): the countdown overlay lives app-wide; firing
@@ -78,12 +81,54 @@ function SleepTimerHost() {
 }
 
 /**
+ * 精简模式宿主（QYP3-035）：手动进入由按钮触发；这里负责「播放音频时自动进入」
+ * （设置项 `playback.autoCompact`）与「音乐会话结束后自动还原」。
+ */
+function CompactModeHost() {
+  const engine = useMusicPlaybackStore((s) => s.engine);
+  const compact = useCompactModeStore((s) => s.compact);
+  const prevEngine = useRef<string | null>(null);
+
+  useEffect(() => {
+    const was = prevEngine.current;
+    prevEngine.current = engine;
+    // 会话刚开始（null → 有引擎）且未处于精简模式：按设置自动进入
+    if (engine && !was && !useCompactModeStore.getState().compact) {
+      void Promise.resolve(window.electronAPI.getSettings?.('playback.autoCompact'))
+        .then((res) => {
+          const v = (res as { data?: unknown } | undefined)?.data;
+          if (v === true || v === 'true') useCompactModeStore.getState().enter();
+        })
+        .catch(() => undefined);
+    }
+  }, [engine]);
+
+  // 会话结束（或视频接管 mpv）：自动还原，别把用户困在空的小窗里
+  useEffect(() => {
+    if (compact && engine === null) useCompactModeStore.getState().exit();
+  }, [compact, engine]);
+
+  return null;
+}
+
+/**
  * 桌面歌词窗口（ADR-0008）复用同一个 renderer 打包产物，但独立成一个
  * BrowserWindow：不带导航栏/播放器外壳，只渲染歌词。
  */
 function Shell() {
+  const compact = useCompactModeStore((s) => s.compact);
   const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
   if (isDeskLyrics) return <DeskLyrics />;
+
+  // 精简模式（QYP3-035）：整个窗口只渲染浮窗界面
+  if (compact) {
+    return (
+      <>
+        <CompactPlayer />
+        <ToastContainer />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
@@ -121,6 +166,7 @@ function App() {
     <HashRouter
       future={{ v7_startTransition: true, v7_relativeSplatPath: true } as object}
     >
+      <CompactModeHost />
       <Shell />
     </HashRouter>
   );

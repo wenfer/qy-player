@@ -79,6 +79,15 @@
 
 ### 窗口/托盘
 - 托盘只是运行中的显隐快捷方式；菜单里有"退出"兜底
+- **精简模式 = 主窗口原地缩小，不新开窗口**（QYP3-035）。播放音频时可点迷你条
+  的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗，
+  渲染层切到 `components/CompactPlayer`（复用 `SpectrumGraph`）。**必须同窗
+  改尺寸**：播放状态与 30fps 频谱都在主窗口 renderer 里（`getSpectrum` 读同一个
+  WebAudioEngine），另开 BrowserWindow 就得把频谱跨进程转发，老机 CPU 不划算。
+  几何全在 `ui-shell/compact-window.ts`：进入前记住 bounds/resizable/置顶，
+  退出原样恢复；进入先放宽 `setMinimumSize`（否则 1280×800 的下限会把浮窗顶回
+  去），退出先 resize 回原尺寸再恢复下限。音乐会话结束（`engine` 变 null，含
+  视频接管 mpv）由 `App.tsx` 的 `CompactModeHost` 自动还原，别把用户困在空小窗
 
 ### 音乐（两处静默失败陷阱，改前必读）
 - **音乐 loadfile 必须回传 `streamSessionId`（第 5 参）**。WebDAV 音频的

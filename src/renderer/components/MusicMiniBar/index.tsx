@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Heart, Mic2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
+import { Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
   useMusicPlaybackStore,
 } from '../../stores/music-playback-store';
+import { useCompactModeStore } from '../../stores/compact-mode-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useToastStore } from '../../stores/toast-store';
 import LyricsPanel from '../LyricsPanel';
@@ -248,6 +249,15 @@ export default function MusicMiniBar() {
         }`}
       >
         <Mic2 size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={() => useCompactModeStore.getState().enter()}
+        aria-label="精简模式"
+        title="精简模式（缩小为右上角浮窗）"
+        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
+      >
+        <Minimize2 size={16} />
       </button>
       {sleep.active && (
         <button

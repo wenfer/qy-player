@@ -681,6 +681,38 @@
 - 待目标机验证：本地音轨频谱随音调跳动、柱状/瀑布切换并记住；服务器/WebDAV 音源
   显示提示；30fps 下 CPU 占用（老机预算）。已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-035 精简模式浮窗（主窗口原地缩小）`[x]`
+- 诉求（用户）：「播放音频增加一个精简模式，自动缩小窗口变成一个浮窗显示到屏幕
+  右上角，显示频谱图、进度、上一曲、暂停、下一曲、音量、循环模式等基础按钮」
+  → 经确认：**主窗口原地缩小**（非另开窗口）+ **手动为主、可选自动**
+- 方案取舍：同窗改尺寸（`setBounds`/`setMinimumSize`/`setAlwaysOnTop`）而非新开
+  BrowserWindow——播放状态与 30fps 频谱都在主窗口 renderer 里，另开窗需跨进程
+  转发频谱，老机 CPU 不划算
+- 内容：
+  - `main/modules/ui-shell/compact-window.ts`（新增）：进入记住 bounds/resizable/
+    alwaysOnTop 并缩到右上角（先放宽最小尺寸）、退出原样恢复；纯函数
+    `compactBounds` 定位置
+  - IPC：`WINDOW.SET_COMPACT_MODE` + preload `setCompactMode`（替换掉从未使用的
+    `enterPlayerMode/exitPlayerMode`）
+  - `stores/compact-mode-store.ts`（新增）：compact 开关 + enter/exit/toggle，
+    同步主进程
+  - `components/CompactPlayer`（新增）：频谱图（复用 SpectrumGraph，加
+    `headerExtra` 放还原按钮）+ 进度条（拖动松手才 seek）+ 上一曲/暂停/下一曲/
+    循环/随机/音量/还原
+  - `music-playback-store`：补 `volume/setVolume`（webaudio 走 gain、mpv 走
+    `playerControl('volume')`）并在起播时应用；mpv 引擎的 `next/prev` 落实循环
+    模式（one=重播当前 / all=队尾回卷），否则浮窗循环按钮对 mpv 形同虚设
+  - `App.tsx`：compact 时只渲染 CompactPlayer；`CompactModeHost` 负责自动进入
+    （设置 `playback.autoCompact`）与会话结束后自动还原
+  - `MusicMiniBar` 加「精简」按钮；`MusicSettings` 加自动进入开关
+  - `shared/ipc-channels.ts`：WINDOW 增 SET_COMPACT_MODE
+- Evidence: 新增 `tests/renderer/music/compact-mode.test.tsx` 10 例（store IPC 同步/
+  幂等、循环与文案纯函数、控件渲染、暂停、循环循环、音量、拖动 seek、还原）、
+  `tests/main/ui/compact-window.test.ts` 2 例（右上角定位 + 多显示器原点）、
+  mini-bar 精简按钮 1 例；typecheck 双配置 + 全量 883/883 + 构建三产物绿
+- 待目标机验证：浮窗尺寸/位置（右上角、置顶）、退出还原原尺寸、精简模式期间播放
+  与频谱正常、音量/循环生效、视频接管时自动还原。已记入 `docs/TARGET-VERIFY.md`
+
 ### QYP3-029 设置页按板块分页签 `[x]`
 - 诉求（用户）：音乐相关配置独立一个板块，不要跟影视的混在一起
 - 现状：设置页是同一条长滚动列——播放（影视：自动连播/跳片头片尾）→

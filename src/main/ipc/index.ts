@@ -106,6 +106,7 @@ import {
   setMusicEngineActive,
 } from '../modules/playback-engine/music-active';
 import { SleepTimer } from '../modules/ui-shell/sleep-timer';
+import { setCompactMode } from '../modules/ui-shell/compact-window';
 import {
   closeDeskLyrics,
   isDesktopLyricsSupported,
@@ -429,6 +430,13 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
   ipcMain.handle(IPC_CHANNELS.SLEEP.SET, (_event, args: { minutes?: number }) => {
     sleepTimer.set(args?.minutes);
     return ok(sleepTimer.state());
+  });
+
+  // 精简模式浮窗（QYP3-035）：主窗口原地缩小/复原（renderer 侧 state 由
+  // 渲染层持有；这里只管窗口几何，跨进程无频谱转发）
+  ipcMain.handle(IPC_CHANNELS.WINDOW.SET_COMPACT_MODE, (_event, enabled: boolean) => {
+    const compact = setCompactMode(getMainWindow?.(), Boolean(enabled));
+    return ok({ compact });
   });
 
   // ------------------------------------------------------------------

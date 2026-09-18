@@ -106,8 +106,8 @@ export const IPC_CHANNELS = {
     SECRETS_PERSISTENT: 'settings:secrets-persistent',
   },
   WINDOW: {
-    ENTER_PLAYER_MODE: 'window:enter-player-mode',
-    EXIT_PLAYER_MODE: 'window:exit-player-mode',
+    /** 精简模式浮窗（QYP3-035）：主窗口原地缩小/复原。 */
+    SET_COMPACT_MODE: 'window:set-compact-mode',
     SET_FULLSCREEN: 'window:set-fullscreen',
   },
   SHORTCUTS: {

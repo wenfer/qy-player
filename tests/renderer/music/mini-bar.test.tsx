@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MusicMiniBar from '../../../src/renderer/components/MusicMiniBar';
 import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playback-store';
 import { useSleepTimerStore } from '../../../src/renderer/stores/sleep-timer-store';
+import { useCompactModeStore } from '../../../src/renderer/stores/compact-mode-store';
 
 /**
  * 迷你控制条可见性（QYP3-026）：
@@ -20,6 +21,7 @@ const api = {
   getSettings: vi.fn(() => Promise.resolve({ ok: true, data: null })),
   pushDeskLyricsState: vi.fn(() => Promise.resolve({ ok: true })),
   setMusicEngineActive: vi.fn(() => Promise.resolve({ ok: true })),
+  setCompactMode: vi.fn(() => Promise.resolve({ ok: true })),
 };
 
 vi.stubGlobal('electronAPI', api);
@@ -42,6 +44,7 @@ const serverTrack = { ...localTrack, id: 0, title: '以父之名', url: 'http://
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useCompactModeStore.setState({ compact: false });
   useSleepTimerStore.setState({ active: false, minutes: null, expiresAt: null, remainingMs: null });
   useMusicPlaybackStore.setState({
     engine: null,
@@ -102,6 +105,14 @@ describe('music mini bar visibility (QYP3-026)', () => {
     render(<MusicMiniBar />);
     await waitFor(() => expect(screen.getByText('晴天')).toBeTruthy());
     expect((screen.getByLabelText('收藏此曲') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('enters compact mode from the mini bar (QYP3-035)', async () => {
+    useMusicPlaybackStore.setState({ engine: 'mpv', current: serverTrack, isPlaying: true });
+    render(<MusicMiniBar />);
+    await waitFor(() => expect(screen.getByText('以父之名')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('精简模式'));
+    await waitFor(() => expect(api.setCompactMode).toHaveBeenCalledWith(true));
   });
 
   it('renders nothing once the music session has ended', async () => {

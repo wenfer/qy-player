@@ -29,6 +29,7 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
     onEnded?: unknown;
     onPlaying?: unknown;
     setEq = vi.fn();
+    setVolume = vi.fn();
     playQueue = vi.fn(async () => {
       if (h.behavior.unsupported) {
         // 与 Chromium 实测时序一致：先 error 事件，再 play() rejection

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Activity, BarChart3, Waves } from 'lucide-react';
 
 /**
@@ -70,6 +70,8 @@ interface SpectrumGraphProps {
   title: string;
   artist?: string | null;
   height?: number;
+  /** 头部右侧额外内容（如精简模式的还原按钮），渲染在图表切换按钮之前。 */
+  headerExtra?: ReactNode;
 }
 
 export default function SpectrumGraph({
@@ -79,6 +81,7 @@ export default function SpectrumGraph({
   title,
   artist,
   height = 168,
+  headerExtra,
 }: SpectrumGraphProps) {
   const [chart, setChart] = useState<SpectrumChart>('bars');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -192,6 +195,7 @@ export default function SpectrumGraph({
           <p className="text-[10px] text-muted-foreground">频谱图</p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {headerExtra}
           <button
             type="button"
             onClick={() => changeChart('bars')}

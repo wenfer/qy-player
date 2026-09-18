@@ -81,6 +81,8 @@ export default function MusicSettings() {
   const [deskLocked, setDeskLocked] = useState(true);
   // 拾音器（QYP3-023）
   const [visualizer, setVisualizer] = useState<string>('auto');
+  // 精简模式（QYP3-035）：播放音频时自动缩成浮窗
+  const [autoCompact, setAutoCompact] = useState(false);
   // 睡眠定时（P2）：状态在 store（跨页共享，主进程为权威）
   const sleep = useSleepTimerStore();
   const setSleepMinutes = useCallback(
@@ -130,6 +132,8 @@ export default function MusicSettings() {
         setDeskLocked(l?.data !== false && l?.data !== 'false');
         const v = (await window.electronAPI.getSettings('playback.visualizer')) as { data?: unknown };
         if (typeof v?.data === 'string') setVisualizer(v.data);
+        const ac = (await window.electronAPI.getSettings('playback.autoCompact')) as { data?: unknown };
+        setAutoCompact(ac?.data === true || ac?.data === 'true');
       } catch {
         // 默认值
       } finally {
@@ -225,6 +229,18 @@ export default function MusicSettings() {
     async (value: string): Promise<void> => {
       setVisualizer(value);
       await save('playback.visualizer', value, '拾音器设置已保存');
+    },
+    [save]
+  );
+
+  const changeAutoCompact = useCallback(
+    async (value: boolean): Promise<void> => {
+      setAutoCompact(value);
+      await save(
+        'playback.autoCompact',
+        value,
+        value ? '播放音频时将自动进入精简模式' : '已关闭自动精简模式'
+      );
     },
     [save]
   );
@@ -386,6 +402,25 @@ export default function MusicSettings() {
           </select>
           <span className="text-xs text-muted-foreground w-full">
             显示在底部音乐控制条上，最高 30 帧/秒。冷门格式走 mpv 引擎时只有播放波形。
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">
+          <span className="text-sm">精简模式</span>
+          <label className="ml-auto flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoCompact}
+              onChange={(e) => void changeAutoCompact(e.target.checked)}
+              className="accent-[var(--primary)]"
+              aria-label="播放音频时自动进入精简模式"
+            />
+            <span className="text-xs text-muted-foreground">播放音频时自动进入</span>
+          </label>
+          <span className="text-xs text-muted-foreground w-full">
+            精简模式把窗口缩成屏幕右上角的小浮窗（频谱图 + 进度 + 上一曲/暂停/下一曲 +
+            循环 + 音量），随时可点浮窗上的「还原」按钮恢复。播放中也可在底部音乐控制条
+            点「精简」手动进入。
           </span>
         </div>
 

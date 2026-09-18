@@ -22,6 +22,8 @@ export interface MusicPlayingState {
   position: number;
   duration: number;
   isPlaying: boolean;
+  /** 音量 0..100（webaudio 走 gain，mpv 走 playerControl('volume')）。 */
+  volume: number;
   queueLength: number;
   queueIndex: number;
   repeat: RepeatMode;
@@ -48,6 +50,7 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   next: () => Promise<void>;
   prev: () => Promise<void>;
   seek: (position: number) => void;
+  setVolume: (volume: number) => void;
   setRepeat: (mode: RepeatMode) => void;
   toggleShuffle: () => void;
   clearError: () => void;
@@ -429,6 +432,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   position: 0,
   duration: 0,
   isPlaying: false,
+  volume: 100,
   queueLength: 0,
   queueIndex: 0,
   repeat: 'off',
@@ -493,6 +497,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
         const { eqGains } = await readAudioChainSettings();
         if (eqGains) engineInstance.setEq(eqGains);
+        // 应用当前音量（换曲不重置用户设定的音量）
+        engineInstance.setVolume(get().volume / 100);
         lastReportAt = Date.now();
         // QYP3-030：状态先落再起播。引擎失败是异步的（error 事件 → 兜底），
         // 兜底要按"正在播的那首"重播；若等 playQueue 返回再写状态，失败时
@@ -600,9 +606,16 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       await engineInstance.next(false);
       syncFromEngine(set, engineInstance);
     } else if (s.engine === 'mpv') {
-      // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则沿用旧行为
-      if (s.serverQueue.length > 0 && s.serverIndex + 1 < s.serverQueue.length) {
-        await get().playServerAt(s.serverIndex + 1);
+      // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则单曲处理。
+      // QYP3-035：循环模式在此落实（one=重播当前 / all=队尾回卷），否则精简
+      // 模式的循环按钮对 mpv 音源形同虚设。
+      if (s.serverQueue.length > 0) {
+        if (s.repeat === 'one') await get().playServerAt(s.serverIndex);
+        else if (s.serverIndex + 1 < s.serverQueue.length) await get().playServerAt(s.serverIndex + 1);
+        else if (s.repeat === 'all') await get().playServerAt(0);
+        else void window.electronAPI.playerControl('stop');
+      } else if (s.repeat !== 'off') {
+        void window.electronAPI.playerControl('seek', 0, 'absolute'); // 单曲重播
       } else {
         void window.electronAPI.playerControl('stop');
       }
@@ -619,6 +632,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     } else if (s.engine === 'mpv') {
       if (s.serverQueue.length > 0 && s.serverIndex - 1 >= 0) {
         await get().playServerAt(s.serverIndex - 1);
+      } else if (s.serverQueue.length > 0 && s.repeat === 'all') {
+        await get().playServerAt(s.serverQueue.length - 1);
       } else {
         void window.electronAPI.playerControl('stop');
       }
@@ -629,6 +644,15 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     const s = get();
     if (s.engine === 'webaudio') engineSingleton?.seek(position);
     else if (s.engine === 'mpv') void window.electronAPI.playerControl('seek', position, 'absolute');
+  },
+
+  setVolume: (volume) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(volume)));
+    set({ volume: clamped });
+    const s = get();
+    // webaudio：gain 0..1；mpv：0..100（共享实例，视频音量同源）
+    if (s.engine === 'webaudio') engineSingleton?.setVolume(clamped / 100);
+    else if (s.engine === 'mpv') void window.electronAPI.playerControl('volume', clamped);
   },
 
   setRepeat: (mode) => {
