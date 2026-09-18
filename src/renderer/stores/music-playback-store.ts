@@ -12,7 +12,28 @@ import type { MediaRef } from '../../shared/types/catalog';
  * direct 解码失败 → 回退 mpv 引擎一次（ADR-0007）。
  */
 
-type EngineExtTrack = QueueTrack & { trackId: number; sourceId: number; mediaId: string };
+/**
+ * 队列条目扩展（QYP3-037 重构）：携带原始队列输入，回退/歌词/来源路由
+ * 全部从 musicInput 取——服务器曲目 trackId 恒为 0，不能再按它路由。
+ */
+type EngineExtTrack = QueueTrack & {
+  trackId: number;
+  sourceId: number;
+  mediaId: string;
+  musicInput: MusicTrackInput;
+  serverId?: number;
+  provider?: 'jellyfin' | 'emby';
+  itemId?: string;
+  mediaSourceId?: string;
+};
+
+/**
+ * 队列条目 id（QYP3-037）：本地用 music_tracks.id；服务器曲目 trackId 恒为
+ * 0（多首相撞），改用负数合成 id（按队列下标，唯一且非 0）。
+ */
+function queueIdFor(t: MusicTrackInput, index: number): number {
+  return t.serverId ? -(index + 1) : t.trackId;
+}
 
 export interface MusicPlayingState {
   engine: 'webaudio' | 'mpv' | null;
@@ -76,12 +97,15 @@ let playToken = 0;
  * current 是在 `await playQueue()` 之后才写入的 —— 兜底因此不能读 current
  * （首播读到 null 会直接放弃；换曲后读到上一首会喂错曲子）。这里记下
  * 「谁失败了」，playQueue 的 catch 据此判断这次 rejection 是否已被兜底接管。
- */
-let directFallbackTrackId: number | null = null;
-/**
- * 正在做 FLAC 封面剥离自救的那一首（QYP3-033）。
  *
- * 与 `directFallbackTrackId` 同理：自救是异步的（fetch + 重封装 29MB 级别），
+ * QYP3-037：改按**队列 id**（QueueTrack.id）记——服务器曲目 trackId 全是 0，
+ * 按 trackId 记会互相认领。
+ */
+let directFallbackQueueId: number | null = null;
+/**
+ * 正在做 FLAC 封面剥离自救的那一首（QYP3-033；QYP3-037 起按队列 id 记）。
+ *
+ * 与 `directFallbackQueueId` 同理：自救是异步的（fetch + 重封装 29MB 级别），
  * 而 `error` 事件先到、`play()` 的 rejection 紧随其后——若 catch 不认领这次
  * rejection，就会把浏览器原文「Failed to load because no supported source was
  * found.」当成播放失败弹给用户，即便自救随后成功。这里记下「谁在自救」，catch
@@ -92,7 +116,12 @@ let directFallbackTrackId: number | null = null;
  * 错误弹出来。改为在下一次 playQueue / stop 时重置，让 catch 的判定与异步顺序
  * 无关。
  */
-let flacRecoveringTrackId: number | null = null;
+let flacRecoveringQueueId: number | null = null;
+/**
+ * 懒解析已失败的队列条目（QYP3-037）：用于「整队都解不出来」的终止判定，
+ * 防止 repeat=all 时空转循环。
+ */
+const resolveFailedIds = new Set<number>();
 /** 当前曲目的歌词原文（桌面歌词用；QYP3-022）。 */
 let currentLyrics: string | null = null;
 let lastDeskPushAt = 0;
@@ -222,13 +251,16 @@ function getEngine(): WebAudioEngine {
       const s = useMusicPlaybackStore.getState();
       if (s.engine === 'mpv') return; // 已在兼容引擎上，无兜底可谈
       const failed = s.current as EngineExtTrack | null;
-      if (!failed || typeof failed.trackId !== 'number' || typeof failed.sourceId !== 'number') return;
-      // QYP3-033：本地 FLAC 因内嵌封面非法被 Chromium 拒绝时，先剥离封面
+      if (!failed || !failed.musicInput) return;
+      // QYP3-033：FLAC 因内嵌封面非法被 Chromium 拒绝时，先剥离封面
       // 在内置引擎重播——保留真频谱/真波形，且不必兜底 mpv（也避免黑窗）。
+      // QYP3-037：服务器/WebDAV 的 qy-stream URL 不带扩展名，只能靠 codec
+      // 判定（isFlacUrl 对任意 qy-stream 都为真，会造成 mp3 白拉整文件）；
+      // 本地 qy-file 仍可按扩展名兜底 codec 缺失的情况。
       // 自救进行中：忽略这一首的后续错误，最终决策交给 recoverFlac 的 .then
-      if (flacRecoveringTrackId === failed.trackId) return;
-      if (isLocalFlacUrl(failed.url)) {
-        flacRecoveringTrackId = failed.trackId;
+      if (flacRecoveringQueueId === failed.id) return;
+      if (failed.codec === 'flac' || isLocalFlacUrl(failed.url)) {
+        flacRecoveringQueueId = failed.id;
         void getEngine()
           .recoverFlac(failed)
           .then((recovered) => {
@@ -244,6 +276,31 @@ function getEngine(): WebAudioEngine {
         return;
       }
       fallbackToMpvNow(failed);
+    };
+    // 懒解析失败（QYP3-037）：解析报错或解析结果不是 webaudio（NEEDS_MPV）。
+    // 服务器曲目直接兜底 mpv（mpv 能继续服务器队列）；本地/WebDAV 先尝试
+    // 跳到下一首（与旧版「解析失败的曲不进队」等价的继续性），跳不动才兜底。
+    const instance = engineSingleton;
+    instance.onResolveError = (_err, track) => {
+      const s = useMusicPlaybackStore.getState();
+      if (s.engine !== 'webaudio') return;
+      const ext = track as EngineExtTrack;
+      resolveFailedIds.add(track.id);
+      if (ext.serverId && ext.itemId) {
+        fallbackToMpvNow(ext);
+        return;
+      }
+      const st = instance.queueState;
+      const total = st.length;
+      const allFailed = resolveFailedIds.size >= total;
+      const nextIndex = st.repeat === 'all' && !allFailed ? (st.index + 1) % total : st.index + 1;
+      if (!allFailed && nextIndex >= 0 && nextIndex < total) {
+        void instance.jumpTo(nextIndex).then(() => {
+          syncFromEngine(instance);
+        });
+        return;
+      }
+      fallbackToMpvNow(ext);
     };
   }
   return engineSingleton;
@@ -363,15 +420,26 @@ function decodeErrorMessage(e: unknown): string {
 }
 
 /**
- * 兜底到 mpv 的统一入口（QYP3-033 抽取）：标记「谁失败了」+ 同步切到 mpv
- * 状态面 + 实际触发 mpv loadfile。先前的 onError 内联逻辑迁移至此，供
- * FLAC 自救失败后的兜底复用。
+ * 兜底到 mpv 的统一入口（QYP3-033 抽取；QYP3-037 改按队列 id 认领 + 服务器
+ * 队列位置对齐）：标记「谁失败了」+ 同步切到 mpv 状态面 + 实际触发 mpv
+ * loadfile。先前的 onError 内联逻辑迁移至此，供 FLAC 自救失败后的兜底复用。
  */
 function fallbackToMpvNow(track: EngineExtTrack): void {
-  directFallbackTrackId = track.trackId;
+  directFallbackQueueId = track.id;
+  const patch: Partial<MusicPlayingState> = {
+    engine: 'mpv',
+    isPlaying: false,
+    errorMessage: null,
+  };
+  // 服务器队列：把 mpv 的推进位置对到兜底曲（此后 eof 靠 serverQueue 继续），
+  // 否则 next() 会从 webaudio 起播时的旧位置重复播放
+  if (track.serverId) {
+    const idx = useMusicPlaybackStore.getState().serverQueue.indexOf(track.musicInput);
+    if (idx >= 0) patch.serverIndex = idx;
+  }
   // 同步切到 mpv：状态面与"已交给兼容引擎"一致，紧随其后的
   // play() rejection 也才能被认作预期（见 playQueue 的 catch）
-  useMusicPlaybackStore.setState({ engine: 'mpv', isPlaying: false, errorMessage: null });
+  useMusicPlaybackStore.setState(patch);
   void fallbackToMpv(track);
 }
 
@@ -385,13 +453,22 @@ function fallbackToMpvNow(track: EngineExtTrack): void {
  *
  * 兜底失败才报错：能播的文件（内置引擎解不了但 mpv 能解的，如内嵌图片块
  * 非法的 FLAC）对用户而言是「能播的」，不该弹一条误导性的错误。
+ *
+ * QYP3-037：解析 ref 按来源分支——服务器曲目走 {provider, serverId, itemId}，
+ * 不能再用本地构造（服务器曲目 trackId/sourceId 全是 0）。
  */
 async function fallbackToMpv(track: EngineExtTrack): Promise<void> {
   try {
-    const resolution = (await window.electronAPI.resolvePlayback(
-      { provider: 'music', sourceId: track.sourceId, itemId: String(track.trackId) },
-      { engineForce: 'mpv' }
-    )) as {
+    const ref = track.serverId && track.itemId
+      ? {
+          provider: track.provider ?? ('jellyfin' as const),
+          serverId: track.serverId,
+          itemId: track.itemId,
+        }
+      : { provider: 'music' as const, sourceId: track.sourceId, itemId: String(track.trackId) };
+    const resolution = (await window.electronAPI.resolvePlayback(ref, {
+      engineForce: 'mpv',
+    })) as {
       ok: boolean;
       data?: { url: string; startPosition: number; mediaContext?: unknown; streamSessionId?: string };
       error?: { message: string };
@@ -446,9 +523,13 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   playQueue: async (tracks, startIndex) => {
     const start = tracks[startIndex];
     if (!start) return;
-    // 新的播放请求：上一首的 FLAC 自救标记作废（见 flacRecoveringTrackId 注释）
-    flacRecoveringTrackId = null;
+    // 新的播放请求：上一首的自救/失败标记与懒解析记录全部作废
+    // （QYP3-037 起按队列 id 记，见各自注释）
+    flacRecoveringQueueId = null;
+    directFallbackQueueId = null;
+    resolveFailedIds.clear();
     const token = ++playToken;
+    const startQueueId = queueIdFor(start, startIndex);
     try {
       const resolution = (await window.electronAPI.resolvePlayback(
         refOfTrack(start)
@@ -472,26 +553,32 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       const { url, startPosition, engine, mediaContext, streamSessionId } = resolution.data;
 
       if (engine?.engine === 'webaudio') {
-        // 整队逐曲解析（webaudio 判定单源在主进程）；解析失败的曲跳过
-        const queue: EngineExtTrack[] = [];
-        for (const t of tracks) {
-          const r = (await window.electronAPI.resolvePlayback(refOfTrack(t))) as typeof resolution;
-          if (r.ok && r.data?.engine?.engine === 'webaudio') {
-            queue.push({
-              id: t.trackId,
-              title: t.title,
-              artist: t.artist,
-              album: null,
-              albumartist: t.albumartist,
-              duration: t.duration,
-              url: r.data.url,
-              trackId: t.trackId,
-              sourceId: t.sourceId,
-              mediaId: (r.data.mediaContext as { mediaId: string } | undefined)?.mediaId ?? t.path,
-            });
-          }
-        }
-        const idx = Math.max(0, queue.findIndex((q) => q.id === start.trackId));
+        // QYP3-037：整队不再逐曲预解析——本地是纯 DB 查询无妨，但服务器是
+        // N 次网络请求（500 首专辑不可接受）。只同步构建快照（首曲带已解析
+        // 的 url 与续播位置），其余曲目由引擎在起播前懒解析；解析出非
+        // webaudio（NEEDS_MPV）或失败的曲子走 onResolveError（跳下一首或
+        // 兜底 mpv），不再依赖「预解析过滤」。
+        const queue: EngineExtTrack[] = tracks.map((t, i) => {
+          const isServer = Boolean(t.serverId && t.itemId);
+          return {
+            id: queueIdFor(t, i),
+            title: t.title,
+            artist: t.artist,
+            album: null,
+            albumartist: t.albumartist,
+            duration: t.duration,
+            url: i === startIndex ? url : '',
+            trackId: t.trackId,
+            sourceId: t.sourceId,
+            mediaId: isServer ? t.itemId! : t.path,
+            musicInput: t,
+            codec: t.codec,
+            ...(isServer
+              ? { serverId: t.serverId, provider: t.provider ?? 'jellyfin', itemId: t.itemId }
+              : {}),
+          };
+        });
+        const idx = startIndex;
         if (token !== playToken) return;
         const engineInstance = getEngine();
         // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
@@ -515,8 +602,30 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           queueIndex: idx,
           queueSnapshot: queue,
           errorMessage: null,
+          // QYP3-037：服务器队列也记进状态——中途某曲兜底 mpv 时，
+          // mpv 的 eof 推进（serverQueue/serverIndex）才有据可依
+          serverQueue: start.serverId ? tracks : [],
+          serverIndex: start.serverId ? startIndex : -1,
         });
-        await engineInstance.playQueue(queue, idx, get().repeat, get().shuffle);
+        await engineInstance.playQueue(
+          queue,
+          idx,
+          get().repeat,
+          get().shuffle,
+          async (track) => {
+            const r = (await window.electronAPI.resolvePlayback(
+              refOfTrack((track as EngineExtTrack).musicInput)
+            )) as typeof resolution;
+            if (!r.ok || !r.data) {
+              throw new Error(r.error?.message ?? '解析播放地址失败');
+            }
+            if (r.data.engine?.engine !== 'webaudio') {
+              throw new Error('NEEDS_MPV');
+            }
+            return { url: r.data.url, startPosition: r.data.startPosition };
+          },
+          startPosition
+        );
         loadLyricsFor(sourceOfTrack(start));
       } else {
         // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
@@ -561,14 +670,15 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     } catch (e) {
       // 这一首已交给 mpv 兜底：紧随 error 事件而来的 rejection
       // （NotSupportedError）属预期，报错会误导用户以为放不了
-      if (directFallbackTrackId === start.trackId) {
-        directFallbackTrackId = null;
+      // （QYP3-037 起按队列 id 认领，服务器曲目不能再按恒为 0 的 trackId）
+      if (directFallbackQueueId === startQueueId) {
+        directFallbackQueueId = null;
         return;
       }
       // 正在做 FLAC 封面剥离自救：同理，结果由 recoverFlac 的 .then 定，
       // 这里不能把浏览器原文（Failed to load because no supported source
       // was found.）当成失败弹出来——即便自救随后成功
-      if (flacRecoveringTrackId === start.trackId) return;
+      if (flacRecoveringQueueId === startQueueId) return;
       set({ errorMessage: decodeErrorMessage(e) });
     }
   },
@@ -604,7 +714,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
       await engineInstance.next(false);
-      syncFromEngine(set, engineInstance);
+      syncFromEngine(engineInstance);
     } else if (s.engine === 'mpv') {
       // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则单曲处理。
       // QYP3-035：循环模式在此落实（one=重播当前 / all=队尾回卷），否则精简
@@ -628,7 +738,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
       await engineInstance.prev();
-      syncFromEngine(set, engineInstance);
+      syncFromEngine(engineInstance);
     } else if (s.engine === 'mpv') {
       if (s.serverQueue.length > 0 && s.serverIndex - 1 >= 0) {
         await get().playServerAt(s.serverIndex - 1);
@@ -722,7 +832,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   stop: () => {
     // 幂等：视频状态事件会高频到达，已无音乐会话时直接返回（不 set）
     if (get().engine === null) return;
-    flacRecoveringTrackId = null; // 音乐会话结束，自救标记作废
+    // 音乐会话结束，自救/兜底标记与懒解析记录作废（QYP3-037）
+    flacRecoveringQueueId = null;
+    directFallbackQueueId = null;
+    resolveFailedIds.clear();
     engineSingleton?.pause();
     currentLyrics = null;
     pushDeskLyrics(get().position, false);
@@ -744,29 +857,22 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   },
 }));
 
-function engineSnapshotCurrent(
-  queue: EngineExtTrack[],
-  currentTrackId: number | null
-): QueueTrack | null {
-  if (currentTrackId === null) return null;
-  return queue.find((q) => q.id === currentTrackId) ?? null;
-}
-
-/** next/prev 后从引擎实例 + store 快照拉回状态（单点归一）。 */
-function syncFromEngine(
-  set: (partial: Partial<MusicPlayingState>) => void,
-  engineInstance: WebAudioEngine
-): void {
+/**
+ * next/prev 后从引擎实例 + store 快照拉回状态（单点归一）。
+ * QYP3-037：改按引擎队列下标对齐快照（服务器合成 id 为负，按 id 查找
+ * 语义脆弱）；currentSource/歌词从 musicInput 路由，服务器歌词仍走端点。
+ */
+function syncFromEngine(engineInstance: WebAudioEngine): void {
   const st = engineInstance.queueState;
   const snapshot = useMusicPlaybackStore.getState().queueSnapshot;
-  const current = engineSnapshotCurrent(snapshot, st.currentTrackId);
-  set({
+  const track = (snapshot[st.index] as EngineExtTrack | undefined) ?? null;
+  useMusicPlaybackStore.setState({
     queueLength: st.length,
     queueIndex: st.index,
-    current,
-    currentSource: current ? { trackId: current.id } : null,
+    current: track,
+    currentSource: track ? sourceOfTrack(track.musicInput) : null,
     position: 0,
     isPlaying: st.currentTrackId !== null,
   });
-  if (current) loadLyricsFor({ trackId: current.id });
+  if (track) loadLyricsFor(sourceOfTrack(track.musicInput));
 }

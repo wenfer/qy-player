@@ -13,6 +13,8 @@ import { LocalSourceAdapter } from '../library-sources/local-source';
 import { loadWebDavSecret, type WebDavSourceAdapter } from '../library-sources/webdav-source';
 import { parseWebDavBaseUrl, relativePathToRequestPath } from '../library-sources/url-guard';
 import { resolveServerApiKey, type SecretStore, type StreamHeaderCache } from '../security/secret-store';
+import type { StreamRouteCache } from '../security/stream-route-cache';
+import { buildStreamUrl } from '../playback-engine/stream-protocol';
 import type { createStorage } from '../storage/db';
 import type { createClient } from '../online-connector';
 
@@ -45,6 +47,8 @@ export interface ResolverDeps {
   storage: ReturnType<typeof createStorage>;
   secretStore: SecretStore;
   streamHeaders: StreamHeaderCache;
+  /** qy-stream 路由表（QYP3-037）：服务器/WebDAV 音频直解时的认证代理路由。 */
+  streamRoutes: StreamRouteCache;
   getResumePosition: (mediaType: string, mediaId: string) => number;
   createOnlineClient: typeof createClient;
   newSessionId?: () => string;
@@ -328,8 +332,15 @@ export async function resolvePlayback(
             preference: deps.getEnginePreference?.() ?? 'spectrum-first',
           });
 
-    // 音乐续播（QYP3-014）：无 30s 阈值；>90% 从头重播
-    const saved = deps.storage.getProgress('local', track.path);
+    // 音乐续播（QYP3-014）：无 30s 阈值；>90% 从头重播。
+    // QYP3-037：WebDAV 的进度键是 `<sourceId>:<path>`（mpv 引擎经
+    // PlaybackStateManager 落的也是这个键）；此前误读 'local' 键，
+    // WebDAV 音乐续播从不生效。
+    const progressKey = source.kind === 'webdav' ? `${sourceId}:${track.path}` : track.path;
+    const saved = deps.storage.getProgress(
+      source.kind === 'webdav' ? 'webdav' : 'local',
+      progressKey
+    );
     const startPosition = resolveMusicResumeTarget(saved);
 
     const mediaContext = {
@@ -370,13 +381,43 @@ export async function resolvePlayback(
       };
     }
 
-    // WebDAV 音频：mpv 直链 + 认证头会话（与视频同管线）
+    // WebDAV 音频（QYP3-037）：直解格式改走 qy-stream 代理进渲染层内置引擎
+    // （真频谱/真波形/均衡器，与本地一致）；非直解/兼容性优先仍走 mpv。
     const { adapter } = getAdapterForSource(deps.db, sourceId, deps.secretStore);
     const base = parseWebDavBaseUrl(getAdapterForSource(deps.db, sourceId, deps.secretStore).root);
     const requestPath = relativePathToRequestPath(track.path, base);
     const url = `${new URL(base.url).origin}${requestPath}`;
     const secret = loadWebDavSecret(deps.secretStore, sourceId);
     const newId = deps.newSessionId ?? randomUUID;
+
+    if (engine.engine === 'webaudio') {
+      // 认证头由主进程注入路由（token 不跨 IPC，也不进渲染层可见的 URL）；
+      // 渲染层拿到的是不透明 qy-stream id，一首歌的多次 Range 请求都能复用。
+      const routeId = newId();
+      deps.streamRoutes.put(routeId, {
+        url,
+        headers: secret
+          ? {
+              Authorization: `Basic ${Buffer.from(`${secret.username}:${secret.password}`).toString('base64')}`,
+            }
+          : {},
+      });
+      void adapter;
+      return {
+        kind: 'music-direct',
+        url: buildStreamUrl(routeId),
+        seekable: true,
+        startPosition,
+        mediaContext: {
+          ...mediaContext,
+          mediaType: 'webdav',
+          mediaId: `${sourceId}:${track.path}`,
+        },
+        engine: { engine: engine.engine, reason: engine.reason },
+      };
+    }
+
+    // WebDAV 音频：mpv 直链 + 认证头会话（与视频同管线）
     let streamSessionId: string | undefined;
     if (secret) {
       streamSessionId = newId();
@@ -543,8 +584,53 @@ export async function resolvePlayback(
     }
   }
 
+  // QYP3-037：音频条目按 codec 判定引擎。直解（含 codec 未知的乐观直解，
+  // 用户决策：真频谱优先，解码失败由渲染层一次性回退 mpv 兜底）走
+  // qy-stream 代理进渲染层内置引擎；视频/转码/非直解仍走 mpv。
+  const chosenSource = details.MediaSources?.find((m) => m.Id === target.mediaSourceId);
+  const audioCodec =
+    chosenSource?.MediaStreams?.find((s) => s.Type === 'Audio')?.Codec ?? null;
   const newId = deps.newSessionId ?? randomUUID;
   const playSessionId = newId();
+  const transcode = mode === 'transcode';
+  const engine =
+    input.engineForce === 'mpv'
+      ? ({ engine: 'mpv', reason: 'compat-first' } as const)
+      : details.Type === 'Audio' && audioCodec === null && !transcode
+        ? // 乐观直解：MediaStreams 缺失/异常时不放弃内置引擎
+          ({ engine: 'webaudio', reason: 'direct-codec' } as const)
+        : selectAudioEngine({
+            codec: audioCodec,
+            sourceKind: 'server',
+            transcode,
+            preference: deps.getEnginePreference?.() ?? 'spectrum-first',
+          });
+
+  if (details.Type === 'Audio' && mode === 'direct' && engine.engine === 'webaudio') {
+    // 认证头留在主进程路由里（X-Emby-Token），渲染层只见不透明 id——
+    // 顺带修掉了 api_key 拼在直链 query 里进渲染层的问题。
+    const upstream = client.getStreamingUrl(target.playId, target.mediaSourceId, 'direct', playSessionId);
+    const routeId = newId();
+    deps.streamRoutes.put(routeId, {
+      url: upstream,
+      headers: { 'X-Emby-Token': binding.apiKey },
+    });
+    return {
+      kind: 'music-direct',
+      url: buildStreamUrl(routeId),
+      seekable: true,
+      startPosition: deps.getResumePosition(binding.type, target.playId),
+      mediaContext: {
+        mediaType: binding.type,
+        mediaId: target.playId,
+        title: target.title,
+        serverId: binding.id,
+        mediaSourceId: target.mediaSourceId,
+      },
+      engine: { engine: 'webaudio', reason: engine.reason },
+    };
+  }
+
   const url = client.getStreamingUrl(target.playId, target.mediaSourceId, mode, playSessionId);
   let streamSessionId: string | undefined;
   if (mode === 'transcode') {

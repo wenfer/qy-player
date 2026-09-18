@@ -12,7 +12,10 @@
  * 与播放流里内嵌的封面无关，剥离不影响封面显示。
  */
 
-/** 本地 webaudio 音轨的播放 URL 才是可剥离对象（WebDAV/服务器走 mpv）。 */
+/**
+ * 本地 webaudio 音轨的播放 URL（路径带 .flac 扩展名，可作判定）。
+ * 服务器/WebDAV 的 qy-stream 代理 URL 不带扩展名，用 isFlacUrl + codec 判定。
+ */
 export function isLocalFlacUrl(url: string): boolean {
   if (!url.startsWith('qy-file://audio/')) return false;
   const last = url.split('/').pop() ?? '';
@@ -23,6 +26,16 @@ export function isLocalFlacUrl(url: string): boolean {
     // 解码失败用原始串（含 % 也无妨，结尾判定仍可靠）
   }
   return name.toLowerCase().endsWith('.flac');
+}
+
+/**
+ * 内置引擎音轨的可剥离判定（QYP3-037）：本地 qy-file 或服务器/WebDAV 的
+ * qy-stream 代理 URL 都可以 fetch + 剥离（代理按 Range 转发，fetch 全量拉取
+ * 同样成立）。qy-stream URL 不带文件名，扩展名判定只对 qy-file 有意义。
+ */
+export function isFlacUrl(url: string): boolean {
+  if (url.startsWith('qy-stream://audio/')) return true;
+  return isLocalFlacUrl(url);
 }
 
 /**

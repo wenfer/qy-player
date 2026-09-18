@@ -4,17 +4,21 @@
  * 单一来源：UI 不得复制算法。纯函数、表驱动测试。
  *
  * 决策规则（顺序即优先级）：
- * 1. 服务器音频（Jellyfin/Emby 音频库）→ mpv（流需要 HTTP 头注入，
- *    Web Audio 无法带认证头；服务端转码天然 mpv）。
- * 1b. WebDAV → mpv（直链同样需要 Basic/TLS 头，renderer 无法注入；
- *     能力地图 §4：WebDAV = mpv 引擎）。
+ * 1. 服务端转码 → mpv（HLS，Chromium 直连解不了）。
  * 2. CUE 分轨 → mpv（精确 start/end 由 mpv loadfile 选项承载）。
  * 3. 用户偏好「兼容性优先」→ 一律 mpv。
  * 4. 用户偏好「拾音器优先」（默认）→ Chromium 直连可解码格式走
- *    renderer 引擎（Web Audio：真频谱 + 均衡器），其余 mpv。
+ *    renderer 引擎（Web Audio：真频谱 + 真波形 + 均衡器），其余 mpv。
+ *
+ * QYP3-037：服务器（Jellyfin/Emby）与 WebDAV **不再**因认证问题强制 mpv——
+ * 音频改由主进程 `qy-stream://` 代理转发（Range 透传 + 认证头注入，token 不
+ * 跨 IPC），渲染层拿到的是同源自定义协议，可以喂 `createMediaElementSource`
+ * 出真实频谱。因此 sourceKind 只作记录，不再参与判定；非直解格式仍走 mpv。
  *
  * direct 格式清单是**契约**：以 spike 实测为准（PHASE3-PLAN §10 风险 1），
  * 不凭文档假设；宁可错降 mpv（兼容性保底），不可误判 direct。
+ * 唯一例外：服务器音频条目拿不到 codec 时按「乐观直解」处理（见
+ * playback-resolver），由 direct 解码失败 → mpv 的一次性回退兜底。
  */
 
 export type EngineId = 'webaudio' | 'mpv';
@@ -26,9 +30,9 @@ export const DIRECT_CODECS: ReadonlySet<string> = new Set([
 ]);
 
 export interface EngineInput {
-  /** 音轨 codec（music_tracks.codec，小写扩展名）；未知可空。 */
+  /** 音轨 codec（music_tracks.codec / 服务器 MediaStreams.Codec）；未知可空。 */
   codec: string | null;
-  /** 来源类型：local/webdav 走直连判定；服务器音频强制 mpv。 */
+  /** 来源类型（仅记录用：认证已由 qy-stream 代理解决）。 */
   sourceKind: 'local' | 'webdav' | 'server';
   /** 服务端转码模式强制 mpv。 */
   transcode?: boolean;
@@ -39,19 +43,10 @@ export interface EngineInput {
 
 export interface EngineDecision {
   engine: EngineId;
-  reason:
-    | 'server-stream'
-    | 'webdav-auth'
-    | 'transcode'
-    | 'cue-track'
-    | 'compat-first'
-    | 'direct-codec'
-    | 'non-direct-codec';
+  reason: 'transcode' | 'cue-track' | 'compat-first' | 'direct-codec' | 'non-direct-codec';
 }
 
 export function selectAudioEngine(input: EngineInput): EngineDecision {
-  if (input.sourceKind === 'server') return { engine: 'mpv', reason: 'server-stream' };
-  if (input.sourceKind === 'webdav') return { engine: 'mpv', reason: 'webdav-auth' };
   if (input.transcode) return { engine: 'mpv', reason: 'transcode' };
   if (input.isCueTrack) return { engine: 'mpv', reason: 'cue-track' };
   if (input.preference === 'compat-first') return { engine: 'mpv', reason: 'compat-first' };

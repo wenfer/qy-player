@@ -10,23 +10,37 @@
  * 失败回退 native 引擎一次（错误回调上抛，由 store 决策）。
  */
 
-import { isLocalFlacUrl, stripFlacPicture } from './flac-strip';
+import { isFlacUrl, stripFlacPicture } from './flac-strip';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
 export interface QueueTrack {
-  /** music_tracks.id（持久键）。 */
+  /** music_tracks.id（持久键）；服务器曲目用负数合成 id（见 store）。 */
   id: number;
   title: string;
   artist: string | null;
   album: string | null;
   albumartist: string | null;
   duration: number | null;
-  /** qy-file://audio/... 播放 URL（QYP3-010 协议桥产物）。 */
+  /**
+   * 播放 URL：`qy-file://audio/...`（本地）、`qy-stream://audio/<id>`
+   * （服务器/WebDAV 代理，QYP3-037）或 blob:（FLAC 自救）。
+   * 允许为空串：配合 urlResolver 按需解析（服务器整队预解析是 N 次网络请求）。
+   */
   url: string;
   /** EQ 频段增益 dB（10 段，-12..+12）；null = 直通。 */
   eqGains?: number[] | null;
+  /** 编解码（flac 等小写扩展名）；FLAC 封面自救的判定依据之一。 */
+  codec?: string | null;
 }
+
+/**
+ * 按需解析单曲播放地址（QYP3-037）：返回真实可播 URL 与续播位置；
+ * 抛错 = 解析失败（由 onResolveError 交给上层兜底）。
+ */
+export type TrackUrlResolver = (
+  track: QueueTrack
+) => Promise<{ url: string; startPosition: number }>;
 
 export interface EngineState {
   isPlaying: boolean;
@@ -159,6 +173,11 @@ export class WebAudioEngine {
   onEnded?: () => void;
   onTime?: (position: number, duration: number) => void;
   onPlaying?: (isPlaying: boolean) => void;
+  /** 懒解析失败（含 NEEDS_MPV）：上层决定回退 mpv（QYP3-037）。 */
+  onResolveError?: (err: unknown, track: QueueTrack) => void;
+  private urlResolver: TrackUrlResolver | null = null;
+  /** playQueue 传入的首曲续播位置；playCurrent 起播后消费一次。 */
+  private startAt = 0;
 
   constructor(deps: WebAudioDeps = {}) {
     this.audio =
@@ -210,10 +229,25 @@ export class WebAudioEngine {
     this.audio.addEventListener?.('error', (e) => this.onError?.(e));
   }
 
-  /** 播放一个队列（从 startIndex 开始）。 */
-  async playQueue(tracks: QueueTrack[], startIndex: number, repeat: RepeatMode, shuffle: boolean): Promise<void> {
+  /**
+   * 播放一个队列（从 startIndex 开始）。
+   *
+   * QYP3-037：urlResolver 提供时按需解析单曲 URL（服务器整队预解析是 N 次
+   * 网络请求，不可接受）；startPosition 是首曲的续播位置（懒解析曲目的
+   * 续播位置随解析结果返回）。
+   */
+  async playQueue(
+    tracks: QueueTrack[],
+    startIndex: number,
+    repeat: RepeatMode,
+    shuffle: boolean,
+    urlResolver?: TrackUrlResolver,
+    startPosition?: number
+  ): Promise<void> {
     this.queue.repeat = repeat;
     this.queue.shuffle = shuffle;
+    this.urlResolver = urlResolver ?? null;
+    this.startAt = startPosition ?? 0;
     this.queue.setQueue(tracks, startIndex);
     await this.playCurrent();
   }
@@ -238,8 +272,27 @@ export class WebAudioEngine {
       URL.revokeObjectURL(this.lastBlobUrl);
       this.lastBlobUrl = null;
     }
+    // 懒解析：url 为空的曲目在起播前才解析；结果写回快照条目，重播/seek
+    // 不再重复解析。失败交给上层（回退 mpv），这里不设 src。
+    let startAt = this.startAt;
+    this.startAt = 0;
+    if (!track.url) {
+      if (!this.urlResolver) return;
+      try {
+        const resolved = await this.urlResolver(track);
+        track.url = resolved.url;
+        startAt = resolved.startPosition;
+      } catch (err) {
+        this.onResolveError?.(err, track);
+        return;
+      }
+    }
     this.audio.src = track.url;
     await this.audio.play?.();
+    // 续播位置：play() resolve 时元数据已可用；duration 未知则放弃（用户可手动 seek）
+    if (startAt > 0 && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
+      this.audio.currentTime = Math.min(startAt, this.audio.duration);
+    }
   }
 
   async next(auto: boolean): Promise<void> {
@@ -308,13 +361,14 @@ export class WebAudioEngine {
   }
 
   /**
-   * FLAC 内嵌封面剥离自救（QYP3-033）：本地 FLAC 因非法封面被 Chromium
-   * 拒绝解码时，剥离封面后以 blob 在内置引擎重播——保留真频谱/真波形，
-   * 且不必兜底 mpv（顺便避免黑窗）。成功返回 true；非本地 FLAC / 无可剥离
-   * 封面 / 重封装后仍解码失败返回 false（交给上层 mpv 兜底）。
+   * FLAC 内嵌封面剥离自救（QYP3-033；QYP3-037 扩展到服务器/WebDAV）：FLAC
+   * 因非法封面被 Chromium 拒绝解码时，剥离封面后以 blob 在内置引擎重播——
+   * 保留真频谱/真波形，且不必兜底 mpv（顺便避免黑窗）。服务器/WebDAV 走
+   * qy-stream 代理 URL（fetch 全量拉取同样成立）。成功返回 true；非 FLAC /
+   * 无可剥离封面 / 重封装后仍解码失败返回 false（交给上层 mpv 兜底）。
    */
   async recoverFlac(track: QueueTrack): Promise<boolean> {
-    if (!isLocalFlacUrl(track.url)) return false;
+    if (!isFlacUrl(track.url)) return false;
     try {
       const blobUrl = await stripFlacPicture(track.url);
       if (!blobUrl) return false;

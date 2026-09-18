@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { createSecretStore, type SecretStore, type StreamHeaderCache, createStreamHeaderCache, MEDIA_SERVER_NAMESPACE } from '../../../src/main/modules/security/secret-store';
+import { createStreamRouteCache } from '../../../src/main/modules/security/stream-route-cache';
 import type { SecretCipher } from '../../../src/main/modules/security/secret-store';
 import type { createStorage } from '../../../src/main/modules/storage/db';
 import {
@@ -39,7 +40,10 @@ interface FakeDetails {
   SeriesName?: string;
   ParentIndexNumber?: number;
   IndexNumber?: number;
-  MediaSources?: Array<{ Id: string }>;
+  MediaSources?: Array<{
+    Id: string;
+    MediaStreams?: Array<{ Type?: string; Codec?: string }>;
+  }>;
 }
 
 interface ClientCall {
@@ -115,9 +119,13 @@ let servers: Array<{
 function makeDeps(clientFactory: unknown, resume = 0): ResolverDeps {
   return {
     db,
-    storage: { getServers: () => servers } as unknown as ReturnType<typeof createStorage>,
+    storage: {
+      getServers: () => servers,
+      getProgress: () => undefined,
+    } as unknown as ReturnType<typeof createStorage>,
     secretStore,
     streamHeaders,
+    streamRoutes: createStreamRouteCache(),
     getResumePosition: () => resume,
     createOnlineClient: clientFactory as ResolverDeps['createOnlineClient'],
     newSessionId: () => `sess-${(sessions += 1)}`,
@@ -351,6 +359,210 @@ describe('playback resolver: strict online routing', () => {
         ref: { provider: 'jellyfin', serverId: 1, itemId: 'ghost' },
       })
     ).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
+  });
+});
+
+describe('playback resolver: server audio → webaudio proxy (QYP3-037)', () => {
+  function oneServer() {
+    servers = [
+      { id: 1, type: 'jellyfin', name: 'A', base_url: 'http://a:8096', user_id: 'u1', is_active: 1 },
+    ];
+    secretStore.setSecret(MEDIA_SERVER_NAMESPACE, '1', 'token-A');
+  }
+
+  function audioClientFactory(calls: ClientCall[], details: FakeDetails) {
+    return makeClientFactory({ 'http://a:8096': { song: details } }, calls);
+  }
+
+  it('direct audio codec routes through qy-stream with engine webaudio', async () => {
+    oneServer();
+    const calls: ClientCall[] = [];
+    const deps = makeDeps(
+      audioClientFactory(calls, {
+        Id: 'song',
+        Name: '歌曲',
+        Type: 'Audio',
+        MediaSources: [
+          { Id: 'ms-1', MediaStreams: [{ Type: 'Audio', Codec: 'flac' }] },
+        ],
+      })
+    );
+    const resolution = await resolvePlayback(deps, {
+      ref: { provider: 'jellyfin', serverId: 1, itemId: 'song' },
+    });
+    expect(resolution.kind).toBe('music-direct');
+    expect(resolution.url).toMatch(/^qy-stream:\/\/audio\//);
+    expect(resolution.engine).toEqual({ engine: 'webaudio', reason: 'direct-codec' });
+    expect(resolution.mediaContext).toMatchObject({
+      mediaType: 'jellyfin',
+      mediaId: 'song',
+      serverId: 1,
+      mediaSourceId: 'ms-1',
+    });
+    // token 不出现在解析结果里，而是留在路由表里
+    expect(JSON.stringify(resolution)).not.toContain('token-A');
+    const route = deps.streamRoutes.get(resolution.url.replace('qy-stream://audio/', ''));
+    expect(route?.url).toContain('/Videos/song/stream');
+    expect(route?.headers['X-Emby-Token']).toBe('token-A');
+  });
+
+  it('unknown codec still attempts webaudio (乐观直解, 用户决策)', async () => {
+    oneServer();
+    const calls: ClientCall[] = [];
+    const resolution = await resolvePlayback(
+      makeDeps(
+        audioClientFactory(calls, {
+          Id: 'song',
+          Name: '歌曲',
+          Type: 'Audio',
+          MediaSources: [{ Id: 'ms-1' }],
+        })
+      ),
+      { ref: { provider: 'jellyfin', serverId: 1, itemId: 'song' } }
+    );
+    expect(resolution.engine).toEqual({ engine: 'webaudio', reason: 'direct-codec' });
+    expect(resolution.url).toMatch(/^qy-stream:\/\/audio\//);
+  });
+
+  it('non-direct codec degrades to mpv (plain streaming url, no engine)', async () => {
+    oneServer();
+    const calls: ClientCall[] = [];
+    const resolution = await resolvePlayback(
+      makeDeps(
+        audioClientFactory(calls, {
+          Id: 'song',
+          Name: '歌曲',
+          Type: 'Audio',
+          MediaSources: [
+            { Id: 'ms-1', MediaStreams: [{ Type: 'Audio', Codec: 'ape' }] },
+          ],
+        })
+      ),
+      { ref: { provider: 'jellyfin', serverId: 1, itemId: 'song' } }
+    );
+    expect(resolution.kind).toBe('online-direct');
+    expect(resolution.url).toContain('/Videos/song/stream');
+    expect(resolution.engine).toBeUndefined();
+  });
+
+  it('engineForce mpv bypasses the proxy (probe / fallback paths)', async () => {
+    oneServer();
+    const calls: ClientCall[] = [];
+    const resolution = await resolvePlayback(
+      makeDeps(
+        audioClientFactory(calls, {
+          Id: 'song',
+          Name: '歌曲',
+          Type: 'Audio',
+          MediaSources: [
+            { Id: 'ms-1', MediaStreams: [{ Type: 'Audio', Codec: 'flac' }] },
+          ],
+        })
+      ),
+      {
+        ref: { provider: 'jellyfin', serverId: 1, itemId: 'song' },
+        engineForce: 'mpv',
+      }
+    );
+    expect(resolution.kind).toBe('online-direct');
+    expect(resolution.engine).toBeUndefined();
+  });
+
+  it('video items are never routed to the proxy', async () => {
+    oneServer();
+    const calls: ClientCall[] = [];
+    const resolution = await resolvePlayback(
+      makeDeps(
+        audioClientFactory(calls, {
+          Id: 'song',
+          Name: '电影',
+          Type: 'Movie',
+          MediaSources: [
+            { Id: 'ms-1', MediaStreams: [{ Type: 'Video', Codec: 'h264' }] },
+          ],
+        })
+      ),
+      { ref: { provider: 'jellyfin', serverId: 1, itemId: 'song' } }
+    );
+    expect(resolution.kind).toBe('online-direct');
+    expect(resolution.url).toContain('/Videos/song/stream');
+    expect(resolution.engine).toBeUndefined();
+  });
+});
+
+describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => {
+  it('direct codec music routes through qy-stream with Basic auth in the route', async () => {
+    const repo = createCatalogRepository(db);
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav` });
+    secretStore.setSecret('webdav', String(sourceId), JSON.stringify({ username: 'u', password: 'p@ss' }));
+    const trackId = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'm1',
+      path: 'Music/song.flac',
+      title: '云上歌',
+      artist: '歌手',
+      album: '专辑',
+      albumartist: '歌手',
+      trackNo: 1,
+      duration: 200,
+      codec: 'flac',
+      fingerprint: 'fp-w1',
+    });
+    const progressKeys: Array<{ mediaType: string; mediaId: string }> = [];
+    const deps: ResolverDeps = {
+      ...makeDeps(makeClientFactory({}, [])),
+      storage: {
+        getServers: () => servers,
+        getProgress: (mediaType: string, mediaId: string) => {
+          progressKeys.push({ mediaType, mediaId });
+          return undefined;
+        },
+      } as unknown as ReturnType<typeof createStorage>,
+    };
+    const resolution = await resolvePlayback(deps, {
+      ref: { provider: 'music', sourceId, itemId: String(trackId) },
+    });
+    expect(resolution.kind).toBe('music-direct');
+    expect(resolution.url).toMatch(/^qy-stream:\/\/audio\//);
+    expect(resolution.engine).toEqual({ engine: 'webaudio', reason: 'direct-codec' });
+    expect(resolution.mediaContext).toMatchObject({
+      mediaType: 'webdav',
+      mediaId: `${sourceId}:Music/song.flac`,
+    });
+    expect(resolution.streamSessionId).toBeUndefined();
+    // 续播键修复：WebDAV 读 'webdav' 域的 <sourceId>:<path>，不再误读 'local'
+    expect(progressKeys).toContainEqual({
+      mediaType: 'webdav',
+      mediaId: `${sourceId}:Music/song.flac`,
+    });
+    const route = deps.streamRoutes.get(resolution.url.replace('qy-stream://audio/', ''));
+    expect(route?.url).toBe(`http://127.0.0.1:${mockPort}/dav/Music/song.flac`);
+    expect(route?.headers.Authorization).toBe(
+      `Basic ${Buffer.from('u:p@ss').toString('base64')}`
+    );
+    expect(JSON.stringify(resolution)).not.toContain('p@ss');
+  });
+
+  it('non-direct codec music still goes to mpv with stashed headers', async () => {
+    const repo = createCatalogRepository(db);
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav` });
+    secretStore.setSecret('webdav', String(sourceId), JSON.stringify({ username: 'u', password: 'p' }));
+    const trackId = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'm2',
+      path: 'Music/song.ape',
+      title: '老歌',
+      trackNo: 1,
+      duration: 200,
+      codec: 'ape',
+      fingerprint: 'fp-w2',
+    });
+    const resolution = await resolvePlayback(makeDeps(makeClientFactory({}, [])), {
+      ref: { provider: 'music', sourceId, itemId: String(trackId) },
+    });
+    expect(resolution.kind).toBe('webdav-stream');
+    expect(resolution.engine).toEqual({ engine: 'mpv', reason: 'non-direct-codec' });
+    expect(resolution.streamSessionId).toBeDefined();
   });
 });
 

@@ -73,6 +73,10 @@ const api = {
   getMusicLyrics: vi.fn(() => Promise.resolve({ ok: true, data: { hasLyrics: false, content: null } })),
   getServerLyrics: vi.fn(() => Promise.resolve({ ok: true, data: { hasLyrics: false, content: null } })),
   pushDeskLyricsState: vi.fn(() => Promise.resolve({ ok: true })),
+  // QYP3-038：服务器会话/进度通道（webaudio 服务器曲目起播即开 Session）
+  startMusicServerSession: vi.fn(() => Promise.resolve({ ok: true, data: { playSessionId: 'ps-1' } })),
+  reportMusicServerProgress: vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true })),
+  reportMusicProgress: vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true })),
 };
 
 vi.stubGlobal('electronAPI', api);
@@ -254,5 +258,95 @@ describe('direct → mpv fallback (QYP3-030)', () => {
 
     expect(useMusicPlaybackStore.getState().errorMessage).toBe('解析播放地址失败');
     expect(api.playerLoadFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('server track fallback (QYP3-037)', () => {
+  const serverTrack = (itemId: string, title: string): MusicTrackInput => ({
+    trackId: 0,
+    sourceId: 0,
+    serverId: 7,
+    provider: 'jellyfin',
+    itemId,
+    title,
+    artist: null,
+    albumartist: null,
+    duration: 200,
+    path: '',
+    codec: 'mp3',
+  });
+
+  /** 服务器曲目解析：直解给 qy-stream；mpv 兜底给直链（记录拿到的 ref）。 */
+  function resolveServerThenMpv(mpvRefOf: { value: unknown } = { value: null }): void {
+    api.resolvePlayback.mockImplementation(
+      (ref: Record<string, unknown>, opts?: { engineForce?: string }) => {
+        if (opts?.engineForce === 'mpv') {
+          mpvRefOf.value = ref;
+          return Promise.resolve({
+            ok: true,
+            data: {
+              kind: 'online-direct',
+              url: 'http://srv:8096/Videos/x/stream',
+              startPosition: 0,
+              mediaContext: { mediaType: 'jellyfin', mediaId: 'x' },
+            },
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          data: {
+            kind: 'music-direct',
+            url: 'qy-stream://audio/sess-1',
+            startPosition: 0,
+            engine: { engine: 'webaudio', reason: 'direct-codec' },
+            mediaContext: { mediaType: 'jellyfin', mediaId: ref.itemId },
+          },
+        });
+      }
+    );
+  }
+
+  it('hands a FAILED server track to mpv via {provider, serverId, itemId}', async () => {
+    const mpvRefOf = { value: null as unknown };
+    resolveServerThenMpv(mpvRefOf);
+    failLikeUnsupportedFormat();
+
+    await useMusicPlaybackStore.getState().playQueue([serverTrack('item-9', '云歌')], 0);
+
+    await vi.waitFor(() => expect(api.playerLoadFile).toHaveBeenCalledTimes(1));
+    // 兜底 ref 必须是服务器路由，不能是本地构造 {provider:'music', itemId:'0'}
+    expect(mpvRefOf.value).toEqual({
+      provider: 'jellyfin',
+      serverId: 7,
+      itemId: 'item-9',
+    });
+    expect(useMusicPlaybackStore.getState().errorMessage).toBeNull();
+  });
+
+  it('gives server tracks distinct negative queue ids (trackId is 0 for all)', async () => {
+    resolveServerThenMpv();
+
+    await useMusicPlaybackStore
+      .getState()
+      .playQueue([serverTrack('a', '一'), serverTrack('b', '二')], 0);
+
+    const snapshot = useMusicPlaybackStore.getState().queueSnapshot;
+    expect(snapshot.map((q) => q.id)).toEqual([-1, -2]);
+    // 服务器队列落进状态：中途兜底 mpv 后，eof 推进有据可依
+    expect(useMusicPlaybackStore.getState().serverQueue.length).toBe(2);
+    expect(useMusicPlaybackStore.getState().serverIndex).toBe(0);
+  });
+
+  it('aligns serverIndex to the fallback track so mpv continues the queue', async () => {
+    resolveServerThenMpv();
+    failLikeUnsupportedFormat();
+
+    // 从第 2 首起播（第 1 首是另一首服务器曲目），失败后 serverIndex 对到 1
+    await useMusicPlaybackStore
+      .getState()
+      .playQueue([serverTrack('a', '一'), serverTrack('b', '二')], 1);
+
+    await vi.waitFor(() => expect(api.playerLoadFile).toHaveBeenCalledTimes(1));
+    expect(useMusicPlaybackStore.getState().serverIndex).toBe(1);
   });
 });

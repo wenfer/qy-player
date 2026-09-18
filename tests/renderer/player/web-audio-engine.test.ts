@@ -313,4 +313,66 @@ describe('WebAudioEngine (QYP3-010)', () => {
     await engine.playQueue([makeTrack(1)], 0, 'off', false);
     expect(resume).not.toHaveBeenCalled();
   });
+
+  // ---- 懒解析（QYP3-037）--------------------------------------------
+
+  it('resolves a lazy track via urlResolver only when url is empty', async () => {
+    const { engine, audio } = makeEngine();
+    const resolver = vi.fn(async () => ({ url: 'qy-stream://audio/r1', startPosition: 0 }));
+    const lazy = { ...makeTrack(1, ''), codec: 'flac' };
+    await engine.playQueue([lazy, makeTrack(2)], 0, 'off', false, resolver);
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith(lazy);
+    expect(audio.src).toBe('qy-stream://audio/r1');
+    // 结果写回快照条目：重播/换回不重复解析
+    expect(lazy.url).toBe('qy-stream://audio/r1');
+    await engine.prev();
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(audio.src).toBe('qy-stream://audio/r1');
+  });
+
+  it('does not call the resolver for tracks that already carry a url', async () => {
+    const { engine } = makeEngine();
+    const resolver = vi.fn(async () => ({ url: 'x', startPosition: 0 }));
+    await engine.playQueue([makeTrack(1), makeTrack(2)], 0, 'off', false, resolver);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('reports resolve errors via onResolveError and never sets src', async () => {
+    const { engine, audio } = makeEngine();
+    const onResolveError = vi.fn();
+    engine.onResolveError = onResolveError;
+    const resolver = vi.fn(async () => {
+      throw new Error('NEEDS_MPV');
+    });
+    await engine.playQueue([makeTrack(1, '')], 0, 'off', false, resolver);
+    expect(onResolveError).toHaveBeenCalledTimes(1);
+    expect(onResolveError.mock.calls[0][1].id).toBe(1);
+    expect(audio.src).toBe('');
+  });
+
+  it('seeks to the resolver-provided startPosition after play', async () => {
+    const audio = fakeAudio();
+    (audio as unknown as { duration: number }).duration = 200;
+    const ctx = fakeCtx();
+    const engine = new WebAudioEngine({
+      createElement: () => audio,
+      createContext: () => ctx,
+    });
+    const resolver = vi.fn(async () => ({ url: 'qy-stream://audio/r1', startPosition: 30 }));
+    await engine.playQueue([makeTrack(1, '')], 0, 'off', false, resolver);
+    expect((audio as unknown as { currentTime: number }).currentTime).toBe(30);
+  });
+
+  it('seeks to the playQueue startPosition for the first (eager) track', async () => {
+    const audio = fakeAudio();
+    (audio as unknown as { duration: number }).duration = 200;
+    const ctx = fakeCtx();
+    const engine = new WebAudioEngine({
+      createElement: () => audio,
+      createContext: () => ctx,
+    });
+    await engine.playQueue([makeTrack(1)], 0, 'off', false, undefined, 15);
+    expect((audio as unknown as { currentTime: number }).currentTime).toBe(15);
+  });
 });

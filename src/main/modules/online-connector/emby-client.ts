@@ -57,7 +57,8 @@ export class EmbyClient extends JellyfinClient {
   async getItemDetails(itemId: string): Promise<JellyfinItem> {
     const response = await this.client.get(`/emby/Users/${this.userId}/Items/${itemId}`, {
       params: {
-        Fields: 'PrimaryImageAspectRatio,BasicSyncInfo,Path,MediaSources,DateCreated,ProductionYear,CommunityRating,Overview,Genres,People',
+        // MediaStreams：音频条目要靠 Codec 判定能否走内置引擎（QYP3-037）
+        Fields: 'PrimaryImageAspectRatio,BasicSyncInfo,Path,MediaSources,MediaStreams,DateCreated,ProductionYear,CommunityRating,Overview,Genres,People',
       },
     });
     return response.data;

@@ -13,17 +13,22 @@ const base: EngineInput = {
 };
 
 describe('engine selector (QYP3-009, ADR-0007)', () => {
-  it('server audio always goes to mpv (auth headers / transcode)', () => {
-    expect(selectAudioEngine({ ...base, sourceKind: 'server' })).toEqual({
-      engine: 'mpv',
-      reason: 'server-stream',
-    });
+  it('server audio follows codec since qy-stream proxy (QYP3-037)', () => {
+    // 认证问题已由主进程 qy-stream 代理解决，sourceKind 不再强制 mpv
     expect(selectAudioEngine({ ...base, sourceKind: 'server', codec: 'flac' })).toEqual({
+      engine: 'webaudio',
+      reason: 'direct-codec',
+    });
+    expect(selectAudioEngine({ ...base, sourceKind: 'server', codec: 'ape' })).toEqual({
       engine: 'mpv',
-      reason: 'server-stream',
+      reason: 'non-direct-codec',
     });
     // 服务端转码强制 mpv，即使本地直连格式
     expect(selectAudioEngine({ ...base, transcode: true })).toEqual({
+      engine: 'mpv',
+      reason: 'transcode',
+    });
+    expect(selectAudioEngine({ ...base, sourceKind: 'server', transcode: true })).toEqual({
       engine: 'mpv',
       reason: 'transcode',
     });
@@ -66,19 +71,21 @@ describe('engine selector (QYP3-009, ADR-0007)', () => {
     expect(selectAudioEngine({ ...base, codec: 'FLAC' }).engine).toBe('webaudio');
   });
 
-  it('webdav always goes to mpv (direct URL needs auth headers)', () => {
+  it('webdav follows codec since qy-stream proxy (QYP3-037)', () => {
     expect(selectAudioEngine({ ...base, sourceKind: 'webdav', codec: 'flac' })).toEqual({
-      engine: 'mpv',
-      reason: 'webdav-auth',
+      engine: 'webaudio',
+      reason: 'direct-codec',
     });
-    expect(selectAudioEngine({ ...base, sourceKind: 'webdav', codec: 'ape' }).reason).toBe(
-      'webdav-auth'
-    );
+    expect(selectAudioEngine({ ...base, sourceKind: 'webdav', codec: 'ape' })).toEqual({
+      engine: 'mpv',
+      reason: 'non-direct-codec',
+    });
   });
 
   it('isWebAudioEngine mirrors the decision', () => {
     expect(isWebAudioEngine({ ...base, codec: 'mp3' })).toBe(true);
     expect(isWebAudioEngine({ ...base, codec: 'ape' })).toBe(false);
-    expect(isWebAudioEngine({ ...base, sourceKind: 'server' })).toBe(false);
+    expect(isWebAudioEngine({ ...base, sourceKind: 'server', codec: 'mp3' })).toBe(true);
+    expect(isWebAudioEngine({ ...base, sourceKind: 'server', codec: null })).toBe(false);
   });
 });

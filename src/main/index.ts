@@ -12,6 +12,8 @@ import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type 
 import { isMpvMusicActive } from './modules/playback-engine/music-active';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
+import { registerStreamProtocol } from './modules/playback-engine/stream-protocol';
+import { createStreamRouteCache } from './modules/security/stream-route-cache';
 import { resolveCoverFileName } from './modules/library-scanner/cover-service';
 
 let mainWindow: BrowserWindow | null = null;
@@ -134,8 +136,15 @@ function createWindow(): BrowserWindow {
 // qy-file 协议（QYP3-008）：只服务 covers 目录（内嵌封面提取结果）。
 // 先注册特权方案（http 源不能加载 file://；自定义协议必须标准/安全），
 // whenReady 后注册处理器，路径严格限定在 coversDir 内（防目录穿越）。
+//
+// qy-stream（QYP3-037）：服务器/WebDAV 音频的主进程认证代理，只在主进程里
+// 解析真实上游 URL 并注入认证头，渲染层仅见不透明 id。`stream: true` 是
+// `<audio>`/`<video>` 按 Range 流式消费所必需的（默认按整段缓冲处理）。
+// 刻意**不加** corsEnabled：qy-file 已验证「自定义特权 scheme 喂
+// createMediaElementSource 能出真频谱」，加 CORS 检查反而可能破坏它。
 protocol.registerSchemesAsPrivileged([
   { scheme: 'qy-file', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: 'qy-stream', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 app.whenReady().then(() => {
@@ -155,7 +164,16 @@ app.whenReady().then(() => {
     }
   });
 
-  registerIpcHandlers(player, () => mainWindow);
+  // qy-stream 路由表：注册协议与 IPC 解析器必须共用同一实例（解析时写入、
+  // 协议处理器读取），所以在这里建好再分别注入。
+  const streamRoutes = createStreamRouteCache();
+
+  registerIpcHandlers(player, () => mainWindow, { streamRoutes });
+
+  // qy-stream://audio/<opaqueId> 代理（QYP3-037）：服务器/WebDAV 音频直链
+  // 需要认证，渲染层无法注入请求头；这里由主进程按 Range 转发并注入认证头，
+  // 让这些音源也能走渲染层 Web Audio 引擎（真频谱/真波形/均衡器）。
+  registerStreamProtocol({ routes: streamRoutes });
 
   // qy-file:// 协议（QYP3-005/010，Electron 21 registerFileProtocol）：
   //   covers/<name> → coversDir 内的封面文件（白名单正则 + 包含校验）

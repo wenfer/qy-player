@@ -85,3 +85,18 @@ describe('isLocalFlacUrl (QYP3-033)', () => {
     expect(isLocalFlacUrl('qy-file://covers/1.png')).toBe(false);
   });
 });
+
+describe('isFlacUrl (QYP3-037)', () => {
+  it('accepts qy-stream proxy urls and local qy-file flac paths', async () => {
+    const { isFlacUrl } = await import('../../../src/renderer/player/flac-strip');
+    expect(isFlacUrl('qy-stream://audio/sess-1')).toBe(true);
+    expect(isFlacUrl('qy-file://audio/1/%E5%98%B2%E7%AC%91.flac')).toBe(true);
+    expect(isFlacUrl('qy-file://audio/1/%E5%98%B2%E7%AC%91.mp3')).toBe(false);
+    expect(isFlacUrl('https://example.com/a.flac')).toBe(false);
+  });
+
+  it('isLocalFlacUrl keeps rejecting qy-stream (extension-less)', async () => {
+    const { isLocalFlacUrl } = await import('../../../src/renderer/player/flac-strip');
+    expect(isLocalFlacUrl('qy-stream://audio/sess-1')).toBe(false);
+  });
+});

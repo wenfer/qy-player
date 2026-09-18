@@ -20,6 +20,10 @@ import {
   sanitizeServerForRenderer,
 } from '../modules/security/secret-store';
 import type { SecretStore, StreamHeaderCache } from '../modules/security/secret-store';
+import {
+  createStreamRouteCache,
+  type StreamRouteCache,
+} from '../modules/security/stream-route-cache';
 import { LocalSourceAdapter } from '../modules/library-sources/local-source';
 import { WebDavSourceAdapter } from '../modules/library-sources/webdav-source';
 import type { SourceAdapter } from '../modules/library-sources/types';
@@ -200,7 +204,19 @@ function describeNetworkError(err: unknown): string {
   return e?.message ? `连接失败: ${e.message}` : '无法连接到服务器';
 }
 
-export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => import('electron').BrowserWindow | null): void {
+export interface IpcHandlerDeps {
+  /**
+   * qy-stream 路由表（QYP3-037）：与主进程入口注册的协议处理器共用同一实例。
+   * 未注入时自查一份（测试/独立启动场景）。
+   */
+  streamRoutes?: StreamRouteCache;
+}
+
+export function registerIpcHandlers(
+  player: PlayerCore,
+  getMainWindow?: () => import('electron').BrowserWindow | null,
+  deps: IpcHandlerDeps = {}
+): void {
   const db = getDatabase();
   const storage = createStorage(db);
 
@@ -223,6 +239,9 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
 
   // Stream headers are stashed main-side; renderers only see session ids.
   const streamHeaders: StreamHeaderCache = createStreamHeaderCache();
+  // qy-stream 路由表（QYP3-037）：可重复读取（一首歌多次 Range 请求），
+  // 与 mpv 用的单次消费 streamHeaders 是两套语义。
+  const streamRoutes: StreamRouteCache = deps.streamRoutes ?? createStreamRouteCache();
 
   // QYP3-019：歌词缓存目录（扫描期从标签透传落盘，人工可编辑 → 受保护）
   const lyricsDir = join(app.getPath('userData'), 'lyrics');
@@ -1219,7 +1238,12 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
     async (
       _event,
       ref: unknown,
-      options: { mode?: 'direct' | 'transcode'; mediaSourceId?: string } = {}
+      options: {
+        mode?: 'direct' | 'transcode';
+        mediaSourceId?: string;
+        /** 渲染层 direct 解码失败后的 mpv 兜底（ADR-0007），必须透传。 */
+        engineForce?: 'mpv';
+      } = {}
     ): Promise<ActionResult<unknown>> => {
       if (!isMediaRef(ref)) {
         return err('VALIDATION_FAILED', '播放引用不合法');
@@ -1236,6 +1260,7 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             storage,
             secretStore,
             streamHeaders,
+            streamRoutes,
             getResumePosition: (mediaType: string, mediaId: string) =>
               playbackStateManager!.getResumePosition(mediaType, mediaId),
             createOnlineClient: createClient,
@@ -1266,7 +1291,12 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
                 .catch(() => {}); // 旧版服务器/Emby 无端点 → 无分段，静默
             },
           },
-          { ref, mode, ...(mediaSourceId ? { mediaSourceId } : {}) }
+          {
+            ref,
+            mode,
+            ...(mediaSourceId ? { mediaSourceId } : {}),
+            ...(options?.engineForce === 'mpv' ? { engineForce: 'mpv' as const } : {}),
+          }
         );
         return ok(resolution);
       } catch (e) {
@@ -1303,11 +1333,14 @@ export function registerIpcHandlers(player: PlayerCore, getMainWindow?: () => im
             storage,
             secretStore,
             streamHeaders,
+            streamRoutes,
             getResumePosition: (mediaType: string, mediaId: string) =>
               playbackStateManager!.getResumePosition(mediaType, mediaId),
             createOnlineClient: createClient,
           },
-          { ref: input.ref, mode }
+          // 探测要的是可直接抓取的真实 URL，与最终用哪个引擎无关；强制 mpv
+          // 分支可以避开 qy-stream 代理（主进程探测拿不到自定义协议）。
+          { ref: input.ref, mode, engineForce: 'mpv' }
         );
         // take() is single-use; a later playback resolve stashes fresh
         // headers, so consuming the probe's own session is safe.

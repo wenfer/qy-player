@@ -37,6 +37,11 @@ export interface JellyfinItem {
     Protocol?: string;
     Path?: string;
     Type?: string;
+    /**
+     * QYP3-037：音频条目的编解码信息（`Type === 'Audio'` 那一条的 `Codec`
+     * 决定能否走渲染层 Web Audio 引擎）。仅 getItemDetails 请求该 Field。
+     */
+    MediaStreams?: Array<{ Type?: string; Codec?: string }>;
   }>;
   RunTimeTicks?: number;
   /** Server watch state (§12.1: server UserData preferred). */
@@ -148,7 +153,8 @@ export class JellyfinClient {
   async getItemDetails(itemId: string): Promise<JellyfinItem> {
     const response = await this.client.get(`/Users/${this.userId}/Items/${itemId}`, {
       params: {
-        Fields: 'PrimaryImageAspectRatio,BasicSyncInfo,Path,MediaSources,Overview,Genres,People',
+        // MediaStreams：音频条目要靠 Codec 判定能否走内置引擎（QYP3-037）
+        Fields: 'PrimaryImageAspectRatio,BasicSyncInfo,Path,MediaSources,MediaStreams,Overview,Genres,People',
       },
     });
     return response.data;

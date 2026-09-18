@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { openDatabaseAtPath, createStorage } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { createSecretStore, createStreamHeaderCache, type SecretStore, type StreamHeaderCache } from '../../../src/main/modules/security/secret-store';
+import { createStreamRouteCache } from '../../../src/main/modules/security/stream-route-cache';
 import type { SecretCipher } from '../../../src/main/modules/security/secret-store';
 import { loadWebDavSecret, WebDavSourceAdapter } from '../../../src/main/modules/library-sources/webdav-source';
 import { getAdapterForSource } from '../../../src/main/modules/catalog/source-service';
@@ -159,6 +160,7 @@ async function resolve(sourceId: number, itemId: number, resume = 0) {
       storage: createStorage(db),
       secretStore,
       streamHeaders,
+      streamRoutes: createStreamRouteCache(),
       getResumePosition: () => resume,
       createOnlineClient: (() => {
         throw new Error('unused in webdav tests');

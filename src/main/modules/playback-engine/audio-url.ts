@@ -7,7 +7,8 @@
  *
  * 安全面：只接受 local 来源；containment 由 LocalSourceAdapter.
  * resolveInside 提供（字符串级 + realpath TOCTOU 双层，QYP2-009）。
- * WebDAV/服务器音频不走 renderer 引擎（ADR-0007），永不在此解析。
+ * WebDAV/服务器音频走另一条协议（`qy-stream://`，主进程认证代理，
+ * QYP3-037），永不在此解析——这里只服务本地包含校验内的文件。
  */
 
 export interface ProtocolSource {
