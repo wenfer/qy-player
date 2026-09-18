@@ -74,6 +74,9 @@ const electronAPI = {
   testSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_TEST, input),
   saveSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SAVE, input),
   removeSource: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_REMOVE, sourceId),
+  // 用途标记（QYP3-039）：收窄用途时主进程会清理超出范围的索引
+  updateSourcePurpose: (sourceId: number, purpose: 'all' | 'music' | 'video') =>
+    ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_UPDATE, { sourceId, purpose }),
   sourceHealth: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, sourceId),
   startScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_START, sourceId),
   cancelScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_CANCEL, sourceId),

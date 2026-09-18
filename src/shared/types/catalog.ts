@@ -93,6 +93,19 @@ export interface SourceCapabilities {
   supportsRange: boolean;
 }
 
+/**
+ * 来源用途标记（QYP3-039，音乐/视频模式隔离）。
+ * 'all' = 音乐与视频都索引（存量默认）；'music' / 'video' 只索引对应域，
+ * 扫描与用途收窄清理都按此语义（见 SOURCE_UPDATE 与扫描过滤器）。
+ */
+export type SourcePurpose = 'all' | 'music' | 'video';
+
+export const SOURCE_PURPOSES: readonly SourcePurpose[] = ['all', 'music', 'video'];
+
+export function isSourcePurpose(value: unknown): value is SourcePurpose {
+  return typeof value === 'string' && (SOURCE_PURPOSES as readonly string[]).includes(value);
+}
+
 export interface SourceSummary {
   id: number;
   kind: SourceKind;
@@ -103,6 +116,7 @@ export interface SourceSummary {
   capabilities: SourceCapabilities;
   /** True when a usable credential exists in the SecretStore. */
   hasCredential: boolean;
+  purpose: SourcePurpose;
 }
 
 export type SourceHealth = 'ok' | 'degraded' | 'offline' | 'auth-required' | 'unscanned';
@@ -141,6 +155,8 @@ export interface CreateLocalSourceInput {
   /** Directory path from the Electron picker; canonicalized main-side. */
   root: string;
   name?: string;
+  /** 用途标记（QYP3-039）；缺省 'all'。 */
+  purpose?: SourcePurpose;
 }
 
 /** Renderer-supplied input for creating a WebDAV source (plan §8.1/8.2). */
@@ -156,6 +172,8 @@ export interface CreateWebDavSourceInput {
    * transport for http:// (plan §8.1). Required for http URLs at save.
    */
   confirmHttpPlaintext?: boolean;
+  /** 用途标记（QYP3-039）；缺省 'all'。 */
+  purpose?: SourcePurpose;
 }
 
 export function isCreateWebDavSourceInput(value: unknown): value is CreateWebDavSourceInput {
@@ -167,6 +185,7 @@ export function isCreateWebDavSourceInput(value: unknown): value is CreateWebDav
   if (input.username !== undefined && (typeof input.username !== 'string' || input.username.length > 256)) return false;
   if (input.password !== undefined && (typeof input.password !== 'string' || input.password.length > 1024)) return false;
   if (input.confirmHttpPlaintext !== undefined && typeof input.confirmHttpPlaintext !== 'boolean') return false;
+  if (input.purpose !== undefined && !isSourcePurpose(input.purpose)) return false;
   return true;
 }
 
@@ -176,6 +195,7 @@ export function isCreateLocalSourceInput(value: unknown): value is CreateLocalSo
   if (input.kind !== 'local') return false;
   if (typeof input.root !== 'string' || input.root.length === 0) return false;
   if (input.name !== undefined && typeof input.name !== 'string') return false;
+  if (input.purpose !== undefined && !isSourcePurpose(input.purpose)) return false;
   return true;
 }
 

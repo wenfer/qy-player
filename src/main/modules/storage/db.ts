@@ -342,6 +342,14 @@ const MIGRATIONS = [
   ALTER TABLE music_tracks ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX IF NOT EXISTS idx_music_tracks_favorite ON music_tracks(favorite);
   `,
+
+  // 009（QYP3-039）：媒体来源用途标记（音乐/视频模式隔离）。
+  // 'all'（默认，兼容存量）= 音乐与视频都索引；'music' 只索引音频；
+  // 'video' 只索引视频。CHECK 不放迁移里（老机 SQLite 版本差异），
+  // 合法值由应用层白名单校验（SOURCE_UPDATE 处理器）。
+  `
+  ALTER TABLE library_sources ADD COLUMN purpose TEXT NOT NULL DEFAULT 'all';
+  `,
 ];
 
 

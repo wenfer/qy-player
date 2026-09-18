@@ -81,7 +81,7 @@ describe('SourceForm (add local source)', () => {
     fireEvent.click(screen.getByRole('button', { name: /添加来源/ }));
 
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith({ kind: 'local', root: '/data/movies', name: '电影收藏' })
+      expect(onSave).toHaveBeenCalledWith({ kind: 'local', root: '/data/movies', name: '电影收藏', purpose: 'all' })
     );
     // 1280x800 no-horizontal-scroll policy: action rows wrap instead.
     expect(document.querySelector('[data-testid="source-form"] .flex-wrap')).toBeTruthy();

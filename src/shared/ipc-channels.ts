@@ -134,6 +134,8 @@ export const IPC_CHANNELS = {
     SOURCE_TEST: 'catalog:source-test',
     SOURCE_SAVE: 'catalog:source-save',
     SOURCE_REMOVE: 'catalog:source-remove',
+    /** 用途标记修改（QYP3-039）：收窄用途时会清理超出范围的索引。 */
+    SOURCE_UPDATE: 'catalog:source-update',
     SOURCE_HEALTH: 'catalog:source-health',
     SCAN_START: 'catalog:scan-start',
     SCAN_CANCEL: 'catalog:scan-cancel',

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { CatalogKind, SourceKind } from '../../../shared/types';
+import type { CatalogKind, SourceKind, SourcePurpose } from '../../../shared/types';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
 
 /**
@@ -19,6 +19,8 @@ export interface SourceRow {
   secret_ref: string | null;
   read_only: number;
   options: string | null;
+  /** 用途标记（QYP3-039，migration 009）：all=音乐+视频，music/video 只索引对应域。 */
+  purpose: SourcePurpose;
 }
 
 export interface CatalogItemRow {
@@ -75,6 +77,8 @@ export interface CreateSourceInput {
   secretRef?: string;
   readOnly?: boolean;
   options?: Record<string, string | number | boolean>;
+  /** 用途标记（QYP3-039）；缺省 'all'（兼容存量语义）。 */
+  purpose?: SourcePurpose;
 }
 
 /** QYP3-003/014：音乐条目 upsert。本地/WebDAV 用 sourceId+sourceKey；
@@ -183,8 +187,8 @@ export function createCatalogRepository(db: Database.Database) {
     createSource(input: CreateSourceInput): number {
       const result = db
         .prepare(
-          `INSERT INTO library_sources (kind, name, root, secret_ref, read_only, options)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO library_sources (kind, name, root, secret_ref, read_only, options, purpose)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           input.kind,
@@ -192,7 +196,8 @@ export function createCatalogRepository(db: Database.Database) {
           input.root,
           input.secretRef ?? null,
           input.readOnly === false ? 0 : 1, // sources default to read-only (plan §14.2)
-          input.options ? JSON.stringify(input.options) : null
+          input.options ? JSON.stringify(input.options) : null,
+          input.purpose ?? 'all'
         );
       return Number(result.lastInsertRowid);
     },
@@ -215,6 +220,7 @@ export function createCatalogRepository(db: Database.Database) {
         name?: string;
         readOnly?: boolean;
         options?: Record<string, string | number | boolean> | null;
+        purpose?: SourcePurpose;
       }
     ): void {
       // Dynamic SET from constants only; values stay parameterized.
@@ -232,6 +238,10 @@ export function createCatalogRepository(db: Database.Database) {
         sets.push('options = ?');
         values.push(patch.options === null ? null : JSON.stringify(patch.options));
       }
+      if (patch.purpose !== undefined) {
+        sets.push('purpose = ?');
+        values.push(patch.purpose);
+      }
       if (sets.length === 0) return;
       sets.push('updated_at = unixepoch()');
       db
@@ -248,6 +258,16 @@ export function createCatalogRepository(db: Database.Database) {
 
     deleteSource(id: number): void {
       db.prepare('DELETE FROM library_sources WHERE id = ?').run(id);
+    },
+
+    /** 用途收窄为 'music' 时清掉视频域索引（QYP3-039；外键级联带走文件/元数据）。 */
+    purgeVideoContentBySource(sourceId: number): void {
+      db.prepare('DELETE FROM catalog_items WHERE source_id = ?').run(sourceId);
+    },
+
+    /** 用途收窄为 'video' 时清掉音乐域索引（QYP3-039；cue 条目级联删除）。 */
+    purgeMusicTracksBySource(sourceId: number): void {
+      db.prepare('DELETE FROM music_tracks WHERE source_id = ?').run(sourceId);
     },
 
     // -- Items --------------------------------------------------------------

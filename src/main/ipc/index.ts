@@ -61,8 +61,9 @@ import type {
   ScanProgressEvent,
   SourceCapabilities,
   SourceListEntry,
+  SourcePurpose,
 } from '../../shared/types';
-import { isMediaRef } from '../../shared/types';
+import { isMediaRef, isSourcePurpose } from '../../shared/types';
 import {
   bindServerById,
   injectAttachedSubtitles,
@@ -2049,6 +2050,7 @@ function registerCatalogHandlers(
             ? { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true }
             : { ...LOCAL_SOURCE_CAPABILITIES },
         hasCredential: source.secret_ref ? secretStore.hasSecretByRef(source.secret_ref) : false,
+        purpose: source.purpose,
         ...(health
           ? {
               health: health.health,
@@ -2094,7 +2096,7 @@ function registerCatalogHandlers(
         return ok(createWebDavSource(db, secretStore, input));
       }
       if (isCreateLocalSourceInput(input)) {
-        return ok(createLocalSourceFromSelection(db, input.root, { name: input.name }));
+        return ok(createLocalSourceFromSelection(db, input.root, { name: input.name, purpose: input.purpose }));
       }
       return err('VALIDATION_FAILED', '来源输入不合法');
     } catch (e) {
@@ -2115,6 +2117,38 @@ function registerCatalogHandlers(
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
     }
   });
+
+  // 用途标记修改（QYP3-039）：收窄用途时清理超出范围的索引——
+  // →'music' 清视频域（catalog_items 级联带走文件/元数据/用户状态）、
+  // →'video' 清音乐域（music_tracks 级联带走 CUE）；→'all' 不清。
+  // 收窄后再扫描会按用途过滤，清域与过滤语义一致、幂等无害。
+  ipcMain.handle(
+    IPC_CHANNELS.CATALOG.SOURCE_UPDATE,
+    (_event, args: { sourceId?: number; purpose?: unknown }): ActionResult<true> => {
+      const sourceId = Number(args?.sourceId);
+      if (!Number.isInteger(sourceId) || sourceId <= 0) {
+        return err('VALIDATION_FAILED', '来源 ID 不合法');
+      }
+      if (!isSourcePurpose(args?.purpose)) {
+        return err('VALIDATION_FAILED', '用途取值不合法');
+      }
+      const purpose = args.purpose as SourcePurpose;
+      const source = repo.getSource(sourceId);
+      if (!source) return err('NOT_FOUND', '来源不存在');
+      const previous = source.purpose;
+      try {
+        repo.updateSource(sourceId, { purpose });
+        if (purpose === 'music' && previous !== 'music') {
+          repo.purgeVideoContentBySource(sourceId);
+        } else if (purpose === 'video' && previous !== 'video') {
+          repo.purgeMusicTracksBySource(sourceId);
+        }
+        return ok(true);
+      } catch (e) {
+        return err('UNAVAILABLE', e instanceof Error ? e.message : '用途更新失败');
+      }
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
     if (!Number.isInteger(sourceId) || sourceId <= 0) {
@@ -2158,12 +2192,15 @@ function registerCatalogHandlers(
       ...adapter,
       list: (path: string, signal: AbortSignal) => walkSourceTree(adapter, path, signal),
     };
+    // 用途过滤（QYP3-039）：来源标记 'music'/'video' 时扫描只索引对应域
+    const purpose = repo.getSource(sourceId)?.purpose ?? 'all';
     const driver =
       adapter.kind === 'webdav'
-        ? createWebDavScanDriver({ repo, sourceId, adapter })
+        ? createWebDavScanDriver({ repo, sourceId, adapter, purpose })
         : createLocalScanDriver({
             repo,
             sourceId,
+            purpose,
             coversDir: join(app.getPath('userData'), 'covers'), // QYP3-005
             lyricsDir, // QYP3-019
             // NFO contents are read through the adapter's containment check,
@@ -2206,7 +2243,11 @@ function registerCatalogHandlers(
         // successful FULL scan (plan §6.1); ipc has no resume path yet.
         const run = repo.getScanRun(runId);
         if (run?.status === 'completed') {
-          markAvailabilityAfterScan(repo, sourceId, driver.seen, { fullScan: true });
+          // 仅音乐来源的批次里没有视频路径（QYP3-039），可用性降级会把
+          // 存量视频条目全部误标 missing——必须跳过
+          if (purpose !== 'music') {
+            markAvailabilityAfterScan(repo, sourceId, driver.seen, { fullScan: true });
+          }
           // Idempotent: legacy local_media progress migrates onto catalog
           // items once the files exist (plan §6.4 / QYP2-011 acceptance).
           try {

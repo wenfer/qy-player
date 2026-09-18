@@ -13,7 +13,7 @@ import { parseWebDavBaseUrl, WebDavUrlError } from '../library-sources/url-guard
 import type { SourceAdapter } from '../library-sources/types';
 import type { SecretStore } from '../security/secret-store';
 import { formatSecretRef } from '../security/secret-store';
-import type { CreateWebDavSourceInput } from '../../../shared/types';
+import type { CreateWebDavSourceInput, SourcePurpose } from '../../../shared/types';
 
 /**
  * Source lifecycle service (plan §7, QYP2-007).
@@ -34,7 +34,7 @@ export interface CreatedSource {
 export function createLocalSourceFromSelection(
   db: Database.Database,
   selectedPath: string,
-  options: { name?: string } = {}
+  options: { name?: string; purpose?: SourcePurpose } = {}
 ): CreatedSource {
   const root = LocalSourceAdapter.canonicalizeRoot(selectedPath);
   const repo = createCatalogRepository(db);
@@ -43,6 +43,7 @@ export function createLocalSourceFromSelection(
     name: options.name?.trim() || basename(root),
     root,
     readOnly: true, // plan §14.2: deletion stays disabled by default
+    purpose: options.purpose,
   });
   return { sourceId, root, name: options.name?.trim() || basename(root) };
 }
@@ -73,6 +74,7 @@ export function createWebDavSource(
     name,
     root: parsed.url,
     readOnly: true, // plan §14.2: deletion stays disabled by default
+    purpose: input.purpose,
   });
   // Empty strings are not credentials; only real pairs reach the store.
   if (input.username && input.password && secretStore) {

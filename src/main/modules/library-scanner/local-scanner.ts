@@ -213,8 +213,14 @@ export function createLocalScanDriver(deps: {
   lyricsDir?: string;
   /** CUE 文本读取（QYP3-006）：本地=fs；WebDAV=bounded GET。缺省则 CUE 跳过。 */
   readText?: (entry: SourceEntry, signal: AbortSignal) => Promise<Buffer | null>;
+  /**
+   * 来源用途标记（QYP3-039）：'music' 只索引音频（跳过视频/NFO），
+   * 'video' 只索引视频（跳过音频/CUE）；缺省 'all' 与旧行为一致。
+   */
+  purpose?: 'all' | 'music' | 'video';
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
+  const purpose = deps.purpose ?? 'all';
   // Existing files snapshot: cheap in-driver change detection without extra
   // repository queries per entry.
   const filesIndex = new Map<string, Pick<CatalogFileRow, 'fingerprint'>>(
@@ -287,6 +293,8 @@ export function createLocalScanDriver(deps: {
       if (entry.isDirectory) return;
       const parsed = classifyPath(entry.relativePath);
       if (parsed.fileClass === 'nfo') {
+        // NFO 跟视频域走（QYP3-039）：仅音乐来源不读 NFO
+        if (purpose === 'music') return;
         await enrichFromNfo(entry.relativePath, signal);
         return;
       }
@@ -296,6 +304,8 @@ export function createLocalScanDriver(deps: {
       // 读取钩子时回退文件名启发式（classifier audioInfoOf）。
       if (parsed.fileClass === 'audio') {
         if (parsed.isSample) return;
+        // 仅视频来源不索引音频（QYP3-039）
+        if (purpose === 'video') return;
         seen.add(entry.relativePath);
         const audioFingerprint = fingerprintFor(entry);
         const audioExisting = musicIndex.get(`audio:${entry.relativePath}`);
@@ -357,10 +367,14 @@ export function createLocalScanDriver(deps: {
       }
       // CUE 描述文件（QYP3-006）：收进列表，finalize 统一解析
       if (parsed.fileClass === 'audio-cue') {
+        // 仅视频来源不索引 CUE（QYP3-039）
+        if (purpose === 'video') return;
         cueFiles.push(entry);
         return;
       }
       if (parsed.fileClass !== 'video' || parsed.isSample) return;
+      // 仅音乐来源不索引视频（QYP3-039）
+      if (purpose === 'music') return;
 
       seen.add(entry.relativePath);
       // Default fingerprint is size + mtime (ms). mtime is floored to an
@@ -462,7 +476,9 @@ export function createLocalScanDriver(deps: {
     finalized = true;
     flushGroup();
     processCueFiles();
-    cleanupMissingMusic();
+    // 仅视频来源的批次里没有音频路径（QYP3-039），跑清理会把存量音轨
+    // 全部误标删除——必须跳过；'all'/'music' 才允许收尾清理音轨。
+    if (purpose !== 'video') cleanupMissingMusic();
   }
 
   /** 音轨可用性（QYP3-014）：全量扫描收尾清理已消失的音轨。 */

@@ -100,6 +100,8 @@ export function createWebDavScanDriver(deps: {
   sourceId: number;
   /** The stored webdav adapter (credentials resolved at construction). */
   adapter: SourceAdapter;
+  /** 来源用途标记（QYP3-039），透传给底层 driver。 */
+  purpose?: 'all' | 'music' | 'video';
 }): LocalScanDriver {
   if (deps.adapter.kind !== 'webdav') {
     throw new Error('createWebDavScanDriver 需要 WebDAV adapter');
@@ -108,6 +110,7 @@ export function createWebDavScanDriver(deps: {
   return createLocalScanDriver({
     repo: deps.repo,
     sourceId: deps.sourceId,
+    purpose: deps.purpose,
     fingerprintOf: webdavFingerprint,
     readNfo: async (relativePath, signal) => {
       const resource = await adapter.open({ sourceId: deps.sourceId, relativePath }, signal);
