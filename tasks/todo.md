@@ -1002,6 +1002,30 @@
 - 待目标机验证：本地 mp3 出真频谱/真波形、调均衡器频谱跟着变、mpv 源仍是
   静态线（设计如此）——已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-047 频谱只留一个 + 经典弹跳柱（移除瀑布）`[x]`
+- 诉求（用户）：播放页面出现两个频谱（下方精简版 + 上方完整版），只保留下方
+  精简版；移除瀑布；柱状频谱改成经典风格的弹跳元素
+- 改动：
+  - `pages/Music/index.tsx` 移除顶部 `<SpectrumGraph>` 块（播放时只剩底部播放条
+    的拾音器，同屏不再有两个频谱）
+  - 新增 `components/Visualizer/bars-painter.ts`：经典频谱分析仪的弹跳柱——
+    按"格"点亮的分段 LED（琥珀 → 橙 → 红）+ 顶端峰值帽，峰值帽按 `dt`
+    **缓慢下落**（`FALL_PER_SEC = 0.55`）而不是跟着电平瞬间归零
+  - `Visualizer`（48 柱/8 段，24px）与 `SpectrumGraph`（56 柱/16 段）都改用该
+    painter；`SpectrumGraph` 内部的瀑布图 / `SpectrumChart` / `downsampleSpectrum`
+    / `heatColor` / `playback.spectrumChart` 持久化全部删除
+  - 无真实数据（mpv 引擎）的诚实行为不变：拾音器静态进度线、频谱图提示
+    "无法显示真实频谱"，绝不假跳动
+- 顺手修：`Visualizer` 的 `draw` 里 `last = now` 推进在算 dt **之前**，
+  传给 painter 的 `dt` 恒为 0 → 峰值帽永远钉在顶上不落；改成先算 `dt`
+- Evidence: `tests/renderer/music/bars-painter.test.ts` 新增 7 例（下采样取峰值、
+  点亮格数与钳制、分段配色、静音时只画空柱、峰值帽缓落并最终消失）；
+  `spectrum-graph.test.ts` 去掉瀑布两项、补"不再有图表切换"；
+  `visualizer.test.tsx` 频谱例改成断言 LED 配色与峰值帽；
+  typecheck 双配置 + 全量 967 绿，三构建通过
+- 待目标机验证：只出现一个频谱、弹跳与峰值帽手感、24px 下分段不糊、
+  精简浮窗与设置里都找不到瀑布入口——已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

@@ -155,9 +155,14 @@
   所以「拿不到真实波形」的只剩：转码 HLS、CUE、兼容性优先、非直解格式
   （codec 不在 `DIRECT_CODECS`）——`Visualizer` 在无真实数据时画一条静态进度线，
   **绝不画假跳动的正弦波**（改前就是假正弦，已被用户指出）。想给某音源加真
-  波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据。音乐页顶部的**频谱图**
-  （`components/SpectrumGraph`，QYP3-034：柱状/瀑布可切换）同此约束——mpv 源
-  显示"无法显示真实频谱"提示，绝不画假数据
+  波形，必须让它走内置引擎解码，而非指望从 mpv 拿数据。`components/SpectrumGraph`
+  （QYP3-034）同此约束——mpv 源显示"无法显示真实频谱"提示，绝不画假数据。
+  **QYP3-047 起**：音乐页顶部不再放频谱图（播放时只留底部播放条那一块，避免
+  同屏两个频谱）；瀑布声谱图与其持久化（`playback.spectrumChart`）已删除，
+  只剩经典弹跳柱状一种。柱状绘制统一走 `Visualizer/bars-painter.ts`
+  （分段 LED 柱 + 峰值帽，峰值帽按 `dt` 缓慢下落——`paint` 的 dt 必须在推进
+  `last` **之前**算，否则峰值帽永远不落）；`Visualizer`（48 柱/8 段，24px 高）
+  与 `SpectrumGraph`（56 柱/16 段）复用同一个 painter
 - **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

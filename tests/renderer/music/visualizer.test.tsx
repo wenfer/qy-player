@@ -2,11 +2,16 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import Visualizer from '../../../src/renderer/components/Visualizer';
+import {
+  BAR_COLORS,
+  PEAK_COLOR,
+} from '../../../src/renderer/components/Visualizer/bars-painter';
 
 /**
  * 拾音器（QYP3-023 / QYP3-033）：只有 renderer 内置引擎才有真实波形；
  * mpv/静音源无真实数据时必须画静态进度线，绝不能画假跳动的正弦波。
  * 组件在无 2D 上下文（jsdom/受限环境）必须静默跳过而不是崩。
+ * QYP3-047：频谱改成经典弹跳柱（分段 LED + 峰值帽），颜色取自 bars-painter。
  */
 describe('visualizer (QYP3-023/033)', () => {
   // jsdom 无 2D 上下文：显式返回 null（组件静默跳过，且不打印 jsdom 噪音）
@@ -78,16 +83,18 @@ describe('visualizer (QYP3-023/033)', () => {
     expect((canvas as HTMLCanvasElement).style.height).toBe('24px');
   });
 
-  it('draws real spectrum bars when spectrum data is non-zero (webaudio engine)', () => {
-    const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
+  it('draws classic bouncing LED bars when spectrum data is non-zero (webaudio engine)', () => {
     const data = new Uint8Array(1024);
-    data.fill(180);
+    data.fill(255);
     const captured = mount({
       mode: 'spectrum',
       getSpectrum: () => data,
       getWaveform: () => null,
     });
-    expect(captured).toContain(SPECTRUM_COLOR);
+    // 分段 LED：底段琥珀、顶段红，外加峰值帽
+    expect(captured).toContain(BAR_COLORS.low);
+    expect(captured).toContain(BAR_COLORS.high);
+    expect(captured).toContain(PEAK_COLOR);
   });
 
   it('draws only a static progress line when spectrum is all zeros (mpv silent element)', () => {

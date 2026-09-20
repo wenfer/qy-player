@@ -4,7 +4,6 @@ import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
 import ServerMusicBrowser from './ServerMusicBrowser';
-import SpectrumGraph from '../../components/SpectrumGraph';
 import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
 import { pickMusicLibraries, type MusicLibraryRef, type ServerLibraryGroup } from '../../utils/server-music';
 
@@ -420,17 +419,6 @@ export default function MusicPage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="text-2xl font-bold tracking-tight mb-4">音乐</h1>
-
-      {/* 播放频谱图（QYP3-034）：有音乐会话时常驻顶部，随音调实时跳动 */}
-      {playback.engine && playback.current && (
-        <SpectrumGraph
-          engine={playback.engine}
-          getSpectrum={playback.getSpectrum}
-          isPlaying={playback.isPlaying}
-          title={playback.current.title}
-          artist={playback.current.artist}
-        />
-      )}
 
       {/* 来源切换（QYP3-025）：本地库 / 各服务器的音乐库 */}
       {serverLibs.length > 0 && (

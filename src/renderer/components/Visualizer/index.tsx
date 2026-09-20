@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useVisualizerFps } from '../../stores/resource-store';
+import { createBarsPainter, type BarsPainter } from './bars-painter';
 
 /**
  * 拾音器（QYP3-023 / QYP3-033）：双模式可视化，帧率上限 30fps（老机预算）。
@@ -47,6 +48,8 @@ interface VisualizerProps {
 }
 
 const BARS = 48;
+/** 拾音器只有 24px 高，8 段 LED 已经够密。 */
+const SEGMENTS = 8;
 const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
 const PROGRESS_PLAYED = 'rgba(255, 209, 102, 0.9)';
 const PROGRESS_IDLE = 'rgba(148, 163, 184, 0.4)';
@@ -90,6 +93,7 @@ export default function Visualizer({
 
     let raf = 0;
     let last = 0;
+    let painter: BarsPainter | null = null;
     const dpr = Math.min(2, typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
     const resize = (): void => {
       canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
@@ -100,6 +104,7 @@ export default function Visualizer({
     const draw = (now: number): void => {
       raf = requestAnimationFrame(draw);
       if (now - last < frameMs) return; // ≤30fps（性能保护下更低）
+      const dt = now - last; // 先算 dt 再推进 last，否则峰值帽永远不落
       last = now;
       const w = canvas.width;
       const h = canvas.height;
@@ -110,18 +115,9 @@ export default function Visualizer({
       if (mode === 'spectrum') {
         const data = isPlaying ? getSpectrum() : null;
         if (data && data.length > 0 && !isAllZero(data)) {
-          const step = Math.max(1, Math.floor(data.length / BARS));
-          const barW = w / BARS;
-          for (let i = 0; i < BARS; i += 1) {
-            let peak = 0;
-            for (let k = 0; k < step; k += 1) {
-              const v = data[i * step + k] ?? 0;
-              if (v > peak) peak = v;
-            }
-            const barH = Math.max(1, (peak / 255) * h);
-            ctx.fillStyle = SPECTRUM_COLOR;
-            ctx.fillRect(i * barW + barW * 0.2, h - barH, barW * 0.6, barH);
-          }
+          // 经典弹跳柱（QYP3-047）：分段 LED + 峰值帽，dt 驱动峰值下落
+          painter ??= createBarsPainter(ctx, { bars: BARS, segments: SEGMENTS });
+          painter.paint(w, h, data, dt);
           return;
         }
         // 无真实频谱（mpv 静音元素全 0 / 未起播）→ 静态进度线
