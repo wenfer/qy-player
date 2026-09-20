@@ -1239,6 +1239,19 @@
   - `PLAYER.LOAD_FILE` 仍会为 mpv 本地音乐 `upsertLocalMedia`，留下无消费方的
     orphan 行（本轮不动）
 
+### QYP3-054 模式恢复连默认页一起恢复 `[x]`
+- 诉求（用户）：音乐模式退出后重启，竖屏布局保持了，但内容是影视首页——
+  "没有完全记住窗口状态"
+- 查证：`WindowProfileHost` 回填时只调了 `appModeStore.setMode('music')`，而
+  **导航**只发生在 `Navigation.handleModeChange` 里（切换语义的一部分）。
+  冷启动路由必然是 `/` → 竖屏窗口停在影视首页上，只有侧栏是音乐那套
+- 改动：恢复 `music` 时若处于初始路由 `/` 则 `navigate('/music', {replace:true})`；
+  **只在初始路由上补跳**——热重载会保留深链（如 `#/settings`），不能抢用户的
+  当前页。精简浮窗（profile=compact 且 music）同样生效：还原浮窗后落在音乐页
+- Evidence: `tests/renderer/window-profile.test.tsx` 改为 MemoryRouter 包裹，
+  +2 例（冷启动落 `/music`、深链不劫持），共 4 例绿；typecheck 双配置通过
+- 待目标机验证：音乐模式退出重启 → 竖屏 + 音乐列表（已记入 TARGET-VERIFY）
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法
