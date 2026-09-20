@@ -51,6 +51,7 @@ import { createCatalogQueryService } from '../modules/catalog/query-service';
 import { migrateLegacyProgressForSource } from '../modules/catalog/legacy-progress';
 import {
   isCreateLocalSourceInput,
+  isSourcePurpose,
   isCreateWebDavSourceInput,
   err,
   ok,
@@ -387,25 +388,23 @@ export function registerIpcHandlers(
   // Skip intro/outro settings (剧集限定；main 侧每次命中实时读取)。
   ipcMain.handle(IPC_CHANNELS.APP.GET_VERSION, () => ok({ version: app.getVersion() }));
 
-  // 音乐库（QYP3-008）：来源限定 local/webdav（服务器音频三期未接查询）
+  // 音乐库（QYP3-008/055）：范围 = 音乐域来源（purpose='music'，见
+  // listMusicSourceIds）——域与用途绑定，影视来源（含 QYP3-041 拆域遗留）
+  // 扫出的音轨不进音乐界面
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_ALBUMS, (_event, args: { limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
-    const sourceIds = catalogRepo
-      .listSources()
-      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-      .map((s) => s.id);
-    return ok({ albums: catalogRepo.listMusicAlbums(sourceIds, limit) });
+    return ok({ albums: catalogRepo.listMusicAlbums(catalogRepo.listMusicSourceIds(), limit) });
   });
 
   ipcMain.handle(
     IPC_CHANNELS.MUSIC.GET_ALBUM_TRACKS,
     (_event, args: { albumartist: string; album: string }) => {
-      const sourceIds = catalogRepo
-        .listSources()
-        .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-        .map((s) => s.id);
       return ok({
-        tracks: catalogRepo.listAlbumTracks(sourceIds, args.albumartist, args.album),
+        tracks: catalogRepo.listAlbumTracks(
+          catalogRepo.listMusicSourceIds(),
+          args.albumartist,
+          args.album
+        ),
       });
     }
   );
@@ -463,8 +462,12 @@ export function registerIpcHandlers(
       });
     }
     const track = catalogRepo.getMusicTrack(record.sourceId!, record.trackId!);
+    // 来源必须仍是音乐域（QYP3-055）：来源被转成影视域后音轨已不可播，
+    // 恢复出一条点不动的曲目更糟——作废记录
     const source = track
-      ? catalogRepo.listSources().find((s) => s.id === record.sourceId)
+      ? catalogRepo
+          .listSources()
+          .find((s) => s.id === record.sourceId && s.purpose === 'music')
       : undefined;
     if (!track || !source) {
       clearNowPlaying(storage);
@@ -988,20 +991,14 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_TRACKS, (_event, args: { offset?: number; limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200); // 页 ≤200（§16.4）
     const offset = Math.max(Number(args?.offset) || 0, 0);
-    const sourceIds = catalogRepo
-      .listSources()
-      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-      .map((s) => s.id);
+    const sourceIds = catalogRepo.listMusicSourceIds();
     return ok({ tracks: catalogRepo.listMusicTracksPaged(sourceIds, offset, limit) });
   });
 
   // 歌手聚合 + 单歌手专辑（QYP3-008a）
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_ARTISTS, (_event, args: { limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200);
-    const sourceIds = catalogRepo
-      .listSources()
-      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-      .map((s) => s.id);
+    const sourceIds = catalogRepo.listMusicSourceIds();
     return ok({ artists: catalogRepo.listMusicArtists(sourceIds, limit) });
   });
 
@@ -1012,10 +1009,7 @@ export function registerIpcHandlers(
       if (typeof args?.albumartist !== 'string') {
         return err('VALIDATION_FAILED', '参数不合法');
       }
-      const sourceIds = catalogRepo
-        .listSources()
-        .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-        .map((s) => s.id);
+      const sourceIds = catalogRepo.listMusicSourceIds();
       return ok({ albums: catalogRepo.listArtistAlbums(sourceIds, args.albumartist, limit) });
     }
   );
@@ -1023,10 +1017,7 @@ export function registerIpcHandlers(
   // 收藏（QYP3-008a）：music 条目不在 catalog_user_state 域内，标记落在音轨行
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_FAVORITES, (_event, args: { limit?: number }) => {
     const limit = Math.min(Math.max(Number(args?.limit) || 200, 1), 200);
-    const sourceIds = catalogRepo
-      .listSources()
-      .filter((s) => s.kind === 'local' || s.kind === 'webdav')
-      .map((s) => s.id);
+    const sourceIds = catalogRepo.listMusicSourceIds();
     return ok({ tracks: catalogRepo.listFavoriteMusicTracks(sourceIds, limit) });
   });
 
@@ -2286,6 +2277,31 @@ function registerCatalogHandlers(
       return err('NOT_FOUND', e instanceof Error ? e.message : '来源不存在');
     }
   });
+
+  // 来源转域（QYP3-055）：把已有来源改成音乐/影视来源。只改用途标签——
+  // 已索引的内容不动，音乐域的查询按 purpose 过滤后立即生效（不用重扫）。
+  // 扫描进行中不允许转（半新半旧的索引说不清归属）。
+  ipcMain.handle(
+    IPC_CHANNELS.CATALOG.SOURCE_SET_PURPOSE,
+    (_event, args: { sourceId: number; purpose: unknown }): ActionResult<{ purpose: string }> => {
+      const sourceId = Number(args?.sourceId);
+      if (!Number.isInteger(sourceId) || sourceId <= 0) {
+        return err('VALIDATION_FAILED', '来源 ID 不合法');
+      }
+      if (!isSourcePurpose(args?.purpose)) {
+        return err('VALIDATION_FAILED', '来源用途不合法');
+      }
+      const purpose = args.purpose;
+      if (activeScanJobs.has(sourceId)) {
+        return err('UNAVAILABLE', '正在扫描中，请等扫描结束再改');
+      }
+      const source = repo.getSource(sourceId);
+      if (!source) return err('NOT_FOUND', '来源不存在');
+      if (source.purpose === purpose) return ok({ purpose });
+      repo.setSourcePurpose(sourceId, purpose);
+      return ok({ purpose });
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
     if (!Number.isInteger(sourceId) || sourceId <= 0) {

@@ -317,10 +317,17 @@ export async function resolvePlayback(
         }
       | undefined;
     if (!track) throw new ResolverError('ITEM_NOT_FOUND', '音轨不存在或已删除');
-    const source = deps.db.prepare('SELECT kind FROM library_sources WHERE id = ?').get(sourceId) as
-      | { kind: 'local' | 'webdav' }
+    const source = deps.db
+      .prepare('SELECT kind, purpose FROM library_sources WHERE id = ?')
+      .get(sourceId) as
+      | { kind: 'local' | 'webdav'; purpose: string }
       | undefined;
     if (!source) throw new ResolverError('UNAVAILABLE', '来源不存在或已删除');
+    // QYP3-055：域与用途绑定。影视来源（含 QYP3-041 拆域遗留）的音轨已退出
+    // 音乐界面，同样不再可播——歌单里残留的旧引用会得到明确报错而不是静音
+    if (source.purpose !== 'music') {
+      throw new ResolverError('UNAVAILABLE', '该音轨的来源已不属于音乐库');
+    }
 
     const engine =
       input.engineForce === 'mpv'

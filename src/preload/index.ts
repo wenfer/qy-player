@@ -74,6 +74,9 @@ const electronAPI = {
   testSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_TEST, input),
   saveSource: (input: unknown) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SAVE, input),
   removeSource: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_REMOVE, sourceId),
+  /** 来源转域（QYP3-055）：改用途标签，已索引内容不动（音乐域查询按 purpose 过滤）。 */
+  setSourcePurpose: (sourceId: number, purpose: 'music' | 'video') =>
+    ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SET_PURPOSE, { sourceId, purpose }),
   sourceHealth: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, sourceId),
   startScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_START, sourceId),
   cancelScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_CANCEL, sourceId),

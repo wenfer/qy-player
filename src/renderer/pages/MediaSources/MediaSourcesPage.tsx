@@ -102,6 +102,47 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
     () => sources.filter((s) => s.purpose === ownPurpose),
     [ownPurpose, sources]
   );
+  // QYP3-055：转域入口——不属于本域的目录/WebDAV 来源列在下方，可一键转过来。
+  // 动机是拆域（QYP3-041）的存量遗留：拆域前扫出的音轨挂在被归一成影视的
+  // 来源上，音乐列表按域过滤后它们从此不可见，用户需要一个恢复入口。
+  const foreignSources = useMemo(
+    () =>
+      sources.filter(
+        (s) => s.purpose !== ownPurpose && (s.kind === 'local' || s.kind === 'webdav')
+      ),
+    [ownPurpose, sources]
+  );
+  const [convertingId, setConvertingId] = useState<number | null>(null);
+
+  const handleConvertPurpose = useCallback(
+    async (source: SourceListEntry) => {
+      const target: SourcePurpose = ownPurpose;
+      const targetLabel = target === 'music' ? '音乐来源' : '影视来源';
+      const confirmed = window.confirm(
+        `把「${source.name}」改为${targetLabel}？已扫描的索引不会重扫，` +
+          `转换后它会从${target === 'music' ? '影视' : '音乐'}模式的媒体库里消失。`
+      );
+      if (!confirmed) return;
+      setConvertingId(source.id);
+      try {
+        const res = (await window.electronAPI.setSourcePurpose(source.id, target)) as {
+          ok: boolean;
+          error?: { message: string };
+        };
+        if (res.ok) {
+          addToast(`「${source.name}」已改为${targetLabel}`, 'success');
+          await loadSources();
+        } else {
+          addToast(res.error?.message ?? '转换失败', 'error');
+        }
+      } catch {
+        addToast('转换失败', 'error');
+      } finally {
+        setConvertingId(null);
+      }
+    },
+    [ownPurpose, addToast, loadSources]
+  );
 
   useEffect(() => {
     loadSources();
@@ -409,6 +450,52 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           />
         )}
       </section>
+
+      {/* 转域入口（QYP3-055）：不属于本域的目录/WebDAV 来源，可一键改过来 */}
+      {foreignSources.length > 0 && (
+        <section aria-label="其它来源">
+          <h2 className="text-sm font-semibold text-muted-foreground mb-1">
+            {ownPurpose === 'music' ? '影视来源' : '音乐来源'}
+            <span className="ml-2 text-xs font-normal">
+              以下来源属于{ownPurpose === 'music' ? '影视' : '音乐'}域，不出现在
+              {ownPurpose === 'music' ? '音乐' : '影视'}列表里
+            </span>
+          </h2>
+          <p className="text-xs text-muted-foreground mb-3 leading-relaxed max-w-2xl">
+            {ownPurpose === 'music'
+              ? '如果某个来源其实只放音乐，可以把它改为音乐来源：已扫描的音轨会立即回到音乐列表（无需重扫），来源也会挪到这里管理。'
+              : '如果某个来源其实以影视为主，可以把它改为影视来源：已扫描的视频索引会回到影视模式（无需重扫）。'}
+          </p>
+          <div className="space-y-2">
+            {foreignSources.map((source) => (
+              <div
+                key={source.id}
+                className="flex items-center gap-3 p-4 bg-card/60 border border-dashed border-border rounded-xl"
+              >
+                <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-secondary text-muted-foreground flex-shrink-0">
+                  {source.kind === 'webdav' ? <Globe size={16} /> : <FolderOpen size={16} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-sm">{source.name}</span>
+                  <div className="text-xs text-muted-foreground mt-0.5 truncate">{source.root}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleConvertPurpose(source)}
+                  disabled={convertingId === source.id}
+                  className="flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg border border-border hover:bg-accent hover:text-foreground transition-colors focus-ring disabled:opacity-50"
+                >
+                  {convertingId === source.id
+                    ? '转换中…'
+                    : ownPurpose === 'music'
+                      ? '改为音乐来源'
+                      : '改为影视来源'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

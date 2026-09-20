@@ -1252,6 +1252,35 @@
   +2 例（冷启动落 `/music`、深链不劫持），共 4 例绿；typecheck 双配置通过
 - 待目标机验证：音乐模式退出重启 → 竖屏 + 音乐列表（已记入 TARGET-VERIFY）
 
+### QYP3-055 音乐列表只认音乐来源，支持来源转域 `[x]`
+- 诉求（用户）：音乐列表是以前在影视模式里加媒体库扫出来的，现在音乐模式的
+  媒体库里已经不显示那个来源了，但音乐列表还在
+- 查证：真实库只有一个来源（`/home/qiuyuan/Music`，migration 010 把它归一成
+  `video`），214 首音轨全挂在它上面；而音乐查询（曲目/专辑/歌手/收藏/搜索）
+  只按 `kind IN (local, webdav)` 过滤，不认 `purpose` —— 域拆了、范围没拆。
+  也不存在任何把来源转回音乐域的入口（表单只在创建时定用途）
+- 口径（用户选定）：① 音乐列表只认音乐来源；② 加「改为音乐来源」入口把 214
+  首找回来（不重扫）
+- 改动：
+  - `repository.listMusicSourceIds()`（`purpose='music'` 且 local/webdav）成为
+    音乐范围的**单一来源**；六个 MUSIC 查询 handler 与 unified-query 的
+    `musicSearch` 全部改走它
+  - `resolver` 音乐分支校验来源 `purpose`：非音乐域 → `UNAVAILABLE`（歌单残留
+    的旧引用得到明确报错）；`GET_NOW_PLAYING` 的来源校验同步收紧
+  - `CATALOG.SOURCE_SET_PURPOSE` + `repo.setSourcePurpose`：只改用途标签，
+    已索引内容不动（转回音乐域后音轨立即回到列表）；扫描进行中拒绝转换
+  - 媒体库页（两种模式）加「其它来源」区：不属于本域的目录/WebDAV 来源一键
+    转域，confirm 确认 + Toast；转过去的来源从此出现在本域管理区
+- 取舍记录：转换是**可逆**的（两种模式都有入口）；拆域遗留的"影视域音轨"不删
+  数据（用户选了转域方案后，老行要么随转域复活、要么留在库里不可见——后者
+  是用户明确把来源留在影视域的语义）
+- Evidence: `music-catalog` +2 例（统一搜索跳过影视域音轨、
+  `listMusicSourceIds`/`setSourcePurpose` 往返）、`playback-resolver` +1 例
+  （影视域音轨拒绝播放）、`media-sources/purpose` 改 2 例 +2 例（转域区渲染/
+  确认转换/取消不调 IPC）；相关 15 文件 179 例绿；typecheck 双配置通过
+- 待目标机验证：音乐媒体库把 `/home/qiuyuan/Music` 转为音乐来源 → 214 首立即
+  回到列表且可播；转回影视域后音乐列表变空——已记入 TARGET-VERIFY
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

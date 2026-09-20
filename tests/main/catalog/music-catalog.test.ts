@@ -20,7 +20,8 @@ beforeEach(() => {
   dbDir = mkdtempSync(join(tmpdir(), 'qy-music-cat-'));
   const db = openDatabaseAtPath(join(dbDir, 'catalog.db'));
   repo = createCatalogRepository(db);
-  sourceId = repo.createSource({ kind: 'local', name: '音乐库', root: '/music' });
+  // QYP3-055：统一搜索的音乐卡片按域过滤——来源必须是音乐域才会被搜到
+  sourceId = repo.createSource({ kind: 'local', name: '音乐库', root: '/music', purpose: 'music' });
   const seed: Array<[string, string, string, number, boolean]> = [
     ['a1', '晴天', '叶惠美', 3, true],
     ['a2', '懦夫', '叶惠美', 4, false],
@@ -147,5 +148,51 @@ describe('music catalog queries (QYP3-008a)', () => {
     // 歌手名也能搜到（且不与其他来源互相去重）
     const byArtist = await unified.search('薛之谦', 1);
     expect(byArtist.items.some((c) => c.ref.provider === 'music' && c.title === '演员')).toBe(true);
+  });
+});
+
+describe('music domain scoping (QYP3-055)', () => {
+  it('unified search ignores tracks of non-music sources', async () => {
+    // 影视域来源上的音轨（QYP3-041 拆域遗留）：不进音乐搜索
+    const videoSourceId = repo.createSource({ kind: 'local', name: '影片盘', root: '/movies' });
+    repo.upsertMusicTrack({
+      sourceId: videoSourceId,
+      sourceKey: 'v1',
+      path: '/movies/晴天.mp3',
+      title: '晴天',
+      artist: '周杰伦',
+      album: '叶惠美',
+      albumartist: '周杰伦',
+      trackNo: 1,
+      duration: 260,
+      codec: 'mp3',
+      fingerprint: 'fp-v1',
+    });
+    const db = openDatabaseAtPath(join(dbDir, 'catalog.db'));
+    const unified = createUnifiedQueryService({
+      db,
+      onlineContinueWatching: async () => [],
+      onlineSearch: async () => [],
+      onlineRecent: async () => [],
+    });
+    const { items } = await unified.search('晴天', 1);
+    expect(items.filter((c) => c.ref.provider === 'music')).toHaveLength(1);
+    expect(
+      items.find((c) => c.ref.provider === 'music' && c.ref.sourceId === sourceId)
+    ).toBeTruthy();
+  });
+
+  it('lists only music-purpose sources and flips a source between domains', () => {
+    const videoId = repo.createSource({ kind: 'local', name: '影片盘', root: '/movies' });
+    expect(repo.getSource(videoId)?.purpose).toBe('video'); // 默认归一成影视
+    expect(repo.listMusicSourceIds()).toEqual([sourceId]);
+    // 转域只改用途标签：音轨行不动，音乐域范围随之变化
+    repo.setSourcePurpose(sourceId, 'video');
+    expect(repo.listMusicSourceIds()).toEqual([]);
+    repo.setSourcePurpose(videoId, 'music');
+    expect(repo.listMusicSourceIds()).toEqual([videoId]);
+    // 幂等无副作用
+    repo.setSourcePurpose(videoId, 'music');
+    expect(repo.listMusicSourceIds()).toEqual([videoId]);
   });
 });

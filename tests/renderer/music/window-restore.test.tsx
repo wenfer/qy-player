@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { CompactModeHost } from '../../../src/renderer/App';
 import WindowProfileHost from '../../../src/renderer/components/WindowProfileHost';
 import { useAppModeStore } from '../../../src/renderer/stores/app-mode-store';
@@ -12,6 +13,8 @@ import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playba
  *
  * 这里钉住的是两个宿主**同时挂载**时的相互作用——单独测 WindowProfileHost
  * 看不出"回填出来的 compact 被 CompactModeHost 当成空会话撤销"这条竞态。
+ *
+ * WindowProfileHost 用了 useNavigate（QYP3-054 恢复默认页），所以要包 Router。
  */
 
 const api = {
@@ -52,10 +55,10 @@ describe('窗口/模式恢复（QYP3-051）', () => {
   it('冷启动恢复的精简浮窗不会被"没有音乐会话"撤销', async () => {
     api.getWindowProfile.mockResolvedValue({ ok: true, data: { compact: true, music: false } });
     render(
-      <>
+      <MemoryRouter>
         <CompactModeHost />
         <WindowProfileHost />
-      </>
+      </MemoryRouter>
     );
 
     await waitFor(() => expect(useCompactModeStore.getState().compact).toBe(true));
@@ -69,10 +72,10 @@ describe('窗口/模式恢复（QYP3-051）', () => {
   it('音乐模式里的浮窗恢复后仍是音乐模式，且不重复挪窗', async () => {
     api.getWindowProfile.mockResolvedValue({ ok: true, data: { compact: true, music: true } });
     render(
-      <>
+      <MemoryRouter>
         <CompactModeHost />
         <WindowProfileHost />
-      </>
+      </MemoryRouter>
     );
 
     await waitFor(() => expect(useAppModeStore.getState().mode).toBe('music'));

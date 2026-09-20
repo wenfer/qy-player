@@ -493,7 +493,7 @@ describe('playback resolver: server audio → webaudio proxy (QYP3-037)', () => 
 describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => {
   it('direct codec music routes through qy-stream with Basic auth in the route', async () => {
     const repo = createCatalogRepository(db);
-    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav` });
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav`, purpose: 'music' });
     secretStore.setSecret('webdav', String(sourceId), JSON.stringify({ username: 'u', password: 'p@ss' }));
     const trackId = repo.upsertMusicTrack({
       sourceId,
@@ -543,7 +543,7 @@ describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => 
 
   it('non-direct codec music still goes to mpv with stashed headers', async () => {
     const repo = createCatalogRepository(db);
-    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav` });
+    const sourceId = repo.createSource({ kind: 'webdav', name: 'w', root: `http://127.0.0.1:${mockPort}/dav`, purpose: 'music' });
     secretStore.setSecret('webdav', String(sourceId), JSON.stringify({ username: 'u', password: 'p' }));
     const trackId = repo.upsertMusicTrack({
       sourceId,
@@ -561,6 +561,27 @@ describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => 
     expect(resolution.kind).toBe('webdav-stream');
     expect(resolution.engine).toEqual({ engine: 'mpv', reason: 'non-direct-codec' });
     expect(resolution.streamSessionId).toBeDefined();
+  });
+
+  it('rejects tracks whose source no longer belongs to the music domain (QYP3-055)', async () => {
+    const repo = createCatalogRepository(db);
+    // 拆域遗留：来源被归一成影视域（默认 purpose），音轨成了孤儿
+    const sourceId = repo.createSource({ kind: 'local', name: '音乐盘', root: '/music' });
+    const trackId = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'old',
+      path: '/music/old.mp3',
+      title: '旧曲',
+      trackNo: 1,
+      duration: 200,
+      codec: 'mp3',
+      fingerprint: 'fp-old',
+    });
+    await expect(
+      resolvePlayback(makeDeps(makeClientFactory({}, [])), {
+        ref: { provider: 'music', sourceId, itemId: String(trackId) },
+      })
+    ).rejects.toMatchObject({ code: 'UNAVAILABLE' });
   });
 });
 

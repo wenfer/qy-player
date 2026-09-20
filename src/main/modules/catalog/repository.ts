@@ -244,6 +244,37 @@ export function createCatalogRepository(db: Database.Database) {
         .run(...values, id);
     },
 
+    /**
+     * 来源转域（QYP3-055）：把已有来源改成音乐/影视来源。
+     *
+     * 动机是 QYP3-041 拆域的存量遗留——拆域前扫描的音轨挂在被归一成 'video'
+     * 的来源上，用户在音乐模式里既看不到这个来源、也没有任何恢复入口。
+     * 只改用途标签：已索引的音轨立即回到音乐列表（不用重扫），反向转换
+     * 同理（视频索引不动，之后按新域重扫各管各的）。
+     */
+    setSourcePurpose(id: number, purpose: SourcePurpose): void {
+      db.prepare(
+        'UPDATE library_sources SET purpose = ?, updated_at = unixepoch() WHERE id = ?'
+      ).run(purpose, id);
+    },
+
+    /**
+     * 音乐域的来源 id（QYP3-055）：音乐列表/专辑/歌手/收藏/搜索的唯一范围。
+     * 域与用途绑定——`purpose='music'` 的来源才算音乐库，其它来源（含拆域
+     * 遗留的 video 来源）扫出的音轨一律不进音乐界面，也不再可播。
+     */
+    listMusicSourceIds(): number[] {
+      return (
+        db
+          .prepare(
+            `SELECT id FROM library_sources
+              WHERE purpose = 'music' AND kind IN ('local', 'webdav')
+              ORDER BY id`
+          )
+          .all() as Array<{ id: number }>
+      ).map((r) => r.id);
+    },
+
     /** Secret refs are managed by the SecretStore layer (QYP2-005). */
     setSourceSecret(id: number, secretRef: string | null): void {
       db.prepare(

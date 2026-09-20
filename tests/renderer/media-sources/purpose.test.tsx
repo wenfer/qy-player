@@ -9,9 +9,13 @@ import type { SourceListEntry, SourcePurpose } from '../../../src/shared/types';
 /**
  * 媒体库按域分离（QYP3-041）：一个来源只属于音乐域或影视域，两个媒体库页
  * 各管各的、互不显示；用途由所在模式决定，表单不再让用户选。
+ *
+ * QYP3-055：拆域遗留需要一个恢复入口——不属于本域的目录/WebDAV 来源列在
+ * 「其它来源」转域区，可一键改成音乐/影视来源（已索引内容不动）。
  */
 
 const listSources = vi.fn();
+const setSourcePurpose = vi.fn();
 
 vi.stubGlobal('electronAPI', {
   getServers: vi.fn(async () => [{ id: 1, type: 'jellyfin', name: '家里', base_url: 'http://nas', is_active: 1 }]),
@@ -21,6 +25,7 @@ vi.stubGlobal('electronAPI', {
   saveSource: vi.fn(async () => ({ ok: true, data: { sourceId: 1 } })),
   testSource: vi.fn(async () => ({ ok: true, data: { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true } })),
   removeSource: vi.fn(),
+  setSourcePurpose,
   sourceHealth: vi.fn(),
   startScan: vi.fn(async () => ({ ok: true })),
   cancelScan: vi.fn(),
@@ -53,19 +58,47 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('MediaSourcesPage domain split (QYP3-041)', () => {
-  it('video mode shows only video sources', async () => {
+describe('MediaSourcesPage domain split (QYP3-041/055)', () => {
+  it('video mode shows only video sources in its own list', async () => {
     listSources.mockResolvedValue(MIXED);
     renderPage('video');
     await waitFor(() => expect(screen.getByText('影片盘')).toBeTruthy());
-    expect(screen.queryByText('音乐盘')).not.toBeTruthy();
+    // 音乐盘出现在「其它来源」转域区，不进本域管理区
+    expect(screen.getByLabelText('其它来源')).toBeTruthy();
+    expect(screen.getByLabelText('媒体来源').textContent).not.toContain('音乐盘');
   });
 
-  it('music mode shows only music sources', async () => {
+  it('music mode shows only music sources in its own list', async () => {
     listSources.mockResolvedValue(MIXED);
     renderPage('music');
     await waitFor(() => expect(screen.getByText('音乐盘')).toBeTruthy());
-    expect(screen.queryByText('影片盘')).not.toBeTruthy();
+    // 影视盘出现在「其它来源」转域区，不进本域管理区
+    expect(screen.getByLabelText('其它来源')).toBeTruthy();
+    expect(screen.getByLabelText('媒体来源').textContent).not.toContain('影片盘');
+  });
+
+  it('offers a one-click conversion for foreign sources (QYP3-055)', async () => {
+    listSources.mockResolvedValue([entry(5, 'Music', 'video'), entry(6, '老片盘', 'video')]);
+    window.confirm = vi.fn(() => true);
+    setSourcePurpose.mockResolvedValue({ ok: true, data: { purpose: 'music' } });
+    renderPage('music');
+    await waitFor(() => expect(screen.getByText('Music')).toBeTruthy());
+    expect(screen.getAllByRole('button', { name: '改为音乐来源' })).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole('button', { name: '改为音乐来源' })[0]);
+    await waitFor(() => expect(setSourcePurpose).toHaveBeenCalledWith(5, 'music'));
+    // 转换成功后回读来源列表（转过去的来源从此出现在本域管理区）
+    await waitFor(() => expect(listSources.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it('cancelling the confirm dialog never calls the IPC', async () => {
+    listSources.mockResolvedValue([entry(5, 'Music', 'video')]);
+    window.confirm = vi.fn(() => false);
+    renderPage('music');
+    await waitFor(() => expect(screen.getByText('Music')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '改为音乐来源' }));
+    await waitFor(() => expect(window.confirm).toHaveBeenCalled());
+    expect(setSourcePurpose).not.toHaveBeenCalled();
   });
 
   it('music mode does not manage media servers, video mode does', async () => {

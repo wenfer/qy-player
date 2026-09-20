@@ -230,10 +230,14 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
    * 失败由 isolateSource 兜底——音乐无结果不阻塞其它来源。
    */
   const musicSearch = (query: string, limit: number): UnifiedCard[] => {
+    // QYP3-055：与音乐列表同范围——只搜音乐域来源（purpose='music'）
     const sourceIds = (
-      db.prepare(`SELECT id FROM library_sources WHERE kind IN ('local', 'webdav')`).all() as Array<{
-        id: number;
-      }>
+      db
+        .prepare(
+          `SELECT id FROM library_sources
+            WHERE purpose = 'music' AND kind IN ('local', 'webdav')`
+        )
+        .all() as Array<{ id: number }>
     ).map((r) => r.id);
     if (sourceIds.length === 0) return [];
     const placeholders = sourceIds.map(() => '?').join(',');
