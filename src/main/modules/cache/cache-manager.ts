@@ -11,7 +11,7 @@
  *   sweep 都不会触碰（§16.4: 缓存不删人工字幕）。
  *
  * 并发预算（§16.4）在这里集中声明为常量，供扫描/probe/scraper 复用与
- * 诊断展示：local≤8、WebDAV≤4、probe≤1、scraper≤2。
+ * 诊断展示：local≤8、WebDAV≤4、probe≤1、scraper≤2、频谱解码≤1。
  */
 
 import { readdirSync, statSync, lstatSync, unlinkSync, existsSync } from 'node:fs';
@@ -22,10 +22,18 @@ export const CONCURRENCY_BUDGET = {
   webdavScan: 4,
   probe: 1,
   scraper: 2,
+  /** 离线频谱（QYP3-050）：后台解码要占满一个核，老机只允许 1 条。 */
+  spectrum: 1,
 } as const;
 
 export const MAX_EVENT_HZ = 4;
 export const MAX_PAGE_SIZE = 200;
+
+/**
+ * 离线频谱缓存配额（QYP3-050）：一首 4 分钟曲目 ≈138KB，64MB 约合 460 首。
+ * 只有非直解格式（mpv 引擎）才会用到，超了按 mtime 最旧先删（可重算）。
+ */
+export const MUSIC_SPECTRUM_QUOTA_BYTES = 64 * 1024 * 1024;
 
 export interface CachePartition {
   /** 唯一名称（诊断展示 + 去重）。 */

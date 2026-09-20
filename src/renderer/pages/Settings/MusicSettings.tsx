@@ -82,6 +82,8 @@ export default function MusicSettings() {
   const [deskLocked, setDeskLocked] = useState(true);
   // 拾音器（QYP3-023）
   const [visualizer, setVisualizer] = useState<string>('auto');
+  // mpv 音源的离线频谱（QYP3-050）：需要机器上有 ffmpeg，没有就自动不生效
+  const [offlineSpectrum, setOfflineSpectrum] = useState(true);
   // 精简模式（QYP3-035）：播放音频时自动缩成浮窗
   const [autoCompact, setAutoCompact] = useState(false);
   // 性能保护（QYP3-036）：状态在 store（主进程压力档 + 持久化开关）
@@ -135,6 +137,10 @@ export default function MusicSettings() {
         setDeskLocked(l?.data !== false && l?.data !== 'false');
         const v = (await window.electronAPI.getSettings('playback.visualizer')) as { data?: unknown };
         if (typeof v?.data === 'string') setVisualizer(v.data);
+        const os = (await window.electronAPI.getSettings('playback.offlineSpectrum')) as {
+          data?: unknown;
+        };
+        setOfflineSpectrum(os?.data !== false && os?.data !== 'false');
         const ac = (await window.electronAPI.getSettings('playback.autoCompact')) as { data?: unknown };
         setAutoCompact(ac?.data === true || ac?.data === 'true');
       } catch {
@@ -232,6 +238,18 @@ export default function MusicSettings() {
     async (value: string): Promise<void> => {
       setVisualizer(value);
       await save('playback.visualizer', value, '拾音器设置已保存');
+    },
+    [save]
+  );
+
+  const changeOfflineSpectrum = useCallback(
+    async (value: boolean): Promise<void> => {
+      setOfflineSpectrum(value);
+      await save(
+        'playback.offlineSpectrum',
+        value,
+        value ? '将以 ffmpeg 为 mpv 音源生成频谱' : '已关闭 mpv 音源频谱生成'
+      );
     },
     [save]
   );
@@ -412,7 +430,27 @@ export default function MusicSettings() {
             <option value="off">关闭</option>
           </select>
           <span className="text-xs text-muted-foreground w-full">
-            显示在底部音乐控制条上，最高 30 帧/秒。冷门格式走 mpv 引擎时只有播放波形。
+            显示在底部音乐控制条上，最高 30 帧/秒。内置引擎解码的音轨是实时频谱；
+            冷门格式走 mpv 引擎时用下面那份离线频谱。
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4">
+          <span className="text-sm">mpv 音源频谱</span>
+          <label className="ml-auto flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={offlineSpectrum}
+              onChange={(e) => void changeOfflineSpectrum(e.target.checked)}
+              className="accent-[var(--primary)]"
+              aria-label="为 mpv 音源生成离线频谱"
+            />
+            <span className="text-xs text-muted-foreground">后台生成（需要 ffmpeg）</span>
+          </label>
+          <span className="text-xs text-muted-foreground w-full">
+            mpv 解码的音源（APE/WMA/CUE 等冷门格式、服务器转码）没有实时频谱接口，
+            开着时会在后台用 ffmpeg 解一遍并算出频谱备用（一首几分钟的歌大约占 100KB
+            缓存）。机器上没有 ffmpeg 就自动不生效，不影响播放。CPU 紧张的旧机器可以关掉。
           </span>
         </div>
 

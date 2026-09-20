@@ -36,6 +36,7 @@
 │     online-connector/          Jellyfin/Emby REST 客户端（EmbyClient 继承 JellyfinClient，路径加 /emby 前缀）
 │     catalog/                   目录查询/仓储 + unified-query（四来源统一首页/搜索）
 │     media-probe/               headless mpv 探测（ADR-0005，probe≤1）
+│     music-spectrum/            离线频谱：ffmpeg 解码 → 自研 FFT → 12fps×48 频带落盘（QYP3-050，并发 1）
 │     media-operations/          字幕导入 / 两阶段安全删除
 │     metadata/                  NFO 解析 / 字段合并 / 元数据编辑器
 │     plugin-runtime/            插件 registry/配置/刮削任务/匹配器/缓存（§11）
@@ -173,6 +174,13 @@
   **暂停 ≠ 没数据**：最后一帧真实数据会冻结在画布上（`frozenRef`，只重画一次），
   冻结帧与 `painter` 都必须放在 ref 里跨 effect 重跑存活——effect 依赖里
   一旦带上 `position`，进度每走一秒就把峰值打回当前电平、暂停也冻不住画面
+  **QYP3-050 起**：mpv 音源不再永远是静音底线——主进程用外部 **ffmpeg** 离线
+  预算一份频谱（`music-spectrum/`：ffmpeg 解 PCM → 手写 radix-2 FFT → 12fps ×
+  48 频带字节矩阵落盘，一首 4 分钟 ≈138KB），渲染层按 mpv 报回的进度（1Hz 离散
+  → `player/spectrum-anchor.ts` 线性外推）索引回放。**声音仍由 mpv 播放，播放
+  路径一行不改**；ffmpeg 探测不到（`~/.local/bin/ffmpeg` → PATH）就静默降级成
+  静音底线——所以"看不见频谱"永远是可接受的降级，不是错误。注意 mpv 0.32 的
+  **编码模式是坏的**（`--o=` 每帧 `error encoding`，实测），别想拿它当 ffmpeg 用
 - **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

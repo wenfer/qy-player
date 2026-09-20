@@ -43,12 +43,15 @@ const ICON_BTN =
 const PLAY_BTN =
   'flex-shrink-0 flex items-center justify-center h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring';
 
-/** 拾音器模式：off=关闭；auto 在 renderer 引擎下按频谱、否则波形。 */
-function resolveMode(setting: string, engine: string | null): VisualizerMode | null {
+/**
+ * 拾音器模式：off=关闭；waveform=真实波形（只有 renderer 引擎有）；
+ * spectrum/auto=频谱——renderer 引擎是实时频谱，mpv 引擎是离线预算频谱
+ * （QYP3-050），拿不到时可视化自己画静音底线。
+ */
+export function resolveMode(setting: string): VisualizerMode | null {
   if (setting === 'off') return null;
   if (setting === 'waveform') return 'waveform';
-  if (setting === 'spectrum') return 'spectrum';
-  return engine === 'webaudio' ? 'spectrum' : 'waveform';
+  return 'spectrum';
 }
 
 export default function MusicMiniBar() {
@@ -260,7 +263,7 @@ export default function MusicMiniBar() {
       >
         {/* 频谱：常驻一行（暂停时冻结最后一帧，不再退化成进度条——进度有自己的一行） */}
         {(() => {
-          const mode = resolveMode(visualizer, playback.engine);
+          const mode = resolveMode(visualizer);
           return showSpectrum && mode ? (
             <Visualizer
               mode={mode}

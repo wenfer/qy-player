@@ -99,7 +99,11 @@ import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
-import { CacheManager } from '../modules/cache/cache-manager';
+import {
+  CacheManager,
+  MUSIC_SPECTRUM_QUOTA_BYTES,
+} from '../modules/cache/cache-manager';
+import { MusicSpectrumService } from '../modules/music-spectrum';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
 import { normalizeReplayGain } from '../modules/playback-engine/replaygain';
@@ -140,6 +144,17 @@ import {
 import type { CatalogBrowseQuery, CatalogSearchQuery } from '../../shared/types';
 
 export let playbackStateManager: PlaybackStateManager | null = null;
+
+/**
+ * 离线频谱服务（QYP3-050）：mpv 音源的频谱由主进程后台用 ffmpeg 预算。
+ * 退出时由 `cancelMusicSpectrum()` 同步杀掉正在跑的解码（Electron 的
+ * will-quit 不 await 异步清理）。
+ */
+export let musicSpectrum: MusicSpectrumService | null = null;
+
+export function cancelMusicSpectrum(): void {
+  musicSpectrum?.cancelAll();
+}
 
 /** 歌单条目引用校验（QYP3-015 契约）：music:<sourceId>:<trackId>。 */
 function isPlaylistItemRef(value: unknown): value is string {
@@ -1103,6 +1118,36 @@ export function registerIpcHandlers(
   // QYP3-019：歌词（人工可编辑，永不清扫）
   registerLyricsPartition(cacheManager, lyricsDir);
 
+  // 离线频谱（QYP3-050）：mpv 音源的真频谱，ffmpeg 预算后落盘；派生缓存，
+  // 可清扫（删了下次播放重算）。没有 ffmpeg 的机器上这个目录永远是空的。
+  const spectrumDir = join(app.getPath('userData'), 'music-spectrum');
+  cacheManager.register(
+    {
+      id: 'music-spectrum',
+      description: '离线频谱（mpv 音源，ffmpeg 预算；可清扫后重算）',
+      rootDir: spectrumDir,
+      quota: { maxBytes: MUSIC_SPECTRUM_QUOTA_BYTES },
+      sweepable: true,
+    },
+    []
+  );
+  musicSpectrum = new MusicSpectrumService({
+    dir: spectrumDir,
+    quotaBytes: MUSIC_SPECTRUM_QUOTA_BYTES,
+    sweep: () => cacheManager.sweep('music-spectrum', MUSIC_SPECTRUM_QUOTA_BYTES),
+    onSettled: (event) => {
+      const win = getMainWindow?.();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(IPC_CHANNELS.MUSIC.ON_SPECTRUM_READY, event);
+      }
+    },
+  });
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_SPECTRUM, () => {
+    // 非关键路径：永远返回结果（ready/pending/unavailable/failed/none），
+    // 不抛错、不弹窗——拿不到就是"这条曲目还是没有频谱"。
+    return ok(musicSpectrum?.get() ?? { status: 'none' });
+  });
+
   ipcMain.handle(IPC_CHANNELS.DIAGNOSTICS.SUMMARY, () => {
     return ok(
       buildDiagnosticsSummary({
@@ -1300,6 +1345,26 @@ export function registerIpcHandlers(
     // opaque session id it received from GET_STREAM_URL.
     const stashedHeaders = streamSessionId ? streamHeaders.take(streamSessionId) : undefined;
     const effectiveHeaders = stashedHeaders ?? httpHeaders;
+
+    // 离线频谱（QYP3-050）：只有"音乐且走 mpv"才需要（renderer 引擎有实时频谱）。
+    // 这里复用**同一份** URL 与认证头——绝不再 take 一次 streamHeaders（单次
+    // 消费语义，再取会让 mpv 拿到空头），也不重新 resolve（服务器会多一次网络）。
+    if (audioChain) {
+      if (decodeConfigValue(storage.getConfig('playback.offlineSpectrum')) === false) {
+        musicSpectrum?.setCurrent(null);
+      } else {
+        // 注意：不传 startSec——续播位置不是分轨偏移，频谱矩阵按**整首**的绝对
+        // 时间轴建，渲染层才能直接用播放进度索引。
+        musicSpectrum?.setCurrent({
+          mediaId: `${mediaContext?.mediaType ?? 'local'}:${mediaContext?.mediaId ?? path}`,
+          url: path,
+          headers: effectiveHeaders,
+        });
+      }
+    } else {
+      // 视频/其他媒体接管 → 音乐频谱会话结束（别再占着 CPU 解码）
+      musicSpectrum?.setCurrent(null);
+    }
 
     // Determine if this is a local file
     const isLocal = isLocalFilePath(path);

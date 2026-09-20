@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, protocol } from 'electron';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { PlayerCore } from './modules/player-core';
-import { registerIpcHandlers, playbackStateManager } from './ipc';
+import { registerIpcHandlers, playbackStateManager, cancelMusicSpectrum } from './ipc';
 import { closeDatabase, getDatabase, createStorage } from './modules/storage/db';
 import { createTray, destroyTray } from './modules/ui-shell/tray';
 import { closeDeskLyrics } from './modules/ui-shell/desk-lyrics';
@@ -331,6 +331,9 @@ app.on('will-quit', async () => {
   stopResourceGuard();
   destroyTray();
   closeDeskLyrics(); // 桌面歌词窗口（QYP3-022）：随应用退出
+  // 离线频谱（QYP3-050）：同步杀掉正在跑的 ffmpeg 解码（will-quit 不 await，
+  // 所以这里必须是同步的 SIGKILL，不能等 Promise）
+  cancelMusicSpectrum();
   // Final progress save before exit
   if (playbackStateManager) {
     playbackStateManager.destroy();

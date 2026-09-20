@@ -230,6 +230,17 @@ const electronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_SESSION_END, listener);
   },
+  /**
+   * 离线频谱（QYP3-050）：主进程是"当前 mpv 音乐曲目"的权威，取数据不带参数；
+   * 返回 ready / pending / unavailable / failed / none 五态。
+   */
+  getMusicSpectrum: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_SPECTRUM),
+  /** main → renderer：某曲目的频谱已定论（就绪/不可用/失败都会推）。 */
+  onMusicSpectrumReady: (cb: (event: unknown) => void) => {
+    const listener = (_event: unknown, payload: unknown): void => cb(payload);
+    ipcRenderer.on(IPC_CHANNELS.MUSIC.ON_SPECTRUM_READY, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MUSIC.ON_SPECTRUM_READY, listener);
+  },
   // 睡眠定时（P2）：到点暂停播放；ON_EXPIRED 让 renderer 停 renderer 引擎
   getSleepTimer: () => ipcRenderer.invoke(IPC_CHANNELS.SLEEP.GET_STATE),
   setSleepTimer: (minutes: number) => ipcRenderer.invoke(IPC_CHANNELS.SLEEP.SET, { minutes }),

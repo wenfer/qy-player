@@ -6,10 +6,12 @@ import { createBarsPainter, type BarsPainter } from '../Visualizer/bars-painter'
 /**
  * 播放频谱图（QYP3-034 / QYP3-047）：经典风格的弹跳柱状频谱（分段 LED + 峰值帽）。
  *
- * 真实频谱只有 renderer 内置引擎（Web Audio）解码的音轨才有；mpv 引擎
- * （服务器 / WebDAV / CUE / 冷门格式，以及兜底到 mpv 的本地 FLAC）在 mpv 0.32
- * 下没有暴露实时频谱的 IPC 接口（`audio-fft` 是 0.34+ 才有，升级会破坏老系统
- * 兼容）→ 面板如实提示"无法显示真实频谱"，**绝不画假跳动**。
+ * 真实频谱只有 renderer 内置引擎（Web Audio）解码的音轨才有**实时**数据；mpv 引擎
+ * （服务器 / WebDAV / CUE / 冷门格式，以及兜底到 mpv 的本地 FLAC）在 mpv 0.32 下
+ * 没有暴露实时频谱的 IPC 接口（`audio-fft` 是 0.34+ 才有，升级会破坏老系统兼容）。
+ * QYP3-050 起这类音源由主进程用 ffmpeg 离线预算频带矩阵，`getSpectrum()` 按播放
+ * 位置返回对应帧——所以门禁改成"有没有数据"，而不是"是不是 webaudio 引擎"。
+ * 一点数据都没有时才如实提示，**绝不画假跳动**。
  *
  * QYP3-047 起只有柱状一种（瀑布声谱图已移除），帧率 ≤30fps（老机预算）。
  */
@@ -41,10 +43,16 @@ export default function SpectrumGraph({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // 性能保护（QYP3-036）：CPU 紧张时降帧，优先保证播放不卡
   const frameMs = 1000 / Math.max(1, useVisualizerFps(30));
+  /**
+   * 有真实数据才画（QYP3-050）：webaudio 引擎是实时频谱；mpv 引擎没有实时数据，
+   * 但主进程可能已经预算好离线频谱（`getSpectrum()` 会按播放位置返回对应帧）。
+   * 都没有时如实显示提示，绝不画假跳动。
+   */
+  const hasData = engine === 'webaudio' || getSpectrum() !== null;
 
   useEffect(() => {
-    // mpv 无真实频谱：不画（面板显示提示）；暂停时冻结上一帧
-    if (engine !== 'webaudio' || !isPlaying) return;
+    // 暂停时冻结上一帧（画布内容保留）；没有真实数据时面板显示提示
+    if (!hasData || !isPlaying) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -75,7 +83,7 @@ export default function SpectrumGraph({
       cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [engine, isPlaying, getSpectrum, height, frameMs]);
+  }, [hasData, isPlaying, getSpectrum, height, frameMs]);
 
   return (
     <div className="mb-6 rounded-xl border border-border bg-card/60 overflow-hidden">
@@ -91,12 +99,13 @@ export default function SpectrumGraph({
         {headerExtra ? <div className="flex items-center gap-1 flex-shrink-0">{headerExtra}</div> : null}
       </div>
 
-      {engine === 'webaudio' ? (
+      {hasData ? (
         <canvas ref={canvasRef} aria-hidden className="w-full block" style={{ height }} />
       ) : (
         <div className="flex items-center justify-center px-4 text-center" style={{ height }}>
           <p className="text-[11px] text-muted-foreground max-w-md">
             此音源经 mpv 解码，mpv 0.32 没有实时频谱接口，无法显示真实频谱。
+            （机器上装了 ffmpeg 的话，系统会在后台为它预算一份，算好前显示这条提示）
           </p>
         </div>
       )}

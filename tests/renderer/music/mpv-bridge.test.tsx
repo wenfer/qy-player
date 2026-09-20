@@ -17,6 +17,7 @@ import {
 
 let stateListener: ((state: unknown) => void) | null = null;
 let sessionEndListener: (() => void) | null = null;
+let spectrumListener: ((event: unknown) => void) | null = null;
 
 const api = {
   onPlayerStateChange: vi.fn((cb: (state: unknown) => void) => {
@@ -27,6 +28,14 @@ const api = {
     sessionEndListener = cb;
     return () => undefined;
   }),
+  onMusicSpectrumReady: vi.fn((cb: (event: unknown) => void) => {
+    spectrumListener = cb;
+    return () => undefined;
+  }),
+  getMusicSpectrum: vi.fn(
+    (): Promise<{ ok: boolean; data: unknown }> =>
+      Promise.resolve({ ok: true, data: { status: 'none' } })
+  ),
   setMusicEngineActive: vi.fn(() => Promise.resolve({ ok: true })),
   pushDeskLyricsState: vi.fn(() => Promise.resolve({ ok: true })),
   playerControl: vi.fn(() => Promise.resolve({ ok: true })),
@@ -96,6 +105,25 @@ beforeEach(() => {
   // 幂等：首次调用注册，其后为 no-op（监听器读的是实时 state）
   attachMusicMpvBridge();
 });
+
+/** 造一份离线频谱：frameCount 帧、每帧 48 字节，第 i 帧内容恒为 i%（便于断言索引）。 */
+function spectrumData(frameCount: number): { fps: number; bands: number; frameCount: number; data: Uint8Array } {
+  const bands = 48;
+  const data = new Uint8Array(frameCount * bands);
+  for (let i = 0; i < frameCount; i += 1) data.fill(i % 251, i * bands, (i + 1) * bands);
+  return { fps: 12, bands, frameCount, data };
+}
+
+/** 让 store 处于"mpv 音乐 + 离线频谱已就绪"，返回按位置取帧的断言入口。 */
+async function primeOfflineSpectrum(frameCount = 600): Promise<void> {
+  api.getMusicSpectrum.mockResolvedValue({
+    ok: true,
+    data: { status: 'ready', mediaId: 'jellyfin:t1', ...spectrumData(frameCount) },
+  });
+  primeMpvMusic();
+  await vi.waitFor(() => expect(api.getMusicSpectrum).toHaveBeenCalled());
+  await vi.waitFor(() => expect(useMusicPlaybackStore.getState().getSpectrum()).not.toBeNull());
+}
 
 describe('mpv music bridge (QYP3-026)', () => {
   it('subscribes once and ignores non-music (video) events', () => {
@@ -188,5 +216,56 @@ describe('mpv music bridge (QYP3-026)', () => {
     expect(state.serverQueue).toEqual([]);
     expect(state.isPlaying).toBe(false);
     expect(api.setMusicEngineActive).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('offline spectrum bridge (QYP3-050)', () => {
+  /** 第 i 帧的字节内容（与 spectrumData 的写法一致）。 */
+  const byteOf = (index: number): number => index % 251;
+
+  it('returns the frame matching the mpv position and freezes while paused', async () => {
+    await primeOfflineSpectrum();
+    stateListener!({ music: true, currentTime: 12, duration: 269, isPlaying: true });
+    const frame = useMusicPlaybackStore.getState().getSpectrum();
+    expect(frame?.length).toBe(48);
+    // round(12 × 12) = 144；位置外推只有几毫秒误差，容忍 ±2 帧
+    expect(frame![0]).toBeGreaterThanOrEqual(byteOf(142));
+    expect(frame![0]).toBeLessThanOrEqual(byteOf(146));
+
+    stateListener!({ music: true, currentTime: 30, isPlaying: false });
+    // 暂停：不再外推，停在锚点那一帧（round(30 × 12) = 360）
+    expect(useMusicPlaybackStore.getState().getSpectrum()![0]).toBe(byteOf(360));
+  });
+
+  it('degrades silently when there is no ffmpeg (unavailable)', async () => {
+    api.getMusicSpectrum.mockResolvedValue({
+      ok: true,
+      data: { status: 'unavailable', mediaId: 'jellyfin:t1', reason: 'no-ffmpeg' },
+    });
+    primeMpvMusic();
+    await vi.waitFor(() => expect(api.getMusicSpectrum).toHaveBeenCalled());
+    await vi.waitFor(() => expect(useMusicPlaybackStore.getState().engine).toBe('mpv'));
+    expect(useMusicPlaybackStore.getState().getSpectrum()).toBeNull();
+  });
+
+  it('drops the offline data when the session leaves the mpv engine', async () => {
+    await primeOfflineSpectrum();
+    expect(useMusicPlaybackStore.getState().getSpectrum()).not.toBeNull();
+    useMusicPlaybackStore.setState({ engine: 'webaudio' });
+    expect(useMusicPlaybackStore.getState().getSpectrum()).toBeNull();
+  });
+
+  it('refetches on the ready push but not on a failure push', async () => {
+    await primeOfflineSpectrum();
+    const before = api.getMusicSpectrum.mock.calls.length;
+    spectrumListener!({ mediaId: 'jellyfin:t1', status: 'ready' });
+    await vi.waitFor(() =>
+      expect(api.getMusicSpectrum.mock.calls.length).toBeGreaterThan(before)
+    );
+
+    const after = api.getMusicSpectrum.mock.calls.length;
+    spectrumListener!({ mediaId: 'jellyfin:t1', status: 'failed' });
+    await Promise.resolve();
+    expect(api.getMusicSpectrum.mock.calls.length).toBe(after);
   });
 });

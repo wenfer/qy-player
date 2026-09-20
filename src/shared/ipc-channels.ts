@@ -51,6 +51,13 @@ export const IPC_CHANNELS = {
      * renderer 据此停掉 renderer 引擎并清空音乐控制条状态。
      */
     ON_SESSION_END: 'music:on-session-end',
+    /**
+     * 离线频谱（QYP3-050）：主进程是"当前 mpv 音乐曲目"的权威，所以取数据
+     * 不带参数，返回 ready / pending / unavailable / failed / none 五态。
+     */
+    GET_SPECTRUM: 'music:get-spectrum',
+    /** main → renderer：某曲目的离线频谱已算完（只带 mediaId，数据由上面那支取）。 */
+    ON_SPECTRUM_READY: 'music:on-spectrum-ready',
   },
   /** 睡眠定时（P2）：到点暂停播放，音乐/视频通用（会话内有效，不持久化）。 */
   SLEEP: {

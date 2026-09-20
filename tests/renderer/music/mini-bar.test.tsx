@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import MusicMiniBar from '../../../src/renderer/components/MusicMiniBar';
+import MusicMiniBar, { resolveMode } from '../../../src/renderer/components/MusicMiniBar';
 import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playback-store';
 import { useSleepTimerStore } from '../../../src/renderer/stores/sleep-timer-store';
 import { useCompactModeStore } from '../../../src/renderer/stores/compact-mode-store';
@@ -65,6 +65,15 @@ beforeEach(() => {
     queueSnapshot: [],
     serverQueue: [],
     serverIndex: -1,
+  });
+});
+
+describe('visualizer mode resolution (QYP3-050)', () => {
+  it('auto picks spectrum for every engine (mpv now has an offline spectrum)', () => {
+    expect(resolveMode('auto')).toBe('spectrum');
+    expect(resolveMode('spectrum')).toBe('spectrum');
+    expect(resolveMode('waveform')).toBe('waveform'); // 仍是显式可选项
+    expect(resolveMode('off')).toBeNull();
   });
 });
 

@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { WebAudioEngine, type QueueTrack, type RepeatMode } from '../player/web-audio-engine';
 import { isLocalFlacUrl } from '../player/flac-strip';
+import { estimatePosition, makeAnchor, type PositionAnchor } from '../player/spectrum-anchor';
 import type { MediaRef } from '../../shared/types/catalog';
+import type { GetSpectrumResult, SpectrumReadyEvent } from '../../shared/types/music-spectrum';
 
 /**
  * 音乐播放状态（QYP3-010/011/014）。
@@ -89,6 +91,52 @@ let engineSingleton: WebAudioEngine | null = null;
 let lastReportAt = 0;
 /** 播放令牌：新 playQueue 使旧 playCurrent 竞态失效（重复点击防护）。 */
 let playToken = 0;
+
+/**
+ * 离线频谱（QYP3-050）：mpv 音源的真频谱由主进程用 ffmpeg 预算，渲染层按
+ * 播放进度索引回放。**放模块级变量而不是 zustand**——一份矩阵 100KB 级，
+ * 不该进渲染热点，也不该触发任何组件重渲染（拾音器每帧来读即可）。
+ */
+let offlineSpectrum: {
+  fps: number;
+  bands: number;
+  frameCount: number;
+  data: Uint8Array;
+} | null = null;
+/** 位置锚点：mpv 位置是 1Hz 离散推送，两次之间靠它外推（否则频谱一秒一跳）。 */
+let spectrumAnchor: PositionAnchor = { position: 0, at: 0, playing: false };
+/** 请求令牌：切歌/停播后到达的过期回包直接丢弃。 */
+let spectrumRequestId = 0;
+
+/** 拉一次当前曲目的离线频谱（主进程是"当前 mpv 曲目"的权威）。 */
+async function refreshOfflineSpectrum(): Promise<void> {
+  const id = ++spectrumRequestId;
+  try {
+    const res = (await window.electronAPI.getMusicSpectrum()) as {
+      ok?: boolean;
+      data?: GetSpectrumResult;
+    };
+    if (id !== spectrumRequestId) return; // 已切歌/停播
+    const data = res?.data;
+    offlineSpectrum =
+      data && data.status === 'ready'
+        ? {
+            fps: data.fps,
+            bands: data.bands,
+            frameCount: data.frameCount,
+            data: data.data,
+          }
+        : null; // pending / unavailable / failed / none 都按"暂时没有"处理
+  } catch {
+    if (id === spectrumRequestId) offlineSpectrum = null;
+  }
+}
+
+/** 清空离线频谱并使在途回包失效（切歌、停播、换引擎）。 */
+function clearOfflineSpectrum(): void {
+  spectrumRequestId += 1;
+  offlineSpectrum = null;
+}
 
 /**
  * direct 引擎解码失败、已交给 mpv 兜底的那一首（QYP3-030）。
@@ -206,6 +254,14 @@ export function attachMusicMpvBridge(): void {
       if (typeof s.duration === 'number' && s.duration > 0) patch.duration = s.duration;
       if (typeof s.isPlaying === 'boolean') patch.isPlaying = s.isPlaying;
       if (Object.keys(patch).length > 0) useMusicPlaybackStore.setState(patch);
+      // 离线频谱（QYP3-050）：每个位置事件都重置锚点，两次推送之间外推
+      if (typeof s.currentTime === 'number') {
+        spectrumAnchor = makeAnchor(
+          s.currentTime,
+          typeof s.isPlaying === 'boolean' ? s.isPlaying : store.isPlaying,
+          performance.now()
+        );
+      }
       pushDeskLyrics(
         typeof s.currentTime === 'number' ? s.currentTime : store.position,
         typeof s.isPlaying === 'boolean' ? s.isPlaying : store.isPlaying
@@ -223,6 +279,24 @@ export function attachMusicMpvBridge(): void {
   });
   window.electronAPI.onMusicSessionEnd(() => {
     useMusicPlaybackStore.getState().stop();
+  });
+  // 离线频谱：主进程算完（或判定拿不到）会推一次，这里再取一次就有结论了
+  window.electronAPI.onMusicSpectrumReady?.((event: unknown) => {
+    const e = event as SpectrumReadyEvent | undefined;
+    if (!e || e.status !== 'ready') return;
+    if (useMusicPlaybackStore.getState().engine === 'mpv') void refreshOfflineSpectrum();
+  });
+  // mpv 音乐起播/切歌 → 拉一次；离开 mpv 引擎或停播 → 清空
+  useMusicPlaybackStore.subscribe((state, prev) => {
+    if (state.engine !== 'mpv') {
+      if (prev.engine === 'mpv') clearOfflineSpectrum();
+      return;
+    }
+    if (prev.engine !== 'mpv' || prev.current !== state.current) {
+      clearOfflineSpectrum();
+      spectrumAnchor = makeAnchor(state.position, state.isPlaying, performance.now());
+      void refreshOfflineSpectrum();
+    }
   });
 }
 
@@ -846,7 +920,21 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
 
   clearError: () => set({ errorMessage: null }),
 
-  getSpectrum: () => engineSingleton?.getSpectrum() ?? null,
+  /**
+   * 拾音器数据源（QYP3-023 / QYP3-050）：renderer 引擎有实时频谱；mpv 引擎
+   * 改用主进程预算好的离线矩阵，按外推后的播放位置取当前帧（零拷贝子视图）。
+   */
+  getSpectrum: () => {
+    const live = engineSingleton?.getSpectrum();
+    if (live) return live;
+    if (!offlineSpectrum) return null;
+    const s = get();
+    if (s.engine !== 'mpv') return null;
+    const t = estimatePosition(spectrumAnchor, s.isPlaying, performance.now());
+    const { fps, bands, frameCount, data } = offlineSpectrum;
+    const index = Math.min(frameCount - 1, Math.max(0, Math.round(t * fps)));
+    return data.subarray(index * bands, (index + 1) * bands);
+  },
   getWaveform: () => engineSingleton?.getWaveform() ?? null,
 
   playServerAt: async (index) => {

@@ -1063,6 +1063,47 @@
 - 待目标机验证：竖屏停靠态四行观感、进度条点击/拖动与键盘手感、按钮不再变椭圆、
   暂停时频谱冻结在最后一帧而不消失——已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-050 mpv 音源的离线频谱（ffmpeg 可选依赖）`[x]`
+- 诉求（用户）：有部分音乐是用的 mpv 播放，而且没有频谱，可以改用 ffmpeg 解决吗
+- 调研（本机实测）：① mpv 0.32 的**编码模式是坏的**（`--o=out.wav --of=wav`
+  每帧 `[ao/lavc] error encoding at 0`，产出 0 字节；wav/flac/mp3 源都一样）
+  → "拿 mpv 当 ffmpeg 用、不引入新依赖"这条路走不通；② 本机有 `/usr/bin/ffmpeg`
+  6.1.5：APE(5:21,30MB) → WAV 1.2s、FLAC 2.1s；③ 用户库里真正走 mpv 的极少
+  （214 首里 1 首 APE）+ Emby 上 codec 非直解的条目
+- 方案（用户选定）：**C 离线预计算频谱 + ffmpeg 探测降级**——不改播放路径
+  （声音仍由 mpv 播），只把频谱算好存起来按进度回放
+- 改动：
+  - `src/main/modules/music-spectrum/`（新）：`spectrum-format.ts`（32 字节头 +
+    frameCount×48 字节帧，magic/版本/截断校验）、`pcm-fft.ts`（手写 radix-2 FFT +
+    Hann 窗 + log 频带 + dB 量化；**fps×hop≡sampleRate** 从而零漂移）、
+    `ffmpeg-locator.ts`（`~/.local/bin/ffmpeg` → PATH，`-version` 探测，含否定结果
+    会话内缓存）、`ffmpeg-decode.ts`（解到 stdout 的 s16le/mono/24k，**同步**挂
+    stdout/stderr data——硬性约束 3；90s SIGKILL、AbortSignal）、`spectrum-cache.ts`
+    （sha1 内容寻址 + 原子写）、`index.ts` 的 `MusicSpectrumService`（并发 1、
+    同曲幂等、失败/无 ffmpeg 会话内不重试、换曲目立即取消、超配额触发 sweep）
+  - 主进程接线：`cache-manager` 加 `MUSIC_SPECTRUM_QUOTA_BYTES(64MB)` 与
+    `CONCURRENCY_BUDGET.spectrum=1`；`ipc/index.ts` 注册 `music-spectrum` 分区 +
+    `MUSIC.GET_SPECTRUM` + 在 `PLAYER.LOAD_FILE` 的 `audioChain`（=音乐且 mpv）分支
+    用**同一份** `effectiveHeaders` 派发任务（绝不再 `take` 一次，单次消费语义）；
+    `main/index.ts` 的 will-quit 同步 `cancelMusicSpectrum()`
+  - 渲染层：`player/spectrum-anchor.ts`（mpv 位置是 1Hz 离散推送，按
+    `(now-at)` 外推，暂停冻结）、store 的 `getSpectrum()` 在 mpv 引擎下返回当前位置
+    的帧（零拷贝 `subarray`，数据放模块级变量不进 zustand）、订阅式触发拉取 +
+    `ON_SPECTRUM_READY` 推送重拉（`spectrumRequestId` 丢弃过期回包）、
+    `MusicMiniBar.resolveMode` 的 auto 恒为 spectrum、`SpectrumGraph` 门禁改成
+    "有数据即画"（不再看引擎）
+  - 设置：`playback.offlineSpectrum`（默认开）+ 音乐设置页说明
+- Evidence: `tests/main/music-spectrum/` 6 个文件 38 例（格式往返/损坏、FFT 正弦
+  定位与 12 帧对齐、ffmpeg 参数契约、注入式 spawn 的 ENOENT/abort/timeout 与
+  **>64KB 流不死锁**、服务幂等/取消/配额、以及 `it.skipIf` 守卫的**真 ffmpeg 端到端**
+  用 lavfi sine 断言峰值落在 1kHz 频带）；渲染层 anchor 纯函数 4 例 + bridge
+  离线频谱 4 例；真实 APE 手动端到端：3860 帧（5:21 × 12fps ✓）、185KB 缓存、
+  本机耗时 1.0s；typecheck 双配置 + 全量 1022 绿 + 三构建通过
+- 待目标机验证：有/无 ffmpeg 两态、老机解码时播放不卡、长曲目不失控、
+  频带观感、缓存目录与诊断——已记入 `docs/TARGET-VERIFY.md`
+- 记录在案的红线变更：`docs/PHASE3-PLAN.md` §10 风险 4 原为"不引入 ffmpeg
+  依赖"，因 mpv 编码模式实测不可用，改为**可选依赖 + 探测降级**
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法
