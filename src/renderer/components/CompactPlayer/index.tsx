@@ -101,7 +101,13 @@ export default function CompactPlayer() {
         </button>
         <button
           type="button"
-          onClick={() => (playback.isPlaying ? playback.pause() : playback.resume())}
+          // 恢复态（QYP3-053，浮窗跨重启恢复）：engine 还是 null，没有引擎可
+          // resume，点播放要从上次位置真正起播，否则浮窗里点了没反应
+          onClick={() => {
+            if (playback.isPlaying) playback.pause();
+            else if (playback.engine) playback.resume();
+            else void playback.resumeRestored();
+          }}
           aria-label={playback.isPlaying ? '暂停' : '播放'}
           className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring flex-shrink-0"
         >

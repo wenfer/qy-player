@@ -98,6 +98,12 @@ import {
 import { buildTmdbPlugin } from '../plugins/tmdb';
 import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
 import { PluginError } from '../../shared/types/plugins';
+import {
+  clearNowPlaying,
+  parseNowPlaying,
+  readNowPlaying,
+  writeNowPlaying,
+} from '../modules/playback-state/now-playing';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
 import {
   CacheManager,
@@ -109,6 +115,7 @@ import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engin
 import { normalizeReplayGain } from '../modules/playback-engine/replaygain';
 import {
   clearMusicSession,
+  isMpvMusicActive,
   isMusicSessionActive,
   setMpvMusicActive,
   setMusicEngineActive,
@@ -311,27 +318,33 @@ export function registerIpcHandlers(
   // phase-1 tables (media_type CHECK) into catalog_user_state; the key
   // format is `<sourceId>:<relativePath>` (see PlaybackResolver).
   const catalogRepo = createCatalogRepository(db);
-  playbackStateManager = new PlaybackStateManager(player, storage, {
-    save: (mediaType, mediaId, position, duration, isFinished) => {
-      if (mediaType !== 'webdav') return;
-      const parsed = parseWebDavMediaId(mediaId);
-      if (!parsed) return;
-      const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
-      if (!file) return;
-      catalogRepo.upsertUserState({ itemId: file.item_id, position, duration, isFinished });
+  playbackStateManager = new PlaybackStateManager(
+    player,
+    storage,
+    {
+      save: (mediaType, mediaId, position, duration, isFinished) => {
+        if (mediaType !== 'webdav') return;
+        const parsed = parseWebDavMediaId(mediaId);
+        if (!parsed) return;
+        const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
+        if (!file) return;
+        catalogRepo.upsertUserState({ itemId: file.item_id, position, duration, isFinished });
+      },
+      getResumePosition: (mediaType, mediaId) => {
+        if (mediaType !== 'webdav') return 0;
+        const parsed = parseWebDavMediaId(mediaId);
+        if (!parsed) return 0;
+        const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
+        if (!file) return 0;
+        const state = catalogRepo.getUserState(file.item_id);
+        if (!state) return 0;
+        if (state.duration && state.position / state.duration > 0.9) return 0;
+        return state.position;
+      },
     },
-    getResumePosition: (mediaType, mediaId) => {
-      if (mediaType !== 'webdav') return 0;
-      const parsed = parseWebDavMediaId(mediaId);
-      if (!parsed) return 0;
-      const file = catalogRepo.getFileByPath(parsed.sourceId, parsed.relativePath);
-      if (!file) return 0;
-      const state = catalogRepo.getUserState(file.item_id);
-      if (!state) return 0;
-      if (state.duration && state.position / state.duration > 0.9) return 0;
-      return state.position;
-    },
-  });
+    // QYP3-053：mpv 本次加载的是音乐 → 不写播放历史（服务器回传保留）
+    () => isMpvMusicActive()
+  );
   playbackStateManager.init();
 
   // Auto-next (QYP2-035, plan §12.3): registered AFTER playback-state's eof
@@ -397,71 +410,85 @@ export function registerIpcHandlers(
     }
   );
 
-  // 音乐进度上报（QYP3-014）：renderer 引擎播放不经 mpv，进度由
-  // renderer 节流（≤10s 一次 + 停止/收尾 final）上报主进程落库，
-  // 与 mpv 引擎共用 legacy 表（local 路径键），续播规则同源。
-  ipcMain.handle(
-    IPC_CHANNELS.MUSIC.REPORT_PROGRESS,
-    (_event, args: {
-      mediaId: string;
-      title?: string;
-      position: number;
-      duration?: number;
-      isFinished?: boolean;
-      /** QYP3-038：WebDAV webaudio 进度落 'webdav' 域（键 <sourceId>:<path>）。 */
-      mediaType?: 'local' | 'webdav';
-    }) => {
-      const mediaId =
-        typeof args?.mediaId === 'string' && args.mediaId.length <= 1024 ? args.mediaId : null;
-      if (!mediaId || !Number.isFinite(Number(args?.position)) || Number(args.position) < 0) {
-        return err('VALIDATION_FAILED', '进度参数不合法');
+  // 当前播放的音乐（QYP3-053）：只存"上次在放哪首 + 放到哪"，**不写历史**。
+  // 用户诉求：音频不需要记录进度，也不要进播放历史；下次启动只是把播放条
+  // 恢复出来（不自动出声），点同一首从头播。校验复用 parseNowPlaying——
+  // 落盘与读回共用同一套规则，坏数据在入口就被挡住。
+  ipcMain.handle(IPC_CHANNELS.MUSIC.SET_NOW_PLAYING, (_event, args: unknown) => {
+    const candidate =
+      args && typeof args === 'object'
+        ? { ...(args as Record<string, unknown>), updatedAt: Date.now() }
+        : args;
+    const record = parseNowPlaying(JSON.stringify(candidate));
+    if (!record) return err('VALIDATION_FAILED', '音乐状态参数不合法');
+    writeNowPlaying(storage, record);
+    return ok({ saved: true });
+  });
+
+  // 启动恢复（QYP3-053）：把记录补成渲染层可直接入队的 MusicTrackInput。
+  // 音轨/来源已被删除时清掉记录并回 null——恢复出一条点不动的曲目更糟。
+  ipcMain.handle(IPC_CHANNELS.MUSIC.GET_NOW_PLAYING, () => {
+    const record = readNowPlaying(storage);
+    if (!record) return ok({ record: null });
+    if (record.type === 'server') {
+      // 服务器被删掉时同样作废记录（对称于下面的音轨分支）
+      const provider = record.provider ?? 'jellyfin';
+      const alive = storage
+        .getServers()
+        .some((s) => s.id === record.serverId && s.type === provider);
+      if (!alive) {
+        clearNowPlaying(storage);
+        return ok({ record: null });
       }
-      const position = Number(args.position);
-      const duration = Number(args?.duration);
-      const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : undefined;
-      const isFinished =
-        args?.isFinished === true ||
-        (safeDuration !== undefined && safeDuration > 0 && position / safeDuration > 0.9);
-      if (args?.mediaType === 'webdav') {
-        // WebDAV 音轨不是本地文件：不进 local_media；进度键与 mpv 引擎
-        // （PlaybackStateManager 落的 <sourceId>:<path>）保持一致
-        storage.addWatchHistory({
-          mediaType: 'webdav',
-          mediaId,
-          title: args?.title ?? mediaId,
-          position,
-          duration: safeDuration,
-        });
-        storage.saveProgress({
-          mediaType: 'webdav',
-          mediaId,
-          position,
-          duration: safeDuration,
-          isFinished,
-        });
-        return ok({ saved: true });
-      }
-      storage.upsertLocalMedia({ path: mediaId, title: args?.title ?? extractTitleFromPath(mediaId) });
-      const localMedia = storage.getLocalMediaByPath(mediaId);
-      storage.addWatchHistory({
-        mediaType: 'local',
-        mediaId,
-        title: args?.title ?? extractTitleFromPath(mediaId),
-        path: mediaId,
-        position,
-        duration: safeDuration,
+      return ok({
+        record: {
+          type: 'server',
+          position: record.position,
+          duration: record.duration ?? null,
+          updatedAt: record.updatedAt,
+          input: {
+            trackId: 0,
+            sourceId: 0,
+            serverId: record.serverId,
+            provider,
+            itemId: record.itemId,
+            title: record.title,
+            artist: record.artist ?? null,
+            albumartist: record.albumartist ?? null,
+            duration: record.duration ?? null,
+            path: '',
+            codec: null,
+          },
+        },
       });
-      storage.saveProgress({
-        mediaType: 'local',
-        mediaId,
-        localMediaId: localMedia?.id,
-        position,
-        duration: safeDuration,
-        isFinished,
-      });
-      return ok({ saved: true });
     }
-  );
+    const track = catalogRepo.getMusicTrack(record.sourceId!, record.trackId!);
+    const source = track
+      ? catalogRepo.listSources().find((s) => s.id === record.sourceId)
+      : undefined;
+    if (!track || !source) {
+      clearNowPlaying(storage);
+      return ok({ record: null });
+    }
+    return ok({
+      record: {
+        type: 'track',
+        position: record.position,
+        duration: record.duration ?? track.duration ?? null,
+        updatedAt: record.updatedAt,
+        input: {
+          trackId: track.id,
+          sourceId: track.source_id,
+          title: track.title,
+          artist: track.artist,
+          albumartist: track.albumartist,
+          duration: record.duration ?? track.duration ?? null,
+          path: track.path,
+          codec: track.codec,
+        },
+      },
+    });
+  });
 
   // 服务器音乐会话（QYP3-038）：webaudio 播放不经 LOAD_FILE，Sessions/Playing
   // 要在这里发起。playSessionId 返回给渲染层，Progress/Stopped 必须携带同一
@@ -502,8 +529,8 @@ export function registerIpcHandlers(
     }
   );
 
-  // 服务器音乐进度（QYP3-038）：Progress/Stopped 回传服务器 + 本地续播键
-  // （mediaType = provider，键 = itemId，与 resolvePlayback 的续播读取一致）。
+  // 服务器音乐进度（QYP3-038）：只回传服务器（QYP3-053 起不再落本地两表
+  // ——音乐不进播放历史，本地只留"当前播放的音乐"一条状态）。
   ipcMain.handle(
     IPC_CHANNELS.MUSIC.REPORT_SERVER_PROGRESS,
     (_event, args: {
@@ -534,21 +561,6 @@ export function registerIpcHandlers(
       const isFinished =
         args?.isFinished === true ||
         (safeDuration !== undefined && safeDuration > 0 && position / safeDuration > 0.9);
-      // 本地续播键：离线也能续播；服务器端 UserData 是另一份
-      storage.addWatchHistory({
-        mediaType: provider,
-        mediaId: itemId,
-        title: args?.title ?? itemId,
-        position,
-        duration: safeDuration,
-      });
-      storage.saveProgress({
-        mediaType: provider,
-        mediaId: itemId,
-        position,
-        duration: safeDuration,
-        isFinished,
-      });
       // 回传服务器：严格按 serverId 路由，失败静默。收尾一律 Stopped
       //（Emby 仅在 Stopped 时把 PositionTicks 写入 UserData——实测教训）；
       // 是否标记看完由位置比率决定，与 mpv 引擎的回传语义一致。

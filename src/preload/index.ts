@@ -189,8 +189,24 @@ const electronAPI = {
   /** 播放期回填真实时长（QYP3-052）：只对本地/WebDAV 曲目（trackId > 0）。 */
   setMusicTrackDuration: (trackId: number, duration: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_TRACK_DURATION, { trackId, duration }),
-  reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean; mediaType?: 'local' | 'webdav' }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
+  /**
+   * 当前播放的音乐（QYP3-053）：只存"上次在放哪首 + 放到哪"，**不写历史**。
+   * server 记录用于启动恢复服务器曲目（本地/WebDAV 按 trackId 查库反查）。
+   */
+  setNowPlaying: (record: {
+    type: 'track' | 'server';
+    sourceId?: number;
+    trackId?: number;
+    serverId?: number;
+    provider?: 'jellyfin' | 'emby';
+    itemId?: string;
+    title: string;
+    artist?: string | null;
+    albumartist?: string | null;
+    duration?: number | null;
+    position: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_NOW_PLAYING, record),
+  getNowPlaying: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_NOW_PLAYING),
   // 服务器音乐会话与进度（QYP3-038）：webaudio 播放不经 LOAD_FILE，
   // Sessions/Playing 系列由渲染层节流后经这两条通道上报
   startMusicServerSession: (args: { serverId: number; provider: 'jellyfin' | 'emby'; itemId: string; mediaSourceId?: string; title?: string }) =>

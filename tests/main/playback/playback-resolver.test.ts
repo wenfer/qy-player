@@ -530,11 +530,9 @@ describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => 
       mediaId: `${sourceId}:Music/song.flac`,
     });
     expect(resolution.streamSessionId).toBeUndefined();
-    // 续播键修复：WebDAV 读 'webdav' 域的 <sourceId>:<path>，不再误读 'local'
-    expect(progressKeys).toContainEqual({
-      mediaType: 'webdav',
-      mediaId: `${sourceId}:Music/song.flac`,
-    });
+    // QYP3-053：音乐不再读播放进度（不按曲目续播），一律从 0 起播
+    expect(progressKeys).toEqual([]);
+    expect(resolution.startPosition).toBe(0);
     const route = deps.streamRoutes.get(resolution.url.replace('qy-stream://audio/', ''));
     expect(route?.url).toBe(`http://127.0.0.1:${mockPort}/dav/Music/song.flac`);
     expect(route?.headers.Authorization).toBe(

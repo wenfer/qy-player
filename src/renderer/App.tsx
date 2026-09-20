@@ -26,7 +26,7 @@ import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
 import { useCompactModeStore } from './stores/compact-mode-store';
-import { useMusicPlaybackStore } from './stores/music-playback-store';
+import { attachMusicMpvBridge, useMusicPlaybackStore } from './stores/music-playback-store';
 import { useResourceStore } from './stores/resource-store';
 
 /**
@@ -125,6 +125,27 @@ export function CompactModeHost() {
 }
 
 /**
+ * 当前播放的音乐宿主（QYP3-053）：启动时读回上次的曲目与进度，把播放条
+ * 恢复出来（不自动出声，点播放才继续）。
+ *
+ * 挂在 `Shell` **之外**：精简浮窗里渲染的是 `CompactPlayer`，音乐条的宿主
+ * 若放在 `MusicMiniBar` 里就永远不跑。恢复态**不算音乐会话**（engine 仍为
+ * null），所以不会误触自动精简，也不会抢走全局媒体键。
+ *
+ * 顺带把 mpv 桥也挂上（幂等，与 `MusicMiniBar` 里那次重复调用无害）：浮窗
+ * 分支不渲染音乐条，而 QYP3-051 起冷启动就可能直接是浮窗——那种情况下没有
+ * 这个桥，mpv 引擎的曲目进度就永远不更新（内置引擎不受影响）。
+ */
+function NowPlayingHost() {
+  const init = useMusicPlaybackStore((s) => s.initNowPlaying);
+  useEffect(() => {
+    attachMusicMpvBridge();
+    void init();
+  }, [init]);
+  return null;
+}
+
+/**
  * 桌面歌词窗口（ADR-0008）复用同一个 renderer 打包产物，但独立成一个
  * BrowserWindow：不带导航栏/播放器外壳，只渲染歌词。
  */
@@ -132,8 +153,10 @@ function Shell() {
   const compact = useCompactModeStore((s) => s.compact);
   // 音乐模式侧栏收成图标轨（QYP3-044），内容区的左边距跟着变
   const mode = useAppModeStore((s) => s.mode);
-  // 音乐模式下播放条停靠窗口底部（QYP3-045），内容区留出它的高度
-  const musicSession = useMusicPlaybackStore((s) => s.engine !== null);
+  // 音乐模式下播放条停靠窗口底部（QYP3-045），内容区留出它的高度。
+  // QYP3-053：恢复态（上次的音乐，未起播）同样要占位，否则重启后内容区
+  // 会盖住恢复出来的播放条。
+  const musicSession = useMusicPlaybackStore((s) => s.engine !== null || s.restored);
   const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
   if (isDeskLyrics) return <DeskLyrics />;
 
@@ -212,6 +235,7 @@ function App() {
       <CompactModeHost />
       <WindowProfileHost />
       <ResourceHost />
+      <NowPlayingHost />
       <Shell />
     </HashRouter>
   );

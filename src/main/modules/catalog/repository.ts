@@ -599,6 +599,22 @@ export function createCatalogRepository(db: Database.Database) {
     },
 
     /**
+     * 单条音轨（QYP3-053）：启动恢复「当前播放的音乐」时按记录里的
+     * `(sourceId, trackId)` 反查；查不到说明曲目已被删除/换源。
+     */
+    getMusicTrack(sourceId: number, trackId: number): MusicTrackRow | null {
+      return (
+        (db
+          .prepare(
+            `SELECT id, source_id, path, title, artist, album, albumartist, track_no, disc_no,
+                    year, duration, codec, bitrate, has_cover, has_lyrics, favorite
+             FROM music_tracks WHERE id = ? AND source_id = ?`
+          )
+          .get(trackId, sourceId) as MusicTrackRow | undefined) ?? null
+      );
+    },
+
+    /**
      * QYP3-052：播放期回填真实时长。
      *
      * 扫描期解析不出来的（VBR 无 Xing 头、标签超出读取窗口、WebDAV 源）在

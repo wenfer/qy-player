@@ -57,17 +57,33 @@ export interface MusicPlayingState {
   /** 服务器音乐队列（QYP3-025）：mpv 引擎下靠它推进上下曲。 */
   serverQueue: MusicTrackInput[];
   serverIndex: number;
+  /**
+   * 启动恢复态（QYP3-053）：上次退出时那首曲目 + 进度已经回填，但**引擎是
+   * null**（不出声）。故意不伪装成引擎：`CompactModeHost` 与全局媒体键都只看
+   * `engine`，伪装会出现"一启动就自动进精简模式/媒体键劫持视频"。
+   */
+  restored: boolean;
+  /** 恢复态的曲目输入（点播放时用它入队）。 */
+  restoreInput: MusicTrackInput | null;
+  /** 恢复态的进度（秒）：点播放从这里起播。 */
+  restorePosition: number;
 }
 
 /** 歌词/进度的来源标识（本地音轨或服务器条目）。 */
 export interface MusicSourceRef {
   trackId: number;
+  /** 本地/WebDAV 音轨所属来源（QYP3-053：恢复记录按 (sourceId, trackId) 反查）。 */
+  sourceId?: number;
   serverId?: number;
   itemId?: string;
 }
 
 export interface MusicPlaybackStore extends MusicPlayingState {
-  playQueue: (tracks: MusicTrackInput[], startIndex: number) => Promise<void>;
+  playQueue: (
+    tracks: MusicTrackInput[],
+    startIndex: number,
+    opts?: { startPosition?: number }
+  ) => Promise<void>;
   pause: () => void;
   resume: () => void;
   next: () => Promise<void>;
@@ -85,10 +101,16 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   playServerAt: (index: number) => Promise<void>;
   /** 结束音乐会话（QYP3-026）：视频接管 mpv 时由主进程事件触发。 */
   stop: () => void;
+  /** 启动恢复（QYP3-053）：读回上次的"当前播放的音乐"（不出声）。 */
+  initNowPlaying: () => Promise<void>;
+  /** 恢复态起播（QYP3-053）：从上一次的进度继续。 */
+  resumeRestored: () => Promise<void>;
 }
 
 let engineSingleton: WebAudioEngine | null = null;
 let lastReportAt = 0;
+/** 「当前播放的音乐」的上报节流（QYP3-053）：收尾不受它限制。 */
+let lastNowPlayingAt = 0;
 /** 播放令牌：新 playQueue 使旧 playCurrent 竞态失效（重复点击防护）。 */
 let playToken = 0;
 /**
@@ -207,7 +229,7 @@ export function refOfTrack(t: MusicTrackInput): MediaRef {
 export function sourceOfTrack(t: MusicTrackInput): MusicSourceRef {
   return t.serverId && t.itemId
     ? { trackId: 0, serverId: t.serverId, itemId: t.itemId }
-    : { trackId: t.trackId };
+    : { trackId: t.trackId, sourceId: t.sourceId };
 }
 
 /** 换曲时重新拉取歌词（本地读缓存 / 服务器走端点，失败静默=无词）。 */
@@ -260,6 +282,9 @@ export function attachMusicMpvBridge(): void {
       if (typeof s.isPlaying === 'boolean') patch.isPlaying = s.isPlaying;
       if (Object.keys(patch).length > 0) useMusicPlaybackStore.setState(patch);
       if (patch.duration !== undefined) maybeReportDuration(); // QYP3-052 时长回填
+      // 「当前播放的音乐」（QYP3-053）：mpv 音乐的位置也来自这里；暂停是
+      // 收尾语义，必须立刻落盘（正在播时按 5s 节流）
+      pushNowPlaying({ final: s.isPlaying === false });
       // 离线频谱（QYP3-050）：每个位置事件都重置锚点，两次推送之间外推
       if (typeof s.currentTime === 'number') {
         spectrumAnchor = makeAnchor(
@@ -316,10 +341,14 @@ function getEngine(): WebAudioEngine {
       useMusicPlaybackStore.setState({ position, duration: known });
       if (known > 0) maybeReportDuration(); // QYP3-052 时长回填
       pushDeskLyrics(position, true);
+      // 上次在放哪首/放到哪（QYP3-053）：内部 5s 节流，1Hz 的位置事件
+      // 不会变成写盘风暴
+      pushNowPlaying();
+      // 服务器回传沿用 10s 节流（Sessions/Playing 系列不宜高频）
       const now = Date.now();
       if (now - lastReportAt >= 10_000) {
         lastReportAt = now;
-        reportProgress();
+        reportServerProgress();
       }
     };
     engineSingleton.onEnded = () => {
@@ -418,37 +447,58 @@ function beginServerSession(track: EngineExtTrack | null): void {
 }
 
 /**
- * 进度上报（QYP3-038 分流）：服务器曲目走 REPORT_SERVER_PROGRESS（回传
- * Sessions/Playing 系列 + 落本地续播键）；本地/WebDAV 走 REPORT_PROGRESS，
- * WebDAV（qy-stream URL 且非服务器）带 mediaType:'webdav' 落对续播键。
- * final = 收尾（跳曲/停止/自然结束）：服务器走 Stopped 端点落位，
- * 是否标记看完由位置比率在主进程判定。
+ * 「当前播放的音乐」上报（QYP3-053）。
+ *
+ * 用户诉求：**音频不记播放历史**，只需要一条"上次在放哪首 + 放到哪"。
+ * 这条记录只用于下次启动恢复播放条（不自动出声，点播放从上次位置继续）；
+ * 音乐不再按曲目续播，所以它不进 `watch_history` / `playback_progress`。
+ *
+ * 节流 ~5s；收尾（暂停/跳曲/停止/会话结束）立即上报，保证退出时是最新位置。
  */
-function reportProgress(opts: { final?: boolean } = {}): void {
+function pushNowPlaying(opts: { final?: boolean } = {}): void {
+  const s = useMusicPlaybackStore.getState();
+  const source = s.currentSource;
+  if (!source || !s.current) return;
+  const now = Date.now();
+  if (!opts.final && now - lastNowPlayingAt < 5_000) return;
+  lastNowPlayingAt = now;
+  const base = {
+    title: s.current.title,
+    artist: s.current.artist,
+    albumartist: s.current.albumartist,
+    duration: s.duration > 0 ? s.duration : null,
+    position: s.position,
+  };
+  // 服务器曲目（trackId 恒为 0）与本地/WebDAV 音轨走两套定位键
+  const payload =
+    source.serverId && source.itemId
+      ? { ...base, type: 'server' as const, serverId: source.serverId, itemId: source.itemId }
+      : { ...base, type: 'track' as const, sourceId: source.sourceId ?? 0, trackId: source.trackId };
+  void Promise.resolve(window.electronAPI.setNowPlaying?.(payload)).catch(() => undefined);
+}
+
+/**
+ * 服务器音乐进度回传（QYP3-038，QYP3-053 起本地表不再写）。
+ *
+ * 只有 **webaudio 引擎** 走这里：mpv 引擎的服务器曲目由主进程
+ * `PlaybackStateManager` 的 `onProgressSaved` 回传（LOAD_FILE 带了会话）。
+ * final = 收尾（跳曲/停止/自然结束）：服务器走 Stopped 端点落位。
+ */
+function reportServerProgress(opts: { final?: boolean } = {}): void {
   const s = useMusicPlaybackStore.getState();
   if (s.engine !== 'webaudio' || !s.current) return;
   const ext = s.current as EngineExtTrack;
-  if (ext.serverId && ext.itemId) {
-    void window.electronAPI.reportMusicServerProgress({
-      serverId: ext.serverId,
-      provider: ext.provider ?? 'jellyfin',
-      itemId: ext.itemId,
-      mediaSourceId: ext.mediaSourceId,
-      title: ext.title,
-      position: s.position,
-      duration: s.duration,
-      isStopped: opts.final === true ? true : undefined,
-      playSessionId: serverPlaySessionId ?? undefined,
-    });
-    return;
-  }
-  void window.electronAPI.reportMusicProgress({
-    mediaId: ext.mediaId,
+  if (!(ext.serverId && ext.itemId)) return;
+  void window.electronAPI.reportMusicServerProgress({
+    serverId: ext.serverId,
+    provider: ext.provider ?? 'jellyfin',
+    itemId: ext.itemId,
+    mediaSourceId: ext.mediaSourceId,
     title: ext.title,
     position: s.position,
     duration: s.duration,
-    // FLAC 自救成功后 url 变 blob:，但那只会发生在本地曲目上
-    mediaType: ext.url.startsWith('qy-stream://') ? 'webdav' : 'local',
+    isStopped: opts.final === true ? true : undefined,
+    playSessionId: serverPlaySessionId ?? undefined,
   });
 }
 
@@ -557,6 +607,19 @@ export interface MusicTrackInput {
   duration: number | null;
   path: string;
   codec: string | null;
+}
+
+/**
+ * 上次的音乐状态（QYP3-053）：主进程把记录补成可直接入队的
+ * `MusicTrackInput`（本地音轨按 (sourceId, trackId) 查库、服务器条目按
+ * serverId 路由），渲染层拿到就能 `playQueue([input], 0, {startPosition})`。
+ */
+export interface RestoredNowPlaying {
+  type: 'track' | 'server';
+  position: number;
+  duration: number | null;
+  updatedAt: number;
+  input: MusicTrackInput;
 }
 
 /**
@@ -676,8 +739,11 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   serverQueue: [],
   serverIndex: -1,
   currentSource: null,
+  restored: false,
+  restoreInput: null,
+  restorePosition: 0,
 
-  playQueue: async (tracks, startIndex) => {
+  playQueue: async (tracks, startIndex, opts) => {
     const start = tracks[startIndex];
     if (!start) return;
     // 新的播放请求：上一首的自救/失败标记与懒解析记录全部作废
@@ -708,6 +774,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       }
       if (token !== playToken) return; // 期间又点了新曲目：让位
       const { url, startPosition, engine, mediaContext, streamSessionId } = resolution.data;
+      // QYP3-053：音乐不再按曲目续播（resolver 恒回 0），起播位置只可能来自
+      // 显式入参——点恢复出来的播放条「播放」时带上上次的位置。
+      const effectiveStart = opts?.startPosition ?? startPosition;
 
       if (engine?.engine === 'webaudio') {
         // QYP3-037：整队不再逐曲预解析——本地是纯 DB 查询无妨，但服务器是
@@ -759,13 +828,16 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           engine: 'webaudio',
           current: queue[idx] ?? null,
           currentSource: sourceOfTrack(start),
-          position: 0,
+          position: effectiveStart,
           duration: queue[idx]?.duration ?? 0,
           isPlaying: true,
           queueLength: queue.length,
           queueIndex: idx,
           queueSnapshot: queue,
           errorMessage: null,
+          restored: false,
+          restoreInput: null,
+          restorePosition: 0,
           // QYP3-037：服务器队列也记进状态——中途某曲兜底 mpv 时，
           // mpv 的 eof 推进（serverQueue/serverIndex）才有据可依
           serverQueue: start.serverId ? tracks : [],
@@ -795,7 +867,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
             if (ctx?.mediaSourceId) ext.mediaSourceId = ctx.mediaSourceId;
             return { url: r.data.url, startPosition: r.data.startPosition };
           },
-          startPosition
+          effectiveStart
         );
         loadLyricsFor(sourceOfTrack(start));
       } else {
@@ -814,11 +886,14 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
             duration: start.duration,
             url,
           },
-          position: 0,
+          position: effectiveStart,
           duration: start.duration ?? 0,
           isPlaying: true,
           errorMessage: null,
           currentSource: sourceOfTrack(start),
+          restored: false,
+          restoreInput: null,
+          restorePosition: 0,
           // 服务器队列（本地冷门格式时为单曲，上下曲无队列可走）
           serverQueue: start.serverId ? tracks : [],
           serverIndex: start.serverId ? startIndex : -1,
@@ -827,7 +902,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         const chain = await readAudioChainSettings();
         await window.electronAPI.playerLoadFile(
           url,
-          startPosition > 0 ? startPosition : undefined,
+          effectiveStart > 0 ? effectiveStart : undefined,
           undefined,
           mediaContext as Parameters<typeof window.electronAPI.playerLoadFile>[3],
           // WebDAV 音频的实际路径：直链不带凭据，认证头只能靠这个不透明
@@ -858,7 +933,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     const s = get();
     if (s.engine === 'webaudio') {
       engineSingleton?.pause();
-      reportProgress();
+      // 收尾（QYP3-053）：暂停位置立刻落进"当前播放的音乐"
+      pushNowPlaying({ final: true });
+      reportServerProgress({ final: true });
       pushDeskLyrics(get().position, false);
       set({ isPlaying: false });
       void window.electronAPI.setMusicEngineActive(false); // 暂停时媒体键还给视频（若无视频则无操作）
@@ -882,8 +959,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     const s = get();
     if (s.engine === 'webaudio') {
       // 离曲收尾：服务器曲目走 Stopped 落位（是否看完由比率判定），
-      // 本地/WebDAV 落最终进度
-      reportProgress({ final: true });
+      // "当前播放的音乐"记下这首的位置（QYP3-053；音乐不写历史）
+      pushNowPlaying({ final: true });
+      reportServerProgress({ final: true });
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
       await engineInstance.next(false);
@@ -927,6 +1005,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     const s = get();
     if (s.engine === 'webaudio') engineSingleton?.seek(position);
     else if (s.engine === 'mpv') void window.electronAPI.playerControl('seek', position, 'absolute');
+    else if (s.restored) {
+      // 恢复态还没起播（引擎是 null）：拖动只是选定"从哪开始"，落进
+      // 恢复位置，点播放时带进 playQueue（QYP3-053）
+      set({ position, restorePosition: position });
+      pushNowPlaying({ final: true });
+    }
   },
 
   setVolume: (volume) => {
@@ -1016,6 +1100,54 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     }
   },
 
+  /**
+   * 启动恢复（QYP3-053）：读回"上次在放哪首 + 放到哪"。
+   *
+   * 刻意**不设置 engine**（保持 null）：`CompactModeHost`、全局媒体键与
+   * 「音乐会话」判定都只看 engine，伪装成有会话会一启动就自动进精简模式、
+   * 还会把媒体键从视频手里抢走。播放条只认 `restored`。
+   */
+  initNowPlaying: async () => {
+    try {
+      const res = (await window.electronAPI.getNowPlaying?.()) as
+        | { ok?: boolean; data?: { record?: RestoredNowPlaying | null } }
+        | undefined;
+      const record = res?.data?.record;
+      if (!record?.input) return;
+      // 期间已经真的开始播了（用户手快）：恢复态让位
+      if (useMusicPlaybackStore.getState().engine !== null) return;
+      const { input } = record;
+      useMusicPlaybackStore.setState({
+        restored: true,
+        restoreInput: input,
+        restorePosition: record.position,
+        current: {
+          id: input.trackId,
+          title: input.title,
+          artist: input.artist,
+          album: null,
+          albumartist: input.albumartist,
+          duration: input.duration,
+          url: '',
+        },
+        currentSource: sourceOfTrack(input),
+        position: record.position,
+        duration: record.duration ?? input.duration ?? 0,
+        isPlaying: false,
+        errorMessage: null,
+      });
+    } catch {
+      // 恢复是非关键路径：读不到就当没有
+    }
+  },
+
+  /** 恢复态起播（QYP3-053）：从上次的进度继续（点播放条上的「播放」）。 */
+  resumeRestored: async () => {
+    const s = get();
+    if (s.engine !== null || !s.restored || !s.restoreInput) return;
+    await get().playQueue([s.restoreInput], 0, { startPosition: s.restorePosition });
+  },
+
   stop: () => {
     // 幂等：视频状态事件会高频到达，已无音乐会话时直接返回（不 set）
     if (get().engine === null) return;
@@ -1023,9 +1155,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     flacRecoveringQueueId = null;
     directFallbackQueueId = null;
     resolveFailedIds.clear();
-    // 收尾上报要在状态清空**之前**（reportProgress 读的是当前状态）：
-    // 服务器曲目由此走 Stopped 落位（QYP3-038）
-    reportProgress({ final: true });
+    // 收尾上报要在状态清空**之前**（读的是当前状态）：服务器曲目由此走
+    // Stopped 落位（QYP3-038），"当前播放的音乐"留下最后位置（QYP3-053）
+    pushNowPlaying({ final: true });
+    reportServerProgress({ final: true });
     serverPlaySessionId = null;
     engineSingleton?.pause();
     currentLyrics = null;

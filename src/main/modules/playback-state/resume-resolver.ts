@@ -168,13 +168,7 @@ function toTarget(
   };
 }
 
-/**
- * 音乐续播（QYP3-014，单一来源）：无 30s 阈值——音乐总是从上次
- * 位置续播；但听完（>90%）从头重播。任何保存过的真实位置（>0）
- * 都是有效续播点。
- */
-export function resolveMusicResumeTarget(saved?: { position: number; duration?: number }): number {
-  if (!saved || !Number.isFinite(saved.position) || saved.position <= 0) return 0;
-  if (saved.duration && saved.duration > 0 && saved.position / saved.duration > 0.9) return 0;
-  return saved.position;
-}
+// 音乐续播（`resolveMusicResumeTarget`，QYP3-014）已删除（QYP3-053）：
+// 音频不再写播放进度、也不再按曲目续播——音乐只有一条"当前播放状态"
+// （曲目 + 进度，见 `now-playing.ts`），用于恢复播放条，起播一律从头。
+// 本模块自此只管影视（电影/单集/剧集）的续播决策。

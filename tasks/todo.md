@@ -1182,6 +1182,63 @@
   - **ID3 标签 >512 KiB 的 mp3**（用户库 3 首，内嵌封面太大）扫描期读不到音频帧，
     只能等播放回填；要覆盖得二次按偏移读
 
+### QYP3-053 音乐不写播放历史，只存「当前播放状态」`[x]`
+- 诉求（用户）：播放音频不需要记录进度，只需要保存当前播放状态，包含播放曲目
+  和进度，不要存入播放历史中
+- 口径（用户选定）：① 下次启动**恢复播放条**（曲目+进度，不自动出声，点播放继续）；
+  ② **不再按曲目续播**（点同一首从头播）；③ **服务器（Emby/Jellyfin）回传保留**；
+  ④ **清掉存量**音乐记录（视频记录不动）
+- 改动：
+  - 新增 `playback-state/now-playing.ts`：`app_config` 里**一条**记录（type track/
+    server + 定位键 + 标题/艺人/时长 + position + updatedAt）；解析与落盘共用同一套
+    规则（坏 JSON / 缺 title / position 非法 / 缺定位键 → null），**不存 path**
+    （本地音轨永远按 `(sourceId, trackId)` 查 `music_tracks`）
+  - IPC：删 `MUSIC.REPORT_PROGRESS`（写 watch_history + playback_progress 的那条），
+    加 `SET_NOW_PLAYING`（校验复用 `parseNowPlaying`）/`GET_NOW_PLAYING`（track 分支
+    查库补成完整 `MusicTrackInput`，音轨或来源已删则清记录回 null）；
+    `REPORT_SERVER_PROGRESS` 去掉本地两表写入，服务器回传/playSessionId 原样保留
+  - mpv 引擎音乐：`PlaybackStateManager` 加 `isMusic` 门禁（接
+    `isMpvMusicActive()`），音乐跳过 `addWatchHistory`/`saveProgress`；服务器回传
+    与本地写解耦后照常触发（对视频是等价重构）
+  - 删音乐 per-track 续播：`resume-resolver.ts` 去掉 `resolveMusicResumeTarget`，
+    `playback-resolver.ts` 音乐分支 `startPosition` 恒为 0（顺带删掉那段读
+    `playback_progress` 的 WebDAV 键）
+  - 渲染层：store 加 `restored/restoreInput/restorePosition` +
+    `initNowPlaying()/resumeRestored()`；`playQueue` 加第 3 参
+    `opts.startPosition`（恢复态起播的唯一入口）；`pushNowPlaying()` 节流 5s
+    （暂停/跳曲/停止/收尾立即，含 mpv 桥）；`NowPlayingHost` 挂在 `Shell` **之外**
+    （浮窗分支不渲染音乐条）；`MusicMiniBar`/`CompactPlayer` 的播放键在 engine 为
+    null 时走 `resumeRestored()`
+  - **恢复态不算音乐会话**（engine 保持 null）：否则冷启动就自动进精简模式、
+    全局媒体键被抢走
+  - migration 011：删 `watch_history`（local/webdav）与 `playback_progress`（local）
+    里的音频行（后缀表与 classifier 的 `AUDIO_EXTENSIONS` 对齐，含 `.wav`、lower()
+    兜大写）；**服务器行分不出音视频一律不动**
+- 顺带修掉的既有 bug：`MUSIC.REPORT_PROGRESS` 的 webdav 分支调
+  `saveProgress({mediaType:'webdav'})`，而 `playback_progress.media_type` 的 CHECK
+  只允许 local/jellyfin/emby → INSERT 必然抛错（渲染层 `void` 未 catch）。该写入
+  已随通道删除
+- Evidence: 新增 `tests/main/playback/now-playing.test.ts` 8 例、
+  `playback-state-music.test.ts` 5 例、`tests/renderer/music/now-playing-restore.test.tsx`
+  7 例；改 `catalog-migrations`（+1 例：mp3/wav/大写 .APE/webdav flac 行消失，
+  mkv 与 emby 行保留；版本断言 → 11）、`source-purpose`（版本 → 11）、
+  `playback-resolver`（音乐不再读 getProgress、startPosition 恒 0）、
+  `server-progress`（本地/WebDAV 改断言 `setNowPlaying`）；typecheck 双配置 +
+  全量 121 文件/1096 绿 + 三构建通过；**真实库副本跑 migration 011**：库停 010，
+  watch_history 28 → 6、playback_progress 27 → 6（22/21 条音频行清除，被清的都是
+  曲目名含 `sine.wav`；保留的 6+6 是影视与服务器行），与独立 JS 分类器算出的
+  期望集合逐 id 相等（临时验证测试已删）
+- 待目标机验证：重启后播放条恢复且不出声、点播放从上次位置继续、历史页不再出现
+  音乐、服务器端「继续收听」照旧、恢复态下媒体键不生效——已记入
+  `docs/TARGET-VERIFY.md`
+- 本轮记录在案但未做的取舍：
+  - 恢复态 `isMusicSessionActive()` 为 false → 全局媒体键不路由到音乐，只有播放条
+    上的按钮能起播（可接受：没有会话就不该抢媒体键）
+  - 上次退出时若是精简浮窗 profile，浮窗里显示 `CompactPlayer`（恢复的曲目显示在
+    标题位，播放键已加兜底）
+  - `PLAYER.LOAD_FILE` 仍会为 mpv 本地音乐 `upsertLocalMedia`，留下无消费方的
+    orphan 行（本轮不动）
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

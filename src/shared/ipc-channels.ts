@@ -30,14 +30,19 @@ export const IPC_CHANNELS = {
     SET_FAVORITE: 'music:set-favorite',
     /** 播放期回填真实时长（QYP3-052）：扫描解析不出来的曲目，播放时补上。 */
     SET_TRACK_DURATION: 'music:set-track-duration',
-    /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
-    REPORT_PROGRESS: 'music:report-progress',
+    /**
+     * 当前播放的音乐状态（QYP3-053）：只存"上次在放哪首 + 放到哪"，
+     * **不写播放历史**（音乐的观看进度不再是持久化概念，只在本次会话内有效）。
+     */
+    SET_NOW_PLAYING: 'music:set-now-playing',
+    /** 启动时读回上次的音乐状态（QYP3-053）：渲染层据此恢复播放条。 */
+    GET_NOW_PLAYING: 'music:get-now-playing',
     /**
      * renderer 引擎服务器音乐会话（QYP3-038）：起播报告 Sessions/Playing，
      * 返回 playSessionId（Progress/Stopped 必须携带同一 id，Emby 才认）。
      */
     START_SERVER_SESSION: 'music:start-server-session',
-    /** renderer 引擎服务器音乐进度上报（QYP3-038）：Progress/Stopped + 本地续播键。 */
+    /** renderer 引擎服务器音乐进度上报（QYP3-038）：Progress/Stopped 回传服务器。 */
     REPORT_SERVER_PROGRESS: 'music:report-server-progress',
     GET_LYRICS: 'music:get-lyrics',
     /** 服务器曲目歌词（QYP3-020b）：Jellyfin 端点，Emby 无词。 */

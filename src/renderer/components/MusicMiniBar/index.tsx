@@ -213,7 +213,9 @@ export default function MusicMiniBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!mounted || !playback.engine || !playback.current) return null;
+  // QYP3-053：恢复态（engine 为 null 但已有上次的曲目与进度）也要显示——
+  // 这就是"下次打开保持上次的音乐"的可见形态；点播放才真正起播。
+  if (!mounted || (!playback.engine && !playback.restored) || !playback.current) return null;
   // 服务器曲目以服务器为准（不落本地库），收藏只对扫描入库的音轨开放
   const canFavorite = playback.current.id > 0;
   // 进度百分比（进度条自己的一行，与频谱互不替代——QYP3-049）
@@ -335,7 +337,11 @@ export default function MusicMiniBar() {
             ) : (
               <button
                 type="button"
-                onClick={() => playback.resume()}
+                // 恢复态（engine 为 null）没引擎可 resume：从上次位置真正起播
+                onClick={() => {
+                  if (playback.engine) playback.resume();
+                  else void playback.resumeRestored();
+                }}
                 aria-label="继续播放音乐"
                 className={PLAY_BTN}
               >

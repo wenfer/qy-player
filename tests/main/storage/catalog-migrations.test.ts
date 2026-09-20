@@ -45,7 +45,7 @@ afterAll(() => {
 describe('music tables (migration 007)', () => {
   it('creates music/playlist tables with business-key uniqueness', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(10);
+    expect(getVersion(db)).toBe(11);
     const names = tableNames(db);
     expect(names).toEqual(expect.arrayContaining(['music_tracks', 'music_cue_entries', 'playlists', 'playlist_items']));
     db.prepare(
@@ -144,7 +144,7 @@ function getVersion(db: Database.Database): number {
 describe('skip_overrides (migration 006)', () => {
   it('applies migration 006 and round-trips series-scope overrides', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(10);
+    expect(getVersion(db)).toBe(11);
     const storage = createStorage(db);
     // 初次无设定
     expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toBeNull();
@@ -199,7 +199,7 @@ describe('source purpose normalization (migration 010, QYP3-041)', () => {
     v9.close();
 
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(10);
+    expect(getVersion(db)).toBe(11);
     const rows = db
       .prepare('SELECT name, purpose FROM library_sources ORDER BY id')
       .all() as Array<{ name: string; purpose: string }>;
@@ -208,6 +208,62 @@ describe('source purpose normalization (migration 010, QYP3-041)', () => {
       { name: '音乐盘', purpose: 'music' },
       { name: '影片盘', purpose: 'video' },
     ]);
+    db.close();
+  });
+});
+
+describe('music history cleanup (migration 011, QYP3-053)', () => {
+  it('drops audio rows from watch_history/playback_progress and keeps video + server rows', () => {
+    const path = makeDbPath();
+    // 造一个停在 010 的库，塞进"照旧会写入"的音乐行（历史 bug 的存量）
+    const v10 = new Database(path);
+    v10.pragma('journal_mode = WAL');
+    runMigrations(v10, { upTo: 10 });
+    expect(getVersion(v10)).toBe(10);
+
+    v10.prepare('INSERT INTO local_media (path, title) VALUES (?, ?)').run('/music/a.mp3', '本地歌');
+    v10.prepare('INSERT INTO local_media (path, title) VALUES (?, ?)').run('/music/sine.wav', '正弦');
+    v10.prepare('INSERT INTO local_media (path, title) VALUES (?, ?)').run('/movies/a.mkv', '本地片');
+    const idOf = (p: string): number =>
+      (v10.prepare('SELECT id FROM local_media WHERE path = ?').get(p) as { id: number }).id;
+
+    const history = v10.prepare(
+      'INSERT INTO watch_history (media_type, media_id, title, path, position) VALUES (?, ?, ?, ?, ?)'
+    );
+    history.run('local', '/music/a.mp3', '本地歌', '/music/a.mp3', 30);
+    history.run('local', '/music/sine.wav', '正弦', '/music/sine.wav', 5);
+    // 大写扩展名（.APE）也要认——lower() 兜住
+    history.run('local', '/music/b.APE', '无损', '/music/b.APE', 90);
+    // WebDAV 音频的 watch_history 行没有 path，键是 <sourceId>:<path>
+    history.run('webdav', '3:Music/c.flac', '云上歌', null, 12);
+    history.run('local', '/movies/a.mkv', '本地片', '/movies/a.mkv', 600);
+    history.run('emby', 'item-1', '在线片', null, 300);
+    history.run('movie', '56', '在线电影', null, 20);
+
+    const progress = v10.prepare(
+      'INSERT INTO playback_progress (media_type, local_media_id, position, duration) VALUES (?, ?, ?, ?)'
+    );
+    progress.run('local', idOf('/music/a.mp3'), 30, 200);
+    progress.run('local', idOf('/music/sine.wav'), 5, 10);
+    progress.run('local', idOf('/movies/a.mkv'), 600, 7200);
+    v10.close();
+
+    const db = openDatabaseAtPath(path);
+    expect(getVersion(db)).toBe(11);
+
+    const titles = db
+      .prepare('SELECT title FROM watch_history ORDER BY title')
+      .all() as Array<{ title: string }>;
+    expect(titles.map((r) => r.title)).toEqual(
+      expect.arrayContaining(['本地片', '在线片', '在线电影'])
+    );
+    expect(titles).toHaveLength(3);
+    expect(titles.map((r) => r.title)).not.toContain('本地歌');
+
+    const remaining = db
+      .prepare('SELECT position FROM playback_progress')
+      .all() as Array<{ position: number }>;
+    expect(remaining).toEqual([{ position: 600 }]);
     db.close();
   });
 });
@@ -229,7 +285,7 @@ describe('getWatchHistory localOnly filter', () => {
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(10);
+    expect(getVersion(db)).toBe(11);
     const tables = tableNames(db);
     for (const table of CATALOG_TABLES) expect(tables).toContain(table);
     for (const table of LEGACY_TABLES) expect(tables).toContain(table);
@@ -258,7 +314,7 @@ describe('catalog migrations (005)', () => {
 
     // Reopen through the normal path: 005 + 006 both apply (append-only chain).
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(10);
+    expect(getVersion(db)).toBe(11);
     expect((db.prepare('SELECT COUNT(*) AS n FROM local_media').get() as { n: number }).n).toBe(1);
     expect((db.prepare('SELECT position FROM playback_progress').get() as { position: number }).position).toBe(600);
 

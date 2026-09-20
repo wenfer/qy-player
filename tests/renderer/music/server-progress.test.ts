@@ -2,12 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * 内置引擎服务器音乐进度/续播对齐（QYP3-038）。
+ * 内置引擎服务器音乐进度（QYP3-038）。
  *
- * webaudio 播放不经 PLAYER.LOAD_FILE，Sessions/Playing 系列与服务器续播
- * 位置会整体丢失。修复后：服务器曲目起播先 START_SERVER_SESSION 拿
- * playSessionId，节流进度带同一 id 回传；本地/WebDAV 仍走 REPORT_PROGRESS
- * （WebDAV 带 mediaType:'webdav' 落对续播键）；stop() 收尾走 Stopped。
+ * webaudio 播放不经 PLAYER.LOAD_FILE，Sessions/Playing 系列会整体丢失。
+ * 修复后：服务器曲目起播先 START_SERVER_SESSION 拿 playSessionId，节流进度
+ * 带同一 id 回传；stop() 收尾走 Stopped。
+ *
+ * QYP3-053 起：**本地/WebDAV 不再上报播放进度**（音乐不进播放历史），改为
+ * 写一条"当前播放的音乐"（SET_NOW_PLAYING）——服务器回传照旧。
  */
 
 const h = vi.hoisted(() => ({
@@ -55,7 +57,7 @@ const api = {
   startMusicServerSession: vi.fn(() => Promise.resolve({ ok: true, data: { playSessionId: 'ps-1' } })),
   // 参数签名要显式声明，否则 mock.calls 的元组是 []（取不到第 1 参）
   reportMusicServerProgress: vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true })),
-  reportMusicProgress: vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true })),
+  setNowPlaying: vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true })),
 };
 
 vi.stubGlobal('electronAPI', api);
@@ -139,7 +141,7 @@ describe('server music progress parity (QYP3-038)', () => {
     });
 
     // 节流窗口（10s）过后，onTime 驱动的上报必须带上同一 playSessionId
-    vi.setSystemTime(1_000_000 + 10_001);
+    vi.setSystemTime(1000000 + 10_001); // 每个用例独立的时间基（模块级节流哨兵跨用例存活）
     (h.engine.instance.onTime as (p: number, d: number) => void)(30, 200);
     await flushMicrotasks();
     expect(api.reportMusicServerProgress).toHaveBeenCalledWith(
@@ -154,9 +156,13 @@ describe('server music progress parity (QYP3-038)', () => {
     );
     const firstCall = api.reportMusicServerProgress.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(firstCall[0].isStopped).toBeUndefined();
+    // 服务器曲目同样写"当前播放的音乐"（恢复播放条用）
+    expect(api.setNowPlaying).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'server', serverId: 7, itemId: 'item-1', position: 30 })
+    );
   });
 
-  it('local tracks never open a server session and keep the local report path', async () => {
+  it('local tracks never open a server session and only record the now-playing state', async () => {
     api.resolvePlayback.mockResolvedValue({
       ok: true,
       data: {
@@ -172,16 +178,23 @@ describe('server music progress parity (QYP3-038)', () => {
     await flushMicrotasks();
 
     expect(api.startMusicServerSession).not.toHaveBeenCalled();
-    vi.setSystemTime(1_000_000 + 10_001);
+    vi.setSystemTime(2000000 + 10_001); // 每个用例独立的时间基（模块级节流哨兵跨用例存活）
     (h.engine.instance.onTime as (p: number, d: number) => void)(15, 200);
     await flushMicrotasks();
-    expect(api.reportMusicProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ mediaId: '/music/a.mp3', mediaType: 'local' })
+    // QYP3-053：不再落播放历史，只记"当前播放的音乐"（本地按 sourceId+trackId 定位）
+    expect(api.setNowPlaying).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'track',
+        sourceId: 5,
+        trackId: 1,
+        title: '曲1',
+        position: 15,
+      })
     );
     expect(api.reportMusicServerProgress).not.toHaveBeenCalled();
   });
 
-  it('webdav tracks report through the webdav progress key', async () => {
+  it('webdav tracks record the same now-playing state (no local progress rows)', async () => {
     api.resolvePlayback.mockResolvedValue({
       ok: true,
       data: {
@@ -197,12 +210,13 @@ describe('server music progress parity (QYP3-038)', () => {
     await flushMicrotasks();
 
     expect(api.startMusicServerSession).not.toHaveBeenCalled();
-    vi.setSystemTime(1_000_000 + 10_001);
+    vi.setSystemTime(3000000 + 10_001); // 每个用例独立的时间基（模块级节流哨兵跨用例存活）
     (h.engine.instance.onTime as (p: number, d: number) => void)(12, 200);
     await flushMicrotasks();
-    expect(api.reportMusicProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ mediaId: '3:Music/a.flac', mediaType: 'webdav' })
+    expect(api.setNowPlaying).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'track', sourceId: 5, trackId: 2, position: 12 })
     );
+    expect(api.reportMusicServerProgress).not.toHaveBeenCalled();
   });
 
   it('stop() flushes a final Stopped for the server track', async () => {
@@ -219,7 +233,7 @@ describe('server music progress parity (QYP3-038)', () => {
 
     await useMusicPlaybackStore.getState().playQueue([serverTrack('item-1', '云歌')], 0);
     await flushMicrotasks();
-    vi.setSystemTime(1_000_000 + 10_001);
+    vi.setSystemTime(4000000 + 10_001); // 每个用例独立的时间基（模块级节流哨兵跨用例存活）
     (h.engine.instance.onTime as (p: number, d: number) => void)(50, 200);
     await flushMicrotasks();
 

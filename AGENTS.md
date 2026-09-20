@@ -52,15 +52,16 @@
 
 数据流要点：
 - **播放**：renderer 调 `playerLoadFile(url, startPos, headers, mediaContext)` → IPC → `PlaybackStateManager.setCurrentMedia(...)` → mpv `loadfile`
-- **进度**：主进程每 10s 从内存态保存（读 `player.getState()`，不走 IPC）→ 本地 SQLite + 经 `reportProgress` 回传 Emby/Jellyfin（`/Sessions/Playing/Progress|Stopped`）
-- **历史**：`watch_history` 表按 `(media_type, media_id)` upsert；剧集记录含 `series_name/season_number/episode_number`
-- **续播**：位置/原因只由 `playback-state/resume-resolver.ts` 纯函数决定（30s/90%/看完下一集/重播）——renderer 不得复制算法；「从头播放」显式传 0（LOAD_FILE 区分显式 0 与未指定）
+- **进度**：主进程每 10s 从内存态保存（读 `player.getState()`，不走 IPC）→ 本地 SQLite + 经 `reportProgress` 回传 Emby/Jellyfin（`/Sessions/Playing/Progress|Stopped`）。**音乐例外**（QYP3-053）：`PlaybackStateManager` 的 `isMusic` 门禁（接 `isMpvMusicActive()`）跳过本地两张表，只保留服务器回传
+- **历史**：`watch_history` 表按 `(media_type, media_id)` upsert；剧集记录含 `series_name/season_number/episode_number`。**音乐不进历史**（QYP3-053，migration 011 清过存量）
+- **续播**：位置/原因只由 `playback-state/resume-resolver.ts` 纯函数决定（30s/90%/看完下一集/重播）——renderer 不得复制算法；「从头播放」显式传 0（LOAD_FILE 区分显式 0 与未指定）。**音乐没有 per-track 续播**（QYP3-053：`resolveMusicResumeTarget` 已删，音乐分支 `startPosition` 恒为 0）；音乐只有"当前播放状态"用于恢复播放条
+- **当前播放的音乐**（QYP3-053）：`playback-state/now-playing.ts` 在 `app_config` 里存**一条**记录（曲目 + 进度，本地按 `(sourceId, trackId)`、服务器按 `(serverId, itemId)` 定位，不存 path/绝对路径）。渲染层经 `MUSIC.SET_NOW_PLAYING`（节流 5s，暂停/跳曲/停止立即）写入，启动时 `MUSIC.GET_NOW_PLAYING` 读回 → `NowPlayingHost` 恢复播放条（**engine 保持 null，不自动出声**）。恢复态**不算音乐会话**（否则会误触自动精简、抢走全局媒体键），点播放走 `resumeRestored()` 从上次位置起播
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（转码/CUE/兼容性优先/非直解格式 → mpv；spectrum-first 且直连格式 → renderer 引擎——QYP3-037 起服务器/WebDAV 音频经 `qy-stream://` 认证流代理也走 renderer 引擎，`sourceKind` 不再强制 mpv）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次；引擎队列**按需懒解析**单曲 URL，服务器整队预解析是 N 次网络请求）
 - **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId
-- **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）
+- **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）。**恢复态（`restored` 为 true 而 `engine` 为 null）不算会话**（QYP3-053）：`CompactModeHost`/媒体键/自动精简都只看 `engine`，播放条与内容区留白另看 `restored`
 - **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默
 - **曲目时长**（QYP3-052）：`music_tracks.duration` 有两条来源，**都不要拆**——
   ① 扫描期 `library-scanner/tag-parser.ts` 从文件头解析（FLAC STREAMINFO / m4a mvhd /
@@ -229,15 +230,15 @@
   引擎队列**按需懒解析**单曲 URL：解析结果非 webaudio（NEEDS_MPV）→ 服务器
   曲目直接兜底 mpv（`serverQueue/serverIndex` 已随 webaudio 会话记录，mpv 可
   继续推进队列）；本地/WebDAV 先跳下一首、整队失败才兜底（防 repeat=all 空转）
-- **服务器音乐的进度/续播靠两条专用 IPC，别删**（QYP3-038）。webaudio 播放
-  不经 LOAD_FILE，`MUSIC.START_SERVER_SESSION`（起播报告 Sessions/Playing，
+- **服务器音乐的进度靠两条专用 IPC**（QYP3-038/053）。webaudio 播放不经
+  LOAD_FILE，`MUSIC.START_SERVER_SESSION`（起播报告 Sessions/Playing，
   记 `playSessionId`）与 `MUSIC.REPORT_SERVER_PROGRESS`（节流 Progress /
-  收尾 Stopped + 本地续播键）补齐服务器侧；收尾一律 Stopped（Emby 仅在
-  Stopped 时把 PositionTicks 写入 UserData），是否标记看完由位置比率判定。
-  本地/WebDAV 走 `MUSIC.REPORT_PROGRESS`（WebDAV 带 `mediaType:'webdav'`，
-  键 `<sourceId>:<path>`——解析器的续播读取已同步修正，此前误读 'local' 域）。
+  收尾 Stopped）补齐服务器侧；收尾一律 Stopped（Emby 仅在 Stopped 时把
+  PositionTicks 写入 UserData），是否标记看完由位置比率判定。**这两个 handler
+  只管服务器回传**——QYP3-053 起不再写本地两表（音乐不进播放历史；本地/WebDAV
+  落 `MUSIC.SET_NOW_PLAYING` 的"当前播放的音乐"一条）。
   队列条目的权威 `mediaId`/`mediaSourceId` 来自解析结果的 `mediaContext`
-  回填（懒解析曲子在 resolver 里回填），进度与 Sessions 回传都从这取
+  回填（懒解析曲子在 resolver 里回填），Sessions 回传从这取
 - **mpv IPC 连接要容忍启动竞态**（QYP3-033）。`MpvProcessManager.start` 只等
   socket 文件出现，而文件由 `bind()` 创建、`listen()` 之后才可连接；两者之间
   connect 会 `ECONNREFUSED`（首个 loadfile 直接报错）。`MpvIpcClient.connect`

@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 import { selectAudioEngine } from '../playback-engine/engine-selector';
-import { resolveMusicResumeTarget } from '../playback-state/resume-resolver';
 import { getAdapterForSource } from '../catalog/source-service';
 import type {
   PlaybackResolution,
@@ -332,16 +331,10 @@ export async function resolvePlayback(
             preference: deps.getEnginePreference?.() ?? 'spectrum-first',
           });
 
-    // 音乐续播（QYP3-014）：无 30s 阈值；>90% 从头重播。
-    // QYP3-037：WebDAV 的进度键是 `<sourceId>:<path>`（mpv 引擎经
-    // PlaybackStateManager 落的也是这个键）；此前误读 'local' 键，
-    // WebDAV 音乐续播从不生效。
-    const progressKey = source.kind === 'webdav' ? `${sourceId}:${track.path}` : track.path;
-    const saved = deps.storage.getProgress(
-      source.kind === 'webdav' ? 'webdav' : 'local',
-      progressKey
-    );
-    const startPosition = resolveMusicResumeTarget(saved);
+    // 音乐续播已取消（QYP3-053）：音频不再有 per-track 进度，任何入口
+    // 都从头播；"上次在放哪首/放到哪"只用于恢复播放条（恢复后的起播位置
+    // 由渲染层显式传 startPosition，见 MusicMiniBar）。
+    const startPosition = 0;
 
     const mediaContext = {
       mediaType: 'local',

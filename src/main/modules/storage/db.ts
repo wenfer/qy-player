@@ -358,6 +358,41 @@ const MIGRATIONS = [
   `
   UPDATE library_sources SET purpose = 'video' WHERE purpose <> 'music';
   `,
+
+  // 011（QYP3-053）：音乐不再进播放历史——清掉存量里的音频行。
+  // 判定只看扩展名（后缀表与 library-scanner/classifier.ts 的
+  // AUDIO_EXTENSIONS 对齐，lower() 兼顾 .APE/.FLAC 这类大写；按长度分组
+  // 取末尾 N 字符，比二十多条 LIKE 短得多）：
+  // watch_history 的 local/webdav 键是路径/相对路径；playback_progress 的
+  // local 键关联 local_media.path。**服务器（jellyfin/emby）行分不出音视频，
+  // 一律不动**——用户库里那几条本来就是视频，误删才是真损失。
+  // catalog_user_state（WebDAV 目录域）不含音乐，不动。
+  `
+  DELETE FROM watch_history
+   WHERE media_type IN ('local', 'webdav')
+     AND (
+       lower(substr(COALESCE(NULLIF(path, ''), media_id), -5))
+         IN ('.flac', '.opus', '.aiff', '.alac')
+       OR lower(substr(COALESCE(NULLIF(path, ''), media_id), -4))
+         IN ('.mp3', '.m4a', '.aac', '.ogg', '.oga', '.wav', '.wma', '.ape',
+             '.tta', '.tak', '.aif', '.dsf', '.dff', '.mpc', '.mka', '.ac3',
+             '.dts', '.amr')
+       OR lower(substr(COALESCE(NULLIF(path, ''), media_id), -3))
+         IN ('.wv', '.au', '.ra')
+     );
+
+  DELETE FROM playback_progress
+   WHERE media_type = 'local'
+     AND local_media_id IN (
+       SELECT id FROM local_media
+        WHERE lower(substr(path, -5)) IN ('.flac', '.opus', '.aiff', '.alac')
+           OR lower(substr(path, -4))
+              IN ('.mp3', '.m4a', '.aac', '.ogg', '.oga', '.wav', '.wma', '.ape',
+                  '.tta', '.tak', '.aif', '.dsf', '.dff', '.mpc', '.mka', '.ac3',
+                  '.dts', '.amr')
+           OR lower(substr(path, -3)) IN ('.wv', '.au', '.ra')
+     );
+  `,
 ];
 
 

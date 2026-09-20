@@ -32,10 +32,10 @@ afterAll(() => {
  * 停在 009 的库），这里只管应用层读写与白名单。
  */
 describe('source purpose (QYP3-039/041)', () => {
-  it('reaches schema version 10 on a fresh database', () => {
+  it('reaches schema version 11 on a fresh database', () => {
     const db = openDatabaseAtPath(makeDbPath());
     const version = (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number }).version;
-    expect(version).toBe(10);
+    expect(version).toBe(11);
     db.close();
   });
 
