@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { PlayerCore } from './modules/player-core';
@@ -9,6 +9,19 @@ import { closeDeskLyrics } from './modules/ui-shell/desk-lyrics';
 import { startResourceGuard, stopResourceGuard } from './modules/ui-shell/resource-guard';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts, type ShortcutOverrides } from './modules/ui-shell/shortcuts';
 import { findMpvBindingConflicts, writeMpvInputConf, getGeneratedConfPath, type MpvBindingOverrides } from './modules/ui-shell/mpv-bindings';
+import {
+  compactBounds,
+  minSizeForProfile,
+  musicBounds,
+} from './modules/ui-shell/compact-window';
+import {
+  attachWindowMemory,
+  flushWindowMemory,
+  readWindowMemory,
+  resolveRestoreBounds,
+  restoreWindowProfile,
+  type WindowMemory,
+} from './modules/ui-shell/window-state';
 import { isMpvMusicActive } from './modules/playback-engine/music-active';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
@@ -27,11 +40,34 @@ function createWindow(): BrowserWindow {
   // Remove the default menu bar (File/Edit/View...) - cleaner player UI
   Menu.setApplicationMenu(null);
 
+  // 窗口与模式记忆（QYP3-051）：上次是影视/音乐/精简浮窗、以及正常几何，都在
+  // 启动时原样恢复。记忆损坏或首次启动都会回落到"主屏居中 1600×900"。
+  const storage = createStorage(getDatabase());
+  const saved = readWindowMemory(storage);
+  const workAreas = screen.getAllDisplays().map((d) => d.workArea);
+  const normalBounds = resolveRestoreBounds(saved?.bounds ?? null, workAreas);
+  const memory: WindowMemory = {
+    profile: saved?.profile ?? 'normal',
+    music: saved?.music ?? false,
+    bounds: normalBounds,
+    maximized: saved?.maximized ?? false,
+  };
+  // 音乐/精简浮窗直接以对应尺寸出现（渲染层稍后按 GET_PROFILE 回填界面）
+  const displayArea = screen.getDisplayMatching(normalBounds).workArea;
+  const initialBounds =
+    memory.profile === 'compact'
+      ? compactBounds(displayArea)
+      : memory.profile === 'music'
+        ? musicBounds(displayArea)
+        : normalBounds;
+  // 最小尺寸必须按 profile 给：构造时若用 1280×800 的下限，小窗会被顶回去
+  const [minWidth, minHeight] = minSizeForProfile(memory.profile);
+
   mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 900,
-    minWidth: 1280,
-    minHeight: 800,
+    ...initialBounds,
+    minWidth,
+    minHeight,
+    resizable: memory.profile !== 'compact', // 精简浮窗固定尺寸
     title: 'QY Player',
     darkTheme: true,
     show: false,
@@ -45,6 +81,10 @@ function createWindow(): BrowserWindow {
       sandbox: false,
     },
   });
+
+  // 记忆接线必须在套用 profile 之前：套用那一刻就会把模式写回配置
+  attachWindowMemory(mainWindow, storage, memory);
+  restoreWindowProfile(mainWindow, memory);
 
   // Forward player state changes to renderer
   //
@@ -122,6 +162,9 @@ function createWindow(): BrowserWindow {
   });
 
   mainWindow.once('ready-to-show', () => {
+    // 记忆里上次是最大化：先 maximize 再 show（隐藏窗口上个别 WM 可能不生效，
+    // 已列入 docs/TARGET-VERIFY.md）
+    if (memory.profile === 'normal' && memory.maximized) mainWindow?.maximize();
     mainWindow?.show();
   });
 
@@ -334,6 +377,8 @@ app.on('will-quit', async () => {
   // 离线频谱（QYP3-050）：同步杀掉正在跑的 ffmpeg 解码（will-quit 不 await，
   // 所以这里必须是同步的 SIGKILL，不能等 Promise）
   cancelMusicSpectrum();
+  // 窗口记忆兜底（QYP3-051）：'close' 里已经落过盘，这里再同步补一次
+  flushWindowMemory();
   // Final progress save before exit
   if (playbackStateManager) {
     playbackStateManager.destroy();

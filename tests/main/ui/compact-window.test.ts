@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * 精简浮窗几何（QYP3-035）：主窗口原地缩到指定显示器工作区的右上角。
@@ -15,6 +15,8 @@ import {
   musicBounds,
   setCompactMode,
   setMusicMode,
+  setNormalBoundsSeed,
+  setProfileChangeListener,
   getWindowProfile,
   COMPACT_HEIGHT,
   COMPACT_MARGIN,
@@ -71,13 +73,18 @@ function fakeWin(bounds = { x: 100, y: 100, width: 1600, height: 900 }) {
     bounds: { ...bounds },
     resizable: true,
     alwaysOnTop: false,
+    maximized: false,
     calls,
     isDestroyed: () => false,
     isResizable: () => win.resizable,
     isAlwaysOnTop: () => win.alwaysOnTop,
-    isMaximized: () => false,
-    unmaximize: () => undefined,
+    isMaximized: () => win.maximized,
+    unmaximize: () => {
+      win.maximized = false;
+    },
     getBounds: () => ({ ...win.bounds }),
+    // 未最大化时"正常几何"就是当前 bounds
+    getNormalBounds: () => ({ ...win.bounds }),
     setBounds: (b: Rectangle) => {
       win.bounds = { ...b };
       calls.push(`bounds:${b.width}x${b.height}`);
@@ -90,14 +97,22 @@ function fakeWin(bounds = { x: 100, y: 100, width: 1600, height: 900 }) {
     },
     setMinimumSize: (w: number, h: number) => calls.push(`min:${w}x${h}`),
   };
-  return win as unknown as BrowserWindow & { bounds: Rectangle; calls: string[] };
+  return win as unknown as BrowserWindow & {
+    bounds: Rectangle;
+    calls: string[];
+    maximized: boolean;
+  };
 }
 
-/** 几何状态是模块级的：用例之间先归位，免得互相污染。 */
+/** 几何/形态状态是模块级的：用例之间先归位，免得互相污染。 */
 function resetProfile(win: BrowserWindow): void {
   setCompactMode(win, false);
   setMusicMode(win, false);
 }
+
+beforeEach(() => {
+  setProfileChangeListener(null);
+});
 
 describe('profile 回填与叠加（QYP3-044 修复）', () => {
   it('reload 后主进程仍记得浮窗/竖屏，且重复下发不再挪动窗口', () => {
@@ -125,5 +140,63 @@ describe('profile 回填与叠加（QYP3-044 修复）', () => {
     expect(getWindowProfile()).toEqual({ compact: false, music: true });
     setMusicMode(win, false);
     expect(win.bounds.width).toBe(1600); // 回到进音乐模式前的尺寸
+  });
+});
+
+describe('启动恢复与记忆通知（QYP3-051）', () => {
+  const remembered = { x: 0, y: 30, width: 1366, height: 768 };
+
+  it('退出音乐模式回到记忆里的正常几何，而不是构造窗口时的尺寸', () => {
+    const win = fakeWin({ x: 40, y: 60, width: 1000, height: 700 }); // 构造参数
+    resetProfile(win);
+    setNormalBoundsSeed(remembered);
+    setMusicMode(win, true);
+    expect(win.bounds.width).toBe(MUSIC_WIDTH);
+    setMusicMode(win, false);
+    expect(win.bounds).toEqual(remembered);
+  });
+
+  it('退出精简浮窗同样回到记忆里的正常几何', () => {
+    const win = fakeWin({ x: 40, y: 60, width: 1000, height: 700 });
+    resetProfile(win);
+    setNormalBoundsSeed(remembered);
+    setCompactMode(win, true);
+    expect(win.bounds.width).toBe(COMPACT_WIDTH);
+    setCompactMode(win, false);
+    expect(win.bounds).toEqual(remembered);
+  });
+
+  it('种子只在没有快照时生效（进过小窗之后不该被覆盖）', () => {
+    const win = fakeWin();
+    resetProfile(win);
+    setCompactMode(win, true); // 真快照 = 1600×900
+    setNormalBoundsSeed(remembered);
+    setCompactMode(win, false);
+    expect(win.bounds.width).toBe(1600);
+  });
+
+  it('形态变化会通知记忆写入方（profile + music）', () => {
+    const win = fakeWin();
+    resetProfile(win);
+    const seen: Array<{ profile: string; music: boolean }> = [];
+    setProfileChangeListener((s) => seen.push(s));
+    setCompactMode(win, true);
+    setMusicMode(win, true);
+    expect(seen).toEqual([
+      { profile: 'compact', music: false },
+      { profile: 'compact', music: true },
+    ]);
+    setProfileChangeListener(null);
+  });
+
+  it('幂等的重复下发不会重复通知', () => {
+    const win = fakeWin();
+    resetProfile(win);
+    const listener = vi.fn();
+    setProfileChangeListener(listener);
+    setMusicMode(win, true);
+    setMusicMode(win, true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    setProfileChangeListener(null);
   });
 });
