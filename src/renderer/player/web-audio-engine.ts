@@ -11,6 +11,8 @@
  */
 
 import { isFlacUrl, stripFlacPicture } from './flac-strip';
+// 与 mpv 离线频谱同一套对数分带数学（pcm-fft 是纯计算模块，无 IO 无依赖）
+import { bandBinRanges } from '../../main/modules/music-spectrum/pcm-fft';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
@@ -164,6 +166,15 @@ export class WebAudioEngine {
   private readonly gain: GainNode | null = null;
   private readonly queue = new PlaybackQueue();
   private freqData: Uint8Array | null = null;
+  /**
+   * 对数分带后的频谱（QYP3-057）。AnalyserNode 的 bin 是 0~22kHz **线性**
+   * 等宽的，音乐能量几乎全在低频——直接等宽下采样会让左边的柱子永远比
+   * 右边活跃。这里按 40Hz~8kHz 对数分带取峰值（与 mpv 离线频谱同一套
+   * `bandBinRanges`），两个引擎的频谱分布才一致。
+   */
+  private static readonly SPECTRUM_BANDS = 64;
+  private bandedFreq: Uint8Array | null = null;
+  private bandRanges: Int32Array | null = null;
   /** 时域波形缓冲（getByteTimeDomainData；fftSize 长度，值中心 128=静音）。 */
   private waveData: Uint8Array | null = null;
   /** 上次剥离封面生成的 blob URL，换曲/自救前释放，避免内存泄漏。 */
@@ -197,6 +208,16 @@ export class WebAudioEngine {
         this.analyser = analyser;
         this.freqData = new Uint8Array(analyser.frequencyBinCount);
         this.waveData = new Uint8Array(analyser.fftSize);
+        // 对数分带边界（fake/测试环境没有 sampleRate 时按 44.1k 兜底）
+        const sampleRate = this.ctx.sampleRate || 44100;
+        this.bandRanges = bandBinRanges(
+          sampleRate,
+          analyser.fftSize,
+          WebAudioEngine.SPECTRUM_BANDS,
+          40,
+          8000
+        );
+        this.bandedFreq = new Uint8Array(WebAudioEngine.SPECTRUM_BANDS);
         let node: AudioNode = this.source;
         // 取样点必须真的在链路上（QYP3-045 修复）：analyser 建了却没接进图时，
         // 它读的是静音——频域恒全 0、时域恒 128，可视化就一直画"无真实数据"
@@ -349,11 +370,35 @@ export class WebAudioEngine {
     });
   }
 
-  /** 频谱快照（UI 拾音器 ≤30fps 拉取；无图返回 null）。 */
+  /**
+   * 频谱快照（UI 拾音器 ≤30fps 拉取；无图返回 null）。
+   *
+   * 返回的是**对数分带**后的峰值（QYP3-057）：40Hz~8kHz 均匀分布 64 带，
+   * 每带取 bin 峰值（字节刻度不变，归一化仍由画图方做）。与 mpv 音源的
+   * 离线频谱同一分布——两个引擎的柱状图左右能量分布一致。
+   */
   getSpectrum(): Uint8Array | null {
     if (!this.analyser || !this.freqData) return null;
     this.analyser.getByteFrequencyData(this.freqData);
-    return this.freqData;
+    return this.bandSpectrum();
+  }
+
+  /** 线性 bin → 对数频带峰值（每带取 max，与离线频谱的聚合方式一致）。 */
+  private bandSpectrum(): Uint8Array {
+    const raw = this.freqData;
+    const ranges = this.bandRanges;
+    const out = this.bandedFreq;
+    if (!raw || !ranges || !out) return raw!;
+    for (let b = 0; b < out.length; b += 1) {
+      const lo = ranges[b * 2];
+      const hi = ranges[b * 2 + 1];
+      let peak = 0;
+      for (let k = lo; k < hi && k < raw.length; k += 1) {
+        if (raw[k] > peak) peak = raw[k];
+      }
+      out[b] = peak;
+    }
+    return out;
   }
 
   /**

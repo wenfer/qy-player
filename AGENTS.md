@@ -204,6 +204,11 @@
   路径一行不改**；ffmpeg 探测不到（`~/.local/bin/ffmpeg` → PATH）就静默降级成
   静音底线——所以"看不见频谱"永远是可接受的降级，不是错误。注意 mpv 0.32 的
   **编码模式是坏的**（`--o=` 每帧 `error encoding`，实测），别想拿它当 ffmpeg 用
+  **QYP3-057 起**：两个引擎的频谱都是**对数分带**（40Hz~8kHz）。内置引擎的
+  `getSpectrum()` 在引擎内把线性 bin 按同一套 `bandBinRanges`（复用 pcm-fft）
+  聚成 **64 带**峰值再返回——AnalyserNode 的 bin 是线性等宽的，画图方若按 bin
+  线性等宽下采样，左边（低频能量区）永远比右边活跃；**勿再改回按 bin 直通**。
+  画图方的 `downsamplePeaks` 对已分带的数据做线性下采样 = 柱子在 log 频轴等距
 - **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

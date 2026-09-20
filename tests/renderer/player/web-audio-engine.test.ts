@@ -242,10 +242,52 @@ describe('WebAudioEngine (QYP3-010)', () => {
     void engine.playQueue([makeTrack(1)], 0, 'off', false);
     const gains = [3, 0, -2, 0, 0, 0, 0, 0, 1, 4];
     engine.setEq(gains);
-    // 通过 spectrum 探针确认 analyser 存在
+    // 通过 spectrum 探针确认 analyser 存在（fake 全 bin 填 7 → 分带后每带峰值 7）
     const spectrum = engine.getSpectrum();
     expect(spectrum).not.toBeNull();
     expect(spectrum![0]).toBe(7);
+  });
+
+  it('spectrum is log-banded (QYP3-057): bass gets few bins, mids get many', () => {
+    // 独立 fake：sampleRate 44100、按 bin 下标放两个标记音
+    // binHz = 44100/2048 ≈ 21.53Hz。bin 2 ≈ 43Hz（第 0 带 40~43.4Hz）；
+    // bin 300 ≈ 6.46kHz（第 61 带 6.24~6.82kHz）
+    const byBin = (arr: Uint8Array): void => {
+      for (let i = 0; i < arr.length; i += 1) arr[i] = i === 2 ? 200 : i === 300 ? 150 : 0;
+    };
+    const engine = new WebAudioEngine({
+      createElement: () => fakeAudio(),
+      createContext: () =>
+        ({
+          sampleRate: 44100,
+          state: 'running',
+          createMediaElementSource: vi.fn(() => ({ connect: vi.fn() })),
+          createAnalyser: vi.fn(() => ({
+            fftSize: 2048,
+            smoothingTimeConstant: 0,
+            frequencyBinCount: 1024,
+            getByteFrequencyData: byBin,
+            getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
+            connect: vi.fn(),
+          })),
+          createBiquadFilter: vi.fn(() => ({
+            type: '',
+            frequency: { value: 0 },
+            gain: { value: 0 },
+            connect: vi.fn(),
+          })),
+          createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn() })),
+          destination: {},
+          resume: vi.fn(async () => undefined),
+        }) as unknown as AudioContext,
+    });
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    const spectrum = engine.getSpectrum();
+    expect(spectrum).not.toBeNull();
+    expect(spectrum!.length).toBe(64); // 对数分带数（与画图方解耦）
+    expect(spectrum![0]).toBe(200); // bin 2 落在第 0 带
+    expect(spectrum![61]).toBe(150); // bin 300 落在第 61 带
+    expect(spectrum![63]).toBe(0); // 8kHz 以上没有能量
   });
 
   it('spectrum stays null-safe when the graph could not build', () => {
