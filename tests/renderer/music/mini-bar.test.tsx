@@ -18,7 +18,10 @@ const api = {
   onMusicSessionEnd: vi.fn(() => () => undefined),
   onMusicCommand: vi.fn(() => () => undefined),
   getMusicFavorites: vi.fn(() => Promise.resolve({ ok: true, data: { tracks: [] } })),
-  getSettings: vi.fn(() => Promise.resolve({ ok: true, data: null })),
+  getSettings: vi.fn((_key: string): Promise<{ ok: boolean; data: unknown }> =>
+    Promise.resolve({ ok: true, data: null })
+  ),
+  setSettings: vi.fn(() => Promise.resolve({ ok: true })),
   pushDeskLyricsState: vi.fn(() => Promise.resolve({ ok: true })),
   setMusicEngineActive: vi.fn(() => Promise.resolve({ ok: true })),
   setCompactMode: vi.fn(() => Promise.resolve({ ok: true })),
@@ -44,6 +47,10 @@ const serverTrack = { ...localTrack, id: 0, title: '以父之名', url: 'http://
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // getSettings 的实现会被单个用例按 key 改写，这里恢复默认，避免串味
+  api.getSettings.mockImplementation((_key: string) =>
+    Promise.resolve({ ok: true, data: null })
+  );
   useCompactModeStore.setState({ compact: false });
   useSleepTimerStore.setState({ active: false, minutes: null, expiresAt: null, remainingMs: null });
   useMusicPlaybackStore.setState({
@@ -58,6 +65,44 @@ beforeEach(() => {
     queueSnapshot: [],
     serverQueue: [],
     serverIndex: -1,
+  });
+});
+
+describe('mini bar spectrum toggle (QYP3-048)', () => {
+  function mountPlaying(): void {
+    useMusicPlaybackStore.setState({ engine: 'mpv', current: serverTrack, isPlaying: true });
+    render(<MusicMiniBar />);
+  }
+
+  it('hides the spectrum on click and remembers the choice', async () => {
+    mountPlaying();
+    await screen.findByText('以父之名');
+    expect(document.querySelector('canvas')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('隐藏频谱'));
+    await waitFor(() => expect(document.querySelector('canvas')).toBeNull());
+    expect(api.setSettings).toHaveBeenCalledWith('playback.showSpectrum', false);
+    expect(screen.getByLabelText('显示频谱')).toBeTruthy();
+  });
+
+  it('shows it again from the same button', async () => {
+    mountPlaying();
+    await screen.findByText('以父之名');
+    fireEvent.click(screen.getByLabelText('隐藏频谱'));
+    await waitFor(() => expect(document.querySelector('canvas')).toBeNull());
+    fireEvent.click(screen.getByLabelText('显示频谱'));
+    await waitFor(() => expect(api.setSettings).toHaveBeenCalledWith('playback.showSpectrum', true));
+    expect(document.querySelector('canvas')).toBeTruthy();
+  });
+
+  it('starts hidden when the persisted choice says so', async () => {
+    api.getSettings.mockImplementation((key: string) =>
+      Promise.resolve({ ok: true, data: key === 'playback.showSpectrum' ? false : null })
+    );
+    mountPlaying();
+    await screen.findByText('以父之名');
+    await waitFor(() => expect(screen.getByLabelText('显示频谱')).toBeTruthy());
+    expect(document.querySelector('canvas')).toBeNull();
   });
 });
 

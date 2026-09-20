@@ -161,8 +161,13 @@
   同屏两个频谱）；瀑布声谱图与其持久化（`playback.spectrumChart`）已删除，
   只剩经典弹跳柱状一种。柱状绘制统一走 `Visualizer/bars-painter.ts`
   （分段 LED 柱 + 峰值帽，峰值帽按 `dt` 缓慢下落——`paint` 的 dt 必须在推进
-  `last` **之前**算，否则峰值帽永远不落）；`Visualizer`（48 柱/8 段，24px 高）
-  与 `SpectrumGraph`（56 柱/16 段）复用同一个 painter
+  `last` **之前**算，否则峰值帽永远不落）；`Visualizer`（48 柱/8 段）
+  与 `SpectrumGraph`（56 柱/16 段）复用同一个 painter。
+  **QYP3-048 起**：播放条里的拾音器高 32px（`MusicMiniBar` 的
+  `VISUALIZER_HEIGHT`），控制条上还有「显示/隐藏频谱」按钮（`Activity` 图标、
+  `aria-pressed`），开关持久化到 `playback.showSpectrum`（走 SETTINGS 的 JSON
+  对称契约，GET 回来是 boolean）——关掉时**不渲染 canvas**、rAF 也随之停，
+  不是"画成空白"
 - **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

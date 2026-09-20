@@ -1026,6 +1026,21 @@
 - 待目标机验证：只出现一个频谱、弹跳与峰值帽手感、24px 下分段不糊、
   精简浮窗与设置里都找不到瀑布入口——已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-048 频谱加高 + 播放条上的显隐开关 `[x]`
+- 诉求（用户）：频谱区域稍微加点高度；播放控件处增加一个是否显示频谱的按钮
+- 改动（`components/MusicMiniBar/index.tsx`）：
+  - 拾音器高度 24 → 32（`VISUALIZER_HEIGHT` 常量），LED 分段在老机分辨率下
+    也分得清；`App.tsx` 的 `pb-28` 让位空间仍够（整条约 98px）
+  - 控制条新增「显示/隐藏频谱」按钮（`Activity` 图标，放在歌词按钮左侧），
+    `aria-pressed` 反映当前态；关掉时整块 canvas 不渲染、rAF 随之停
+    （不是画成空白，也不再占 CPU）
+  - 开关持久化到 `playback.showSpectrum`，走 SETTINGS 的 JSON 对称契约
+    （GET 回来是 boolean，默认开）
+- Evidence: `mini-bar.test.tsx` 增 3 例（点一下收起并落库、再点展开、
+  持久化值说关就关不渲染 canvas）；typecheck 双配置 + 全量绿，三构建通过
+- 待目标机验证：32px 下弹跳柱观感、开关即时生效且重启后保持——
+  已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

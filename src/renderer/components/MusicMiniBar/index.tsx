@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
+import { Activity, Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
   useMusicPlaybackStore,
@@ -17,6 +17,9 @@ import Visualizer, { type VisualizerMode } from '../Visualizer';
  * `attachMusicMpvBridge` 写回（视频不会驱动本条）；歌词面板（QYP3-021）
  * 由本条的「词」按钮开合；拾音器（QYP3-023）按设置模式显示。
  */
+
+/** 拾音器高度（QYP3-048：从 24 抬到 32，LED 分段更看得清）。 */
+const VISUALIZER_HEIGHT = 32;
 
 /** 拾音器模式：off=关闭；auto 在 renderer 引擎下按频谱、否则波形。 */
 function resolveMode(setting: string, engine: string | null): VisualizerMode | null {
@@ -36,6 +39,8 @@ export default function MusicMiniBar() {
   const [mounted, setMounted] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [visualizer, setVisualizer] = useState<string>('auto');
+  // 频谱显隐（QYP3-048）：控制条上随时可关，默认开，选择持久化
+  const [showSpectrum, setShowSpectrum] = useState(true);
   // 收藏集合（QYP3-013a）：全局收藏快捷键与迷你条共用同一份状态
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
   const addToast = useToastStore((s) => s.addToast);
@@ -98,6 +103,25 @@ export default function MusicMiniBar() {
         if (typeof value === 'string') setVisualizer(value);
       })
       .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    // 频谱显隐（QYP3-048）：JSON 对称——SET 字符串化、GET 由 decodeConfigValue 还原
+    void window.electronAPI
+      .getSettings('playback.showSpectrum')
+      .then((res) => {
+        const value = (res as { data?: unknown })?.data;
+        if (typeof value === 'boolean') setShowSpectrum(value);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const toggleSpectrum = useCallback((): void => {
+    setShowSpectrum((prev) => {
+      const next = !prev;
+      void window.electronAPI.setSettings('playback.showSpectrum', next).catch(() => undefined);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -172,7 +196,7 @@ export default function MusicMiniBar() {
       >
         {(() => {
           const mode = resolveMode(visualizer, playback.engine);
-          return mode ? (
+          return showSpectrum && mode ? (
             <Visualizer
               mode={mode}
               getSpectrum={playback.getSpectrum}
@@ -180,7 +204,7 @@ export default function MusicMiniBar() {
               isPlaying={playback.isPlaying}
               position={playback.position}
               duration={playback.duration}
-              height={24}
+              height={VISUALIZER_HEIGHT}
             />
           ) : null;
         })()}
@@ -248,6 +272,18 @@ export default function MusicMiniBar() {
         }`}
       >
         <Heart size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={toggleSpectrum}
+        aria-label={showSpectrum ? '隐藏频谱' : '显示频谱'}
+        aria-pressed={showSpectrum}
+        title={showSpectrum ? '隐藏频谱' : '显示频谱'}
+        className={`p-1.5 rounded-lg hover:bg-accent focus-ring ${
+          showSpectrum ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Activity size={16} />
       </button>
       <button
         type="button"
