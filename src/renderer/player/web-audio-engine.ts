@@ -191,12 +191,18 @@ export class WebAudioEngine {
     if (this.ctx && this.audio) {
       try {
         this.source = this.ctx.createMediaElementSource(this.audio);
-        this.analyser = this.ctx.createAnalyser();
-        this.analyser.fftSize = 2048;
-        this.analyser.smoothingTimeConstant = 0.8;
-        this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
-        this.waveData = new Uint8Array(this.analyser.fftSize);
+        const analyser = this.ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        this.analyser = analyser;
+        this.freqData = new Uint8Array(analyser.frequencyBinCount);
+        this.waveData = new Uint8Array(analyser.fftSize);
         let node: AudioNode = this.source;
+        // 取样点必须真的在链路上（QYP3-045 修复）：analyser 建了却没接进图时，
+        // 它读的是静音——频域恒全 0、时域恒 128，可视化就一直画"无真实数据"
+        // 的那条静态进度线（用户看到的就是一条直线）。
+        node.connect(analyser);
+        node = analyser;
         for (const freq of EQ_BANDS) {
           const f = this.ctx.createBiquadFilter();
           f.type = freq <= 350 ? 'lowshelf' : freq >= 9000 ? 'highshelf' : 'peaking';

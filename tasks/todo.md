@@ -983,6 +983,25 @@
   改 1 例（失败态改用曲目加载）；`music-library` 改 2 例（专辑网格要先切 tab、
   空态文案改「没有曲目」）；typecheck 双配置 + 全量绿，三构建通过
 
+### QYP3-046 频谱一直是一条直线（AnalyserNode 悬空）`[x]`
+- 诉求（用户）：频谱全都是一条直线，并无任何效果
+- 根因：`web-audio-engine` 构造时 `createAnalyser()` 了，却**从来没接进图**——
+  实际链路是 `source → EQ×10 → gain → destination`，analyser 悬空。
+  `getByteFrequencyData` 恒全 0、`getByteTimeDomainData` 恒 128，于是
+  `Visualizer` / `SpectrumGraph` 永远走"无真实数据"的静态进度线。
+  `git log -S "connect(this.analyser)"` 为空：这个节点自 QYP3-009 建图起就
+  没接过；QYP3-031 只补了 `AudioContext.resume()`（必要但不充分），所以"真频谱"
+  一直没真正生效过——测试里那条 "source → analyser → …" 用例只断言了队列状态，
+  没验连线，所以没兜住
+- 修复：`node.connect(analyser); node = analyser;`（取样点是链路第一跳，EQ 串在
+  它之后，与 AGENTS 里写的图一致）
+- Evidence: `web-audio-engine.test.ts` 增 1 例——用会记录连线的假上下文钉住
+  `source->analyser` 是第一跳、`analyser->filter` 存在、不存在绕过 analyser 的
+  `source->filter`、10 段 EQ 串成 9 条 `filter->filter`；typecheck 双配置 +
+  全量绿，三构建通过
+- 待目标机验证：本地 mp3 出真频谱/真波形、调均衡器频谱跟着变、mpv 源仍是
+  静态线（设计如此）——已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

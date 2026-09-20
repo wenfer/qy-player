@@ -139,7 +139,13 @@
   删。mpv 引擎（转码/CUE/兼容性优先/冷门格式）渲染层拿不到真实音频数据，
   **没有真实频谱**——只有随播放节拍起伏的降级波形（AGENTS.md 拾音器条目 +
   架构总览音乐会话段）
-- **真实波形/频谱只能来自 renderer 内置引擎（Web Audio）**（QYP3-033/037）。渲染层
+- **真实波形/频谱只能来自 renderer 内置引擎（Web Audio）**（QYP3-033/037），
+  且 **`AnalyserNode` 必须真的接进音频图**：`MediaElementSource → Analyser
+  (fftSize 2048) → 10×BiquadFilter → Gain → destination`。只 `createAnalyser()`
+  不 `connect()` 的话它读的是静音（频域恒全 0、时域恒 128），可视化会一直走
+  "无真实数据"的静态进度线——看起来就是"一条直线"（QYP3-045 修的就是这个：
+  analyser 自 QYP3-009 建图起就悬空，QYP3-031 只补了 AudioContext.resume，
+  不够）。改音频图后先确认连线，别只看"有没有创建"。渲染层
   的 AnalyserNode 同时给频域（`getSpectrum`，`getByteFrequencyData`）与时域
   （`getWaveform`，`getByteTimeDomainData`）真实数据；拾音器据此画真波形/频谱。
   mpv 0.32 **没有**暴露实时频谱/波形的 IPC 接口（已用 `strings` 核实：只有

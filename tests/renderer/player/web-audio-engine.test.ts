@@ -147,6 +147,35 @@ describe('PlaybackQueue (QYP3-010)', () => {
   });
 });
 
+/** 会记录连线的假上下文：用来钉住"analyser 必须在链路上"。 */
+function fakeCtxWithEdges(): { ctx: AudioContext; edges: string[] } {
+  const edges: string[] = [];
+  const node = (label: string, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+    const n: Record<string, unknown> = { label, ...extra };
+    n.connect = (target: unknown): void => {
+      edges.push(`${label}->${(target as { label?: string } | undefined)?.label ?? 'destination'}`);
+    };
+    return n;
+  };
+  const ctx = {
+    state: 'running',
+    createMediaElementSource: () => node('source'),
+    createAnalyser: () =>
+      node('analyser', {
+        fftSize: 2048,
+        smoothingTimeConstant: 0,
+        frequencyBinCount: 1024,
+        getByteFrequencyData: (arr: Uint8Array) => arr.fill(7),
+        getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
+      }),
+    createBiquadFilter: () => node('filter', { type: '', frequency: { value: 0 }, gain: { value: 0 } }),
+    createGain: () => node('gain', { gain: { value: 1 } }),
+    destination: { label: 'destination' },
+    resume: vi.fn(async () => undefined),
+  };
+  return { ctx: ctx as unknown as AudioContext, edges };
+}
+
 describe('WebAudioEngine (QYP3-010)', () => {
   function makeEngine(): { engine: WebAudioEngine; audio: FakeAudio; ctx: AudioContext } {
     const audio = fakeAudio();
@@ -163,6 +192,22 @@ describe('WebAudioEngine (QYP3-010)', () => {
     // 曲目切换只换 src（图单次构建）
     void engine.playQueue([makeTrack(1), makeTrack(2)], 0, 'off', false);
     expect(engine.queueState).toMatchObject({ length: 2, index: 0, currentTrackId: 1 });
+  });
+
+  it('connects the analyser into the graph (QYP3-045): 悬空的 analyser 只读到静音', () => {
+    const { ctx, edges } = fakeCtxWithEdges();
+    const engine = new WebAudioEngine({
+      createElement: () => fakeAudio(),
+      createContext: () => ctx,
+    });
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    // 取样点是链路第一跳；绕过它（source 直连 filter）频谱就恒为全 0
+    expect(edges[0]).toBe('source->analyser');
+    expect(edges).toContain('analyser->filter');
+    expect(edges.at(-1)).toBe('gain->destination');
+    expect(edges).not.toContain('source->filter');
+    // 10 段 EQ 串在 analyser 之后
+    expect(edges.filter((e) => e === 'filter->filter')).toHaveLength(9);
   });
 
   it('next(auto) with repeat one restarts the same track', async () => {
