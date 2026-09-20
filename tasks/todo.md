@@ -1041,6 +1041,28 @@
 - 待目标机验证：32px 下弹跳柱观感、开关即时生效且重启后保持——
   已记入 `docs/TARGET-VERIFY.md`
 
+### QYP3-049 播放条重新排版（频谱与进度并存、进度可操作）`[x]`
+- 诉求（用户）：暂停时频谱消失、被一根没用的进度条替代（二者本该同时显示）；
+  播放按钮右边那根进度条太窄且点不动，应独占一行；宽度挤压把按钮压成了椭圆
+- 改动（`components/MusicMiniBar/index.tsx`，四行布局：频谱 / 曲名+时间 /
+  进度条 / 按钮）：
+  - 进度条独占一行，外框 16px 高便于点击；`role="slider"` + 点击 seek +
+    键盘 ←/→ ±5s（Shift ×30）、Home/End 到头尾（自绘控件必须补键盘路径）
+  - 按钮统一 `ICON_BTN`/`PLAY_BTN`（32×32 / 36×36）且 `flex-shrink-0`，
+    放不下换行而不是压缩——椭圆就是这么来的
+  - `Visualizer` 暂停时**冻结最后一帧**（`FrozenFrame` + `keep()` 复用缓冲），
+    不再退化成进度线；无真实数据（mpv）时改画一根静音底线，不再画进度
+    （进度归播放条），因此 `Visualizer` 去掉了 `position`/`duration` 两个 prop
+  - `painter` 与冻结帧移入 ref：`position` 此前在 effect 依赖里，进度每走一秒
+    就重建动画循环，峰值被打回当前电平、暂停也冻不住
+  - `App.tsx` 停靠条让位 `pb-28` → `pb-40`（四行布局约 140px 高）
+- Evidence: `mini-bar.test.tsx` 增 4 例（频谱与进度是两行且各就各位、点击 seek、
+  键盘 seek、所有按钮都带 `flex-shrink-0`）；`visualizer.test.tsx` 增"暂停冻结
+  最后一帧"，两条"静态进度线"用例改成断言静音底线；typecheck 双配置 + 全量绿，
+  三构建通过
+- 待目标机验证：竖屏停靠态四行观感、进度条点击/拖动与键盘手感、按钮不再变椭圆、
+  暂停时频谱冻结在最后一帧而不消失——已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

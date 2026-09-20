@@ -35,7 +35,7 @@ describe('visualizer (QYP3-023/033)', () => {
   }
 
   function mount(
-    opts: { mode: 'spectrum' | 'waveform'; getSpectrum: () => Uint8Array | null; getWaveform: () => Uint8Array | null; isPlaying?: boolean; position?: number; duration?: number; height?: number },
+    opts: { mode: 'spectrum' | 'waveform'; getSpectrum: () => Uint8Array | null; getWaveform: () => Uint8Array | null; isPlaying?: boolean; height?: number },
   ) {
     const fakeCtx = fakeCtx2D();
     const origGetContext = HTMLCanvasElement.prototype.getContext;
@@ -55,9 +55,7 @@ describe('visualizer (QYP3-023/033)', () => {
         getSpectrum={opts.getSpectrum}
         getWaveform={opts.getWaveform}
         isPlaying={opts.isPlaying ?? true}
-        position={opts.position ?? 0}
-        duration={opts.duration ?? 100}
-        height={opts.height ?? 24}
+        height={opts.height ?? 32}
       />
     );
     void container;
@@ -73,8 +71,6 @@ describe('visualizer (QYP3-023/033)', () => {
         getSpectrum={vi.fn(() => null)}
         getWaveform={vi.fn(() => null)}
         isPlaying
-        position={10}
-        duration={100}
         height={24}
       />
     );
@@ -97,17 +93,29 @@ describe('visualizer (QYP3-023/033)', () => {
     expect(captured).toContain(PEAK_COLOR);
   });
 
-  it('draws only a static progress line when spectrum is all zeros (mpv silent element)', () => {
+  it('freezes the last real frame when paused instead of falling back to an idle line', () => {
+    const IDLE = 'rgba(148, 163, 184, 0.4)'; // 无数据时的静音底线
+    const data = new Uint8Array(1024);
+    data.fill(255);
+    const captured = mount({
+      mode: 'spectrum',
+      getSpectrum: () => data,
+      getWaveform: () => null,
+      isPlaying: false, // 暂停：频谱不该消失（进度是播放条自己的一行）
+    });
+    expect(captured).toContain(BAR_COLORS.low);
+    expect(captured).not.toContain(IDLE);
+  });
+
+  it('draws only an idle line when spectrum is all zeros (mpv silent element)', () => {
     const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
     const IDLE = 'rgba(148, 163, 184, 0.4)';
     const captured = mount({
       mode: 'spectrum',
       getSpectrum: () => new Uint8Array(1024), // 全 0 → 无真实数据
       getWaveform: () => null,
-      position: 0,
-      duration: 100,
     });
-    // 无真实数据：绝不画假频谱条；只画一条静态进度线（position=0 无播放段）
+    // 无真实数据：绝不画假频谱条，也不画进度（进度归播放条），只有一根静音底线
     expect(captured).not.toContain(SPECTRUM_COLOR);
     expect(captured).toContain(IDLE);
   });
@@ -121,25 +129,21 @@ describe('visualizer (QYP3-023/033)', () => {
       mode: 'waveform',
       getSpectrum: () => null,
       getWaveform: () => wave,
-      position: 0,
-      duration: 100,
     });
     // 真实波形条（居中镜像，幅度由采样驱动）必然画出琥珀色
     expect(captured).toContain(SPECTRUM_COLOR);
   });
 
-  it('draws a static progress line (played + idle) when no real waveform is available', () => {
+  it('draws only an idle line when no real waveform is available (mpv source)', () => {
     const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';
     const IDLE = 'rgba(148, 163, 184, 0.4)';
     const captured = mount({
       mode: 'waveform',
       getSpectrum: () => null,
       getWaveform: () => null, // 无真实波形（mpv 源）
-      position: 50,
-      duration: 100,
     });
-    // 静态进度线：播放段琥珀 + 未播段灰
-    expect(captured).toContain(SPECTRUM_COLOR);
+    // 无真实波形：不画假跳动，也不画进度（进度归播放条），只有一根静音底线
+    expect(captured).not.toContain(SPECTRUM_COLOR);
     expect(captured).toContain(IDLE);
   });
 });

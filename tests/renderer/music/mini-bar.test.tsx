@@ -106,6 +106,71 @@ describe('mini bar spectrum toggle (QYP3-048)', () => {
   });
 });
 
+describe('mini bar playback layout (QYP3-049)', () => {
+  function mountPlaying(): void {
+    useMusicPlaybackStore.setState({
+      engine: 'webaudio',
+      current: localTrack,
+      isPlaying: true,
+      duration: 200,
+      position: 50,
+    });
+    render(<MusicMiniBar />);
+  }
+
+  it('keeps the spectrum and the progress bar as two separate rows', async () => {
+    mountPlaying();
+    await screen.findByText('晴天');
+    // 频谱（canvas）与进度条（role=slider）同时存在，互不替代
+    expect(document.querySelector('canvas')).toBeTruthy();
+    const slider = screen.getByRole('slider', { name: /播放进度/ });
+    expect(slider).toBeTruthy();
+    expect(slider.getAttribute('aria-valuenow')).toBe('50');
+    // 进度条不是夹在按钮之间的窄条：它与按钮行是兄弟节点，独占一行
+    expect(slider.querySelector('button')).toBeNull();
+    expect(slider.previousElementSibling?.textContent).toContain('晴天');
+    expect(slider.nextElementSibling?.querySelector('button')).toBeTruthy();
+  });
+
+  it('seeks by clicking the progress bar', async () => {
+    mountPlaying();
+    await screen.findByText('晴天');
+    const seek = vi.spyOn(useMusicPlaybackStore.getState(), 'seek');
+    // jsdom 没有布局：给进度轨道一个可用宽度
+    HTMLDivElement.prototype.getBoundingClientRect = vi.fn(
+      () => ({ left: 0, width: 200, right: 200, top: 0, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) })
+    ) as never;
+    const slider = screen.getByRole('slider', { name: /播放进度/ });
+    fireEvent.click(slider, { clientX: 100 });
+    // 200 宽的中点 → 50% → 100s
+    expect(seek).toHaveBeenCalledWith(100);
+  });
+
+  it('seeks with the keyboard (arrows / Home)', async () => {
+    mountPlaying();
+    await screen.findByText('晴天');
+    const seek = vi.spyOn(useMusicPlaybackStore.getState(), 'seek');
+    const slider = screen.getByRole('slider', { name: /播放进度/ });
+    fireEvent.keyDown(slider, { key: 'ArrowRight' }); // 50 + 5
+    expect(seek.mock.lastCall?.[0]).toBeCloseTo(55, 5);
+    fireEvent.keyDown(slider, { key: 'ArrowLeft' }); // 50 - 5
+    expect(seek.mock.lastCall?.[0]).toBeCloseTo(45, 5);
+    fireEvent.keyDown(slider, { key: 'Home' });
+    expect(seek.mock.lastCall?.[0]).toBeCloseTo(0, 5);
+  });
+
+  it('does not squeeze the buttons (no shrinking classes on the control row)', async () => {
+    mountPlaying();
+    await screen.findByText('晴天');
+    const buttons = Array.from(document.querySelectorAll('button'));
+    expect(buttons.length).toBeGreaterThan(5);
+    // 圆形/方形按钮被压扁成椭圆的根因是允许压缩：所有按钮都必须是 flex-shrink-0
+    for (const b of buttons) {
+      expect(b.className).toContain('flex-shrink-0');
+    }
+  });
+});
+
 describe('music mini bar visibility (QYP3-026)', () => {
   it('renders for the mpv engine (server music) with the waveform strip', async () => {
     useMusicPlaybackStore.setState({

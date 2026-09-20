@@ -167,7 +167,12 @@
   `VISUALIZER_HEIGHT`），控制条上还有「显示/隐藏频谱」按钮（`Activity` 图标、
   `aria-pressed`），开关持久化到 `playback.showSpectrum`（走 SETTINGS 的 JSON
   对称契约，GET 回来是 boolean）——关掉时**不渲染 canvas**、rAF 也随之停，
-  不是"画成空白"
+  不是"画成空白"。
+  **QYP3-049 起**：`Visualizer` **不再**在无真实数据时画进度线（进度归播放条
+  自己的那一行），只画一根静音底线——所以它不再收 `position`/`duration`。
+  **暂停 ≠ 没数据**：最后一帧真实数据会冻结在画布上（`frozenRef`，只重画一次），
+  冻结帧与 `painter` 都必须放在 ref 里跨 effect 重跑存活——effect 依赖里
+  一旦带上 `position`，进度每走一秒就把峰值打回当前电平、暂停也冻不住画面
 - **FLAC 因内嵌封面非法被 Chromium 拒绝时，剥离封面自救**（QYP3-033/037）。
   某些 FLAC 的 `METADATA_BLOCK_PICTURE` 块损坏（如 `picture.type=-1` /
   0xFFFFFFFF），Chromium 的 ffmpeg 在打开容器阶段就 `DEMUXER_ERROR_COULD_NOT_OPEN`

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Activity, Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
@@ -16,10 +23,25 @@ import Visualizer, { type VisualizerMode } from '../Visualizer';
  * 常驻（可折叠）。mpv 引擎的位置由主进程状态事件经
  * `attachMusicMpvBridge` 写回（视频不会驱动本条）；歌词面板（QYP3-021）
  * 由本条的「词」按钮开合；拾音器（QYP3-023）按设置模式显示。
+ *
+ * 布局（QYP3-049，四行）：频谱 / 曲名+时间 / 进度条 / 按钮。
+ * 频谱与进度条**同时**显示、互不替代——此前暂停时频谱会让位给一根没有
+ * 用的进度条；进度条也从"夹在播放按钮右边的窄条"改成独占一行、可点可键盘。
+ * 所有按钮固定 32×32 且不许压缩（`flex-shrink-0`）：竖窄屏里一排按钮会把
+ * 彼此挤成椭圆，宁可换行也不压。
  */
 
 /** 拾音器高度（QYP3-048：从 24 抬到 32，LED 分段更看得清）。 */
 const VISUALIZER_HEIGHT = 32;
+
+/**
+ * 按钮统一 32×32 且 `flex-shrink-0`（QYP3-049）：竖窄屏里一排按钮会把彼此
+ * 挤扁成椭圆，所以宁可换行也不许压缩。
+ */
+const ICON_BTN =
+  'flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring';
+const PLAY_BTN =
+  'flex-shrink-0 flex items-center justify-center h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring';
 
 /** 拾音器模式：off=关闭；auto 在 renderer 引擎下按频谱、否则波形。 */
 function resolveMode(setting: string, engine: string | null): VisualizerMode | null {
@@ -124,6 +146,43 @@ export default function MusicMiniBar() {
     });
   }, []);
 
+  /**
+   * 进度条单独占一行（QYP3-049）：此前它被夹在播放按钮右边，既窄又无法操作。
+   * 自绘的进度条要自己接键盘：←/→ ±5s（Shift ×30），Home/End 到头尾。
+   */
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  const seekToRatio = useCallback((ratio: number): void => {
+    const s = useMusicPlaybackStore.getState();
+    if (s.duration <= 0) return;
+    s.seek(Math.max(0, Math.min(1, ratio)) * s.duration);
+  }, []);
+
+  const handleProgressClick = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>): void => {
+      const rect = progressRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      seekToRatio((e.clientX - rect.left) / rect.width);
+    },
+    [seekToRatio]
+  );
+
+  const handleProgressKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+      const { position, duration } = useMusicPlaybackStore.getState();
+      if (duration <= 0) return;
+      const step = e.shiftKey ? 30 : 5;
+      const clamp = (v: number): number => Math.max(0, Math.min(duration, v));
+      if (e.key === 'ArrowLeft') seekToRatio(clamp(position - step) / duration);
+      else if (e.key === 'ArrowRight') seekToRatio(clamp(position + step) / duration);
+      else if (e.key === 'Home') seekToRatio(0);
+      else if (e.key === 'End') seekToRatio(1);
+      else return;
+      e.preventDefault();
+    },
+    [seekToRatio]
+  );
+
   useEffect(() => {
     setMounted(true);
     // mpv 引擎位置源 + 视频接管时的会话收尾（QYP3-026）
@@ -154,6 +213,11 @@ export default function MusicMiniBar() {
   if (!mounted || !playback.engine || !playback.current) return null;
   // 服务器曲目以服务器为准（不落本地库），收藏只对扫描入库的音轨开放
   const canFavorite = playback.current.id > 0;
+  // 进度百分比（进度条自己的一行，与频谱互不替代——QYP3-049）
+  const pct =
+    playback.duration > 0
+      ? Math.min(100, Math.max(0, (playback.position / playback.duration) * 100))
+      : 0;
 
   const fmt = (sec: number): string => {
     const m = Math.floor(sec / 60);
@@ -194,6 +258,7 @@ export default function MusicMiniBar() {
             : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-xl shadow-lg'
         }`}
       >
+        {/* 频谱：常驻一行（暂停时冻结最后一帧，不再退化成进度条——进度有自己的一行） */}
         {(() => {
           const mode = resolveMode(visualizer, playback.engine);
           return showSpectrum && mode ? (
@@ -202,134 +267,158 @@ export default function MusicMiniBar() {
               getSpectrum={playback.getSpectrum}
               getWaveform={playback.getWaveform}
               isPlaying={playback.isPlaying}
-              position={playback.position}
-              duration={playback.duration}
               height={VISUALIZER_HEIGHT}
             />
           ) : null;
         })()}
-        <div className="flex flex-wrap items-center gap-3">
-      <button
-        type="button"
-        onClick={() => void playback.prev()}
-        aria-label="上一曲"
-        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-      >
-        <SkipBack size={16} />
-      </button>
-      {playback.isPlaying ? (
-        <button
-          type="button"
-          onClick={() => playback.pause()}
-          aria-label="暂停音乐"
-          className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
+
+        {/* 曲名 + 时间 */}
+        <div className="flex items-baseline gap-2 min-w-0">
+          <p className="text-sm font-medium truncate min-w-0 flex-1">
+            {playback.current.title}
+            {playback.current.artist ? (
+              <span className="ml-1 text-xs text-muted-foreground">{playback.current.artist}</span>
+            ) : null}
+          </p>
+          <span className="text-[11px] text-muted-foreground tabular-nums flex-shrink-0">
+            {fmt(playback.position)} / {fmt(playback.duration)}
+          </span>
+        </div>
+
+        {/* 进度条：独占一行，可点可键盘（外框 16px 高是为了好点，内轨仍是细条） */}
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="播放进度（左右方向键快退快进，Home/End 到头尾）"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(1, Math.round(playback.duration))}
+          aria-valuenow={Math.round(playback.position)}
+          aria-valuetext={`${fmt(playback.position)} / ${fmt(playback.duration)}`}
+          onClick={handleProgressClick}
+          onKeyDown={handleProgressKeyDown}
+          className="h-4 flex items-center cursor-pointer group focus-ring"
         >
-          <Music2 size={16} className="hidden" />
-          <span aria-hidden>⏸</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => playback.resume()}
-          aria-label="继续播放音乐"
-          className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-ring"
-        >
-          <span aria-hidden>▶</span>
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={() => void playback.next()}
-        aria-label="下一曲"
-        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-      >
-        <SkipForward size={16} />
-      </button>
-      <div className="flex-1 min-w-[8rem]">
-        <p className="text-xs truncate">{playback.current.title}</p>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground">{fmt(playback.position)}</span>
-          <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
+          <div ref={progressRef} className="relative h-1.5 w-full rounded-full bg-muted">
             <div
-              className="h-full bg-primary rounded-full transition-all"
-              style={{ width: `${Math.min(100, playback.duration > 0 ? (playback.position / playback.duration) * 100 : 0)}%` }}
+              className="absolute inset-y-0 left-0 bg-primary rounded-full"
+              style={{ width: `${pct}%` }}
+            />
+            <span
+              className="absolute top-1/2 -translate-y-1/2 h-3 w-3 -ml-1.5 rounded-full bg-primary opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity"
+              style={{ left: `${pct}%` }}
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">{fmt(playback.duration)}</span>
+        </div>
+
+        <div className="flex items-center gap-1 flex-wrap">
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => void playback.prev()}
+              aria-label="上一曲"
+              className={ICON_BTN}
+            >
+              <SkipBack size={16} />
+            </button>
+            {playback.isPlaying ? (
+              <button
+                type="button"
+                onClick={() => playback.pause()}
+                aria-label="暂停音乐"
+                className={PLAY_BTN}
+              >
+                <span aria-hidden className="text-sm leading-none">⏸</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => playback.resume()}
+                aria-label="继续播放音乐"
+                className={PLAY_BTN}
+              >
+                <span aria-hidden className="text-sm leading-none ml-0.5">▶</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void playback.next()}
+              aria-label="下一曲"
+              className={ICON_BTN}
+            >
+              <SkipForward size={16} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+            <button
+              type="button"
+              onClick={() => canFavorite && playback.current && void toggleFavorite(playback.current.id)}
+              aria-label={canFavorite && favoriteIds.has(playback.current.id) ? '取消收藏' : '收藏此曲'}
+              aria-pressed={Boolean(canFavorite && favoriteIds.has(playback.current.id))}
+              disabled={!canFavorite}
+              title={canFavorite ? undefined : '服务器曲目不支持收藏'}
+              className={`${ICON_BTN} disabled:opacity-40 disabled:cursor-default ${
+                canFavorite && favoriteIds.has(playback.current.id)
+                  ? 'text-primary'
+                  : ''
+              }`}
+            >
+              <Heart size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={toggleSpectrum}
+              aria-label={showSpectrum ? '隐藏频谱' : '显示频谱'}
+              aria-pressed={showSpectrum}
+              title={showSpectrum ? '隐藏频谱' : '显示频谱'}
+              className={`${ICON_BTN} ${showSpectrum ? 'text-primary' : ''}`}
+            >
+              <Activity size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLyrics((v) => !v)}
+              aria-label="歌词"
+              aria-pressed={showLyrics}
+              className={`${ICON_BTN} ${showLyrics ? 'text-primary' : ''}`}
+            >
+              <Mic2 size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => useCompactModeStore.getState().enter()}
+              aria-label="精简模式"
+              title="精简模式（缩小为右上角浮窗）"
+              className={ICON_BTN}
+            >
+              <Minimize2 size={16} />
+            </button>
+            {sleep.active && (
+              <button
+                type="button"
+                onClick={() => void sleep.setMinutes(0)}
+                aria-label="取消睡眠定时"
+                title="点击取消睡眠定时"
+                className="flex-shrink-0 flex items-center gap-1 px-2 h-8 rounded-lg text-[10px] text-primary border border-border hover:bg-accent focus-ring"
+              >
+                <Moon size={12} />
+                {formatRemaining(sleep.remainingMs)}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                playback.pause();
+                setCollapsed(true);
+              }}
+              aria-label="收起音乐控制条"
+              className={ICON_BTN}
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => canFavorite && playback.current && void toggleFavorite(playback.current.id)}
-        aria-label={canFavorite && favoriteIds.has(playback.current.id) ? '取消收藏' : '收藏此曲'}
-        aria-pressed={Boolean(canFavorite && favoriteIds.has(playback.current.id))}
-        disabled={!canFavorite}
-        title={canFavorite ? undefined : '服务器曲目不支持收藏'}
-        className={`p-1.5 rounded-lg hover:bg-accent focus-ring disabled:opacity-40 disabled:cursor-default ${
-          canFavorite && favoriteIds.has(playback.current.id)
-            ? 'text-primary'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        <Heart size={16} />
-      </button>
-      <button
-        type="button"
-        onClick={toggleSpectrum}
-        aria-label={showSpectrum ? '隐藏频谱' : '显示频谱'}
-        aria-pressed={showSpectrum}
-        title={showSpectrum ? '隐藏频谱' : '显示频谱'}
-        className={`p-1.5 rounded-lg hover:bg-accent focus-ring ${
-          showSpectrum ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        <Activity size={16} />
-      </button>
-      <button
-        type="button"
-        onClick={() => setShowLyrics((v) => !v)}
-        aria-label="歌词"
-        aria-pressed={showLyrics}
-        className={`p-1.5 rounded-lg hover:bg-accent focus-ring ${
-          showLyrics ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        <Mic2 size={16} />
-      </button>
-      <button
-        type="button"
-        onClick={() => useCompactModeStore.getState().enter()}
-        aria-label="精简模式"
-        title="精简模式（缩小为右上角浮窗）"
-        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-      >
-        <Minimize2 size={16} />
-      </button>
-      {sleep.active && (
-        <button
-          type="button"
-          onClick={() => void sleep.setMinutes(0)}
-          aria-label="取消睡眠定时"
-          title="点击取消睡眠定时"
-          className="px-2 py-1 rounded-lg text-[10px] text-primary border border-border hover:bg-accent focus-ring flex items-center gap-1 flex-shrink-0"
-        >
-          <Moon size={12} />
-          {formatRemaining(sleep.remainingMs)}
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={() => {
-          playback.pause();
-          setCollapsed(true);
-        }}
-        aria-label="收起音乐控制条"
-        className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground focus-ring"
-      >
-        <X size={14} />
-      </button>
-        </div>
-    </div>
     </>
   );
 }
