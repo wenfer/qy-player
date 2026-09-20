@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Gauge, Maximize2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { Gauge, Maximize2, Mic2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import { useCompactModeStore } from '../../stores/compact-mode-store';
 import { useResourceStore } from '../../stores/resource-store';
 import { pressureLabel } from '../../../shared/resource-pressure';
 import SpectrumGraph from '../SpectrumGraph';
+import LyricsPanel from '../LyricsPanel';
 
 /**
  * 精简模式浮窗界面（QYP3-035）：主窗口缩成右上角小浮窗时渲染。
@@ -40,6 +41,8 @@ export default function CompactPlayer() {
   const powerSave = useResourceStore((s) => s.powerSave);
   // 拖动进度时先本地跟手，松手才真正 seek（避免 mpv 引擎被连续 seek 刷屏）
   const [dragPos, setDragPos] = useState<number | null>(null);
+  // 歌词浮层（QYP3-058）：浮窗里也看歌词，整幅盖在播放器上
+  const [showLyrics, setShowLyrics] = useState(false);
 
   const duration = playback.duration;
   const displayPos = dragPos ?? playback.position;
@@ -54,6 +57,16 @@ export default function CompactPlayer() {
 
   return (
     <div className="h-full w-full flex flex-col gap-2 p-3 bg-background text-foreground overflow-hidden">
+      {showLyrics && playback.current && playback.currentSource && (
+        <LyricsPanel
+          placement="overlay"
+          source={playback.currentSource}
+          title={playback.current.title}
+          position={playback.position}
+          onSeek={playback.seek}
+          onClose={() => setShowLyrics(false)}
+        />
+      )}
       <SpectrumGraph
         engine={playback.engine}
         getSpectrum={playback.getSpectrum}
@@ -135,6 +148,15 @@ export default function CompactPlayer() {
           className={`${BTN} ${playback.shuffle ? 'text-primary' : ''}`}
         >
           <Shuffle size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowLyrics((v) => !v)}
+          aria-label="歌词"
+          aria-pressed={showLyrics}
+          className={`${BTN} ${showLyrics ? 'text-primary' : ''}`}
+        >
+          <Mic2 size={15} />
         </button>
         <button
           type="button"

@@ -77,3 +77,30 @@ describe('LyricsPanel server tracks (QYP3-020b)', () => {
     expect(screen.queryByRole('button', { name: '导入歌词' })).toBeNull();
   });
 });
+
+describe('LyricsPanel placement (QYP3-058)', () => {
+  const rootClass = (): string =>
+    document.querySelector('.backdrop-blur')?.className ?? '';
+
+  it('defaults to above-bar: above the spectrum-bearing mini bar, higher z-index', async () => {
+    render(<LyricsPanel source={local} title="晴天" position={0} onSeek={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('晴天')).toBeTruthy());
+    const cls = rootClass();
+    // 播放条带频谱行后高约 150px：面板悬在它上方，且 z-50 盖过播放条的 z-40
+    expect(cls).toContain('bottom-44');
+    expect(cls).toContain('z-50');
+    expect(cls).not.toContain('bottom-20');
+    expect(cls).not.toContain('z-40');
+  });
+
+  it('overlay fills the compact floating window (no centering/width, no max-h clamp)', async () => {
+    render(<LyricsPanel placement="overlay" source={local} title="晴天" position={0} onSeek={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('晴天')).toBeTruthy());
+    const cls = rootClass();
+    expect(cls).toContain('top-10');
+    expect(cls).toContain('bottom-3');
+    expect(cls).toContain('z-50');
+    expect(cls).not.toContain('translate-x-1/2');
+    expect(cls).not.toContain('max-h-');
+  });
+});

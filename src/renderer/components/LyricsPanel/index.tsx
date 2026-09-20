@@ -22,9 +22,22 @@ interface LyricsPanelProps {
   position: number;
   onSeek: (time: number) => void;
   onClose: () => void;
+  /**
+   * 弹出位置（QYP3-058）：above-bar = 主窗口里悬在播放条**上方**（播放条带
+   * 频谱行后高约 150px，此前 bottom-20 + 同级 z-index 会被频谱压住）；
+   * overlay = 精简浮窗里整幅覆盖（窗口只有 400×300，只能盖在播放器上面）。
+   */
+  placement?: 'above-bar' | 'overlay';
 }
 
-export default function LyricsPanel({ source, title, position, onSeek, onClose }: LyricsPanelProps) {
+export default function LyricsPanel({
+  source,
+  title,
+  position,
+  onSeek,
+  onClose,
+  placement = 'above-bar',
+}: LyricsPanelProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const addToast = useToastStore((s) => s.addToast);
@@ -75,8 +88,19 @@ export default function LyricsPanel({ source, title, position, onSeek, onClose }
 
   const hasTimedLines = lines.length > 0;
 
+  // above-bar（QYP3-058）：播放条带频谱行后高约 150px，面板要悬在它**上方**
+  // （bottom-44 = 176px），并抬高 z-index——渲染顺序上它在播放条之前，同级
+  // z-index 会被播放条的频谱 canvas 压住。overlay：精简浮窗只有 ~400×300，
+  // 整幅覆盖在播放器上（紧凑标题栏 28px，所以 top-10 起步）。
+  const placementClass =
+    placement === 'overlay'
+      ? 'fixed left-3 right-3 top-10 bottom-3 z-50'
+      : 'fixed bottom-44 left-1/2 -translate-x-1/2 z-50 w-[min(560px,calc(100vw-2rem))] max-h-[46vh]';
+
   return (
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-2rem))] max-h-[46vh] bg-card/95 backdrop-blur border border-border rounded-xl shadow-lg flex flex-col">
+    <div
+      className={`${placementClass} bg-card/95 backdrop-blur border border-border rounded-xl shadow-lg flex flex-col`}
+    >
       <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
         <div className="min-w-0">
           <p className="text-xs font-medium truncate">{title}</p>

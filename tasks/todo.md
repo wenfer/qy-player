@@ -1315,6 +1315,32 @@
 - 待目标机验证：内置引擎放一首歌，柱状频谱左右都有跳动、幅度可比（已记入
   TARGET-VERIFY）
 
+### QYP3-058 歌词被频谱压住 / 精简浮窗频谱残影 / 精简模式没有歌词 `[x]`
+- 诉求（用户）：① 歌词弹窗被频谱挡住；② 精简模式的频谱效果重叠显示异常；
+  ③ 精简模式也需要显示歌词
+- 根因：
+  ① QYP3-048 给 MusicMiniBar 加频谱行后高约 150px，LyricsPanel 仍停在
+  `bottom-20` 且 `z-40` 与播放条同级——渲染顺序上它在播放条**之前**，
+  同级 z-index 让播放条的频谱 canvas 把它下半截盖住
+  ② `SpectrumGraph` 的 draw 循环从不 `clearRect`：bars-painter 的 `paint`
+  只画"点亮的 LED 格 + 峰值帽"，不清底——上一帧的柱子残留叠加（Visualizer
+  一直清底所以没事，SpectrumGraph 从建组件起就漏了）
+  ③ CompactPlayer 根本没有歌词入口
+- 改动：
+  ① LyricsPanel 加 `placement: 'above-bar' | 'overlay'`（默认 above-bar）：
+  above-bar 抬到 `bottom-44`（176px，越过 150px 的播放条）+ `z-50`；
+  overlay 用 `top-10 bottom-3 left-3 right-3` 铺满浮窗（不用 max-h 夹——
+  浮窗只有 ~300px 高，46vh 会把面板压短）
+  ② SpectrumGraph draw 在 `painter.paint` 前 `clearRect`
+  ③ CompactPlayer 加 Mic2 按钮（aria-pressed）+ overlay 版 LyricsPanel
+  （有 `currentSource` 才渲染）；歌词拉取仍在 loadfile 之后且失败静默，
+  服务器曲目只读
+- Evidence：新增单测（placement 类名 2 例 + 浮窗歌词开关 1 例）；
+  CDP 现场巡检 9/9（above-bar 面板底边 ≤ 播放条顶边、overlay 几何铺满、
+  进出精简往返、无新增 JS 异常）；typecheck 双配置通过
+- 待目标机验证：主窗口歌词面板完整露出频谱上方；浮窗频谱无残影；
+  浮窗歌词开合正常（已记入 TARGET-VERIFY）
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

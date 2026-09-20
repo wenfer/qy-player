@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompactPlayer, {
   nextRepeat,
@@ -155,5 +155,22 @@ describe('CompactPlayer (QYP3-035)', () => {
     fireEvent.click(screen.getByLabelText('还原窗口'));
     expect(useCompactModeStore.getState().compact).toBe(false);
     expect(api.setCompactMode).toHaveBeenCalledWith(false);
+  });
+
+  it('lyrics button toggles the overlay panel (QYP3-058)', async () => {
+    render(<CompactPlayer />);
+    const btn = screen.getByLabelText('歌词');
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByText(/还没有歌词/)).toBeNull();
+
+    fireEvent.click(btn);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    // LyricsPanel 渲染为 overlay（compact api 的 getMusicLyrics 返回无词）
+    await waitFor(() => expect(screen.getByText(/还没有歌词/)).toBeTruthy());
+    expect(screen.getByText(/还没有歌词/).closest('.backdrop-blur')?.className).toContain('top-10');
+
+    fireEvent.click(screen.getByLabelText('关闭歌词面板'));
+    expect(screen.queryByText(/还没有歌词/)).toBeNull();
+    expect(screen.getByLabelText('歌词').getAttribute('aria-pressed')).toBe('false');
   });
 });

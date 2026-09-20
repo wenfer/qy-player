@@ -74,6 +74,9 @@ export default function SpectrumGraph({
       raf = requestAnimationFrame(draw);
       if (now - last < frameMs) return; // ≤30fps（性能保护下更低）
       painter ??= createBarsPainter(ctx, { bars: BARS, segments: SEGMENTS });
+      // painter 只画"点亮的 LED 格 + 峰值帽"，不负责清底——不 clearRect 的
+      // 话上一帧的柱子残留并与新帧叠加（QYP3-058，精简浮窗里尤其明显）
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       painter.paint(canvas.width, canvas.height, getSpectrum(), now - last);
       last = now;
     };
