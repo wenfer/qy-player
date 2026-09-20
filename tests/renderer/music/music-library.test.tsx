@@ -55,6 +55,8 @@ describe('Music page (QYP3-008)', () => {
         <MusicPage />
       </MemoryRouter>
     );
+    // 默认视图是「全部曲目」（QYP3-045），专辑网格要切过去
+    fireEvent.click(await screen.findByText('专辑'));
     await waitFor(() => expect(screen.getByText('叶惠美')).toBeTruthy());
     expect(screen.getByText(/周杰伦 · 3 首/)).toBeTruthy();
     expect(screen.getByText('未知专辑')).toBeTruthy();
@@ -79,13 +81,13 @@ describe('Music page (QYP3-008)', () => {
   });
 
   it('shows empty state when there is no music', async () => {
-    electronAPI.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });
+    // 默认视图是「全部曲目」（QYP3-045）
+    electronAPI.getMusicTracks.mockResolvedValue({ ok: true, data: { tracks: [] } });
     render(
       <MemoryRouter>
         <MusicPage />
       </MemoryRouter>
     );
-    await waitFor(() => expect(screen.getByText('没有音乐')).toBeTruthy());
-    expect(screen.getByText(/媒体库页/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('没有曲目')).toBeTruthy());
   });
 });

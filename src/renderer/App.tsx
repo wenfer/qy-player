@@ -124,6 +124,8 @@ function Shell() {
   const compact = useCompactModeStore((s) => s.compact);
   // 音乐模式侧栏收成图标轨（QYP3-044），内容区的左边距跟着变
   const mode = useAppModeStore((s) => s.mode);
+  // 音乐模式下播放条停靠窗口底部（QYP3-045），内容区留出它的高度
+  const musicSession = useMusicPlaybackStore((s) => s.engine !== null);
   const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
   if (isDeskLyrics) return <DeskLyrics />;
 
@@ -146,7 +148,11 @@ function Shell() {
       <TitleBar />
       <div className="flex-1 min-h-0 flex">
         <Navigation />
-        <main className={`flex-1 min-h-0 overflow-y-auto ${mode === 'music' ? 'ml-14' : 'ml-60'}`}>
+        <main
+          className={`flex-1 min-h-0 overflow-y-auto ${
+            mode === 'music' ? 'ml-14' : 'ml-60'
+          } ${mode === 'music' && musicSession ? 'pb-28' : ''}`}
+        >
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/detail/:type/:serverId/:id" element={<Detail />} />

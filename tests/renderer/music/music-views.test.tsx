@@ -98,18 +98,28 @@ describe('Music page views (QYP3-008a)', () => {
   });
 });
 
+/** 默认就是曲目列表（QYP3-045）：进音乐模式先看到曲目，不用再点一次 tab。 */
+describe('Music page default view', () => {
+  it('shows the track list without any extra click', async () => {
+    render(<MusicPage />);
+    await waitFor(() => expect(screen.getByText('晴天')).toBeTruthy());
+    expect(api.getMusicTracks).toHaveBeenCalled();
+    expect(api.getMusicAlbums).not.toHaveBeenCalled();
+  });
+});
+
 /** 加载失败必须显式呈现（前端审查）：此前只弹 Toast，页面渲染成空网格。 */
 describe('Music page load failure', () => {
   it('shows a retryable error state instead of an empty grid', async () => {
-    api.getMusicAlbums.mockResolvedValue({ ok: false });
+    api.getMusicTracks.mockResolvedValue({ ok: false });
     render(<MusicPage />);
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(screen.getByText('没能加载音乐库')).toBeTruthy();
-    // 不是"没有音乐"——那条文案会让人以为库真的是空的
-    expect(screen.queryByText('没有音乐')).toBeNull();
+    // 不是"没有曲目"——那条文案会让人以为库真的是空的
+    expect(screen.queryByText('没有曲目')).toBeNull();
 
-    api.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });
+    api.getMusicTracks.mockResolvedValue({ ok: true, data: { tracks: [] } });
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
-    await waitFor(() => expect(screen.getByText('没有音乐')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('没有曲目')).toBeTruthy());
   });
 });

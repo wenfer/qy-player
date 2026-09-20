@@ -164,7 +164,8 @@ export default function MusicPage() {
   const addToast = useToastStore((s) => s.addToast);
   const playback = useMusicPlaybackStore();
 
-  const [view, setView] = useState<View>('albums');
+  // 默认「全部曲目」：进音乐模式先看到曲目列表，而不是专辑网格（QYP3-045）
+  const [view, setView] = useState<View>('all');
   const [albums, setAlbums] = useState<MusicAlbumRow[] | null>(null);
   const [artists, setArtists] = useState<MusicArtistRow[] | null>(null);
   const [artistAlbums, setArtistAlbums] = useState<MusicAlbumRow[] | null>(null);
@@ -461,14 +462,14 @@ export default function MusicPage() {
       <>
       {/* 视图切换 */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
+        <button type="button" onClick={() => switchView('all')} className={tabClass(view === 'all')}>
+          <ListMusic size={14} /> 全部曲目
+        </button>
         <button type="button" onClick={() => switchView('albums')} className={tabClass(view === 'albums')}>
           <Disc3 size={14} /> 专辑
         </button>
         <button type="button" onClick={() => switchView('artists')} className={tabClass(view === 'artists')}>
           <User size={14} /> 歌手
-        </button>
-        <button type="button" onClick={() => switchView('all')} className={tabClass(view === 'all')}>
-          <ListMusic size={14} /> 全部曲目
         </button>
         <button type="button" onClick={() => switchView('favorites')} className={tabClass(view === 'favorites')}>
           <Heart size={14} /> 收藏

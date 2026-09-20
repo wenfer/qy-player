@@ -5,6 +5,7 @@ import {
   useMusicPlaybackStore,
 } from '../../stores/music-playback-store';
 import { useCompactModeStore } from '../../stores/compact-mode-store';
+import { useAppModeStore } from '../../stores/app-mode-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useToastStore } from '../../stores/toast-store';
 import LyricsPanel from '../LyricsPanel';
@@ -28,6 +29,9 @@ function resolveMode(setting: string, engine: string | null): VisualizerMode | n
 export default function MusicMiniBar() {
   const playback = useMusicPlaybackStore();
   const sleep = useSleepTimerStore();
+  // 音乐模式（竖窄屏）里停靠在窗口底部，成为音乐界面的常驻播放条（QYP3-045）；
+  // 其他模式仍是居中浮卡，不喧宾夺主
+  const docked = useAppModeStore((s) => s.mode === 'music');
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
@@ -135,7 +139,7 @@ export default function MusicMiniBar() {
 
   if (collapsed) {
     return (
-      <div className="fixed bottom-4 right-4 z-40">
+      <div className={`fixed z-40 ${docked ? 'bottom-3 left-14 right-3 flex justify-end' : 'bottom-4 right-4'}`}>
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -159,7 +163,13 @@ export default function MusicMiniBar() {
           onClose={() => setShowLyrics(false)}
         />
       )}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-2rem))] bg-card/95 backdrop-blur border border-border rounded-xl px-4 py-3 flex flex-col gap-2 shadow-lg">
+      <div
+        className={`fixed z-40 bg-card/95 backdrop-blur border-border px-4 py-3 flex flex-col gap-2 ${
+          docked
+            ? 'bottom-0 left-14 right-0 border-t'
+            : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-xl shadow-lg'
+        }`}
+      >
         {(() => {
           const mode = resolveMode(visualizer, playback.engine);
           return mode ? (
@@ -174,7 +184,7 @@ export default function MusicMiniBar() {
             />
           ) : null;
         })()}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
       <button
         type="button"
         onClick={() => void playback.prev()}
@@ -211,7 +221,7 @@ export default function MusicMiniBar() {
       >
         <SkipForward size={16} />
       </button>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-[8rem]">
         <p className="text-xs truncate">{playback.current.title}</p>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">{fmt(playback.position)}</span>
