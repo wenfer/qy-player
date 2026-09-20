@@ -1281,6 +1281,23 @@
 - 待目标机验证：音乐媒体库把 `/home/qiuyuan/Music` 转为音乐来源 → 214 首立即
   回到列表且可播；转回影视域后音乐列表变空——已记入 TARGET-VERIFY
 
+### QYP3-056 菜单点不动：模式恢复把路由无限弹回 `/music` `[x]`
+- 诉求（用户）：侧栏菜单点不动；要求开调试接口（CDP）自查功能可用性
+- 现场（CDP 9222 复现）：点「歌单」「设置」路由纹丝不动；
+  `location.hash='#/playlists'` 也在几百毫秒内被弹回 `#/music`，
+  history.length 持续增长 → 无限导航循环
+- 根因：QYP3-054 的恢复 effect 依赖 `[navigate]`，而 react-router v6 的
+  `useNavigate` 在 **location 变化后返回新函数**——恢复导航本身触发 effect
+  重跑 → 又 navigate 回 `/music` → 循环。任何菜单点击都在几毫秒内被弹回
+- 修复：navigate 经 ref 在挂载时捕获一次，effect 改空依赖；**不加**"只跑
+  一次"哨兵——StrictMode（dev）双跑时第一次被 cleanup 取消、第二次被哨兵
+  挡住，恢复会整个失效（实测踩过）；恢复的两个动作天然幂等，重复无害
+- 顺带澄清（非 bug）：调试窗口一度全空是本机 vite 掉了导致 renderer 加载
+  chrome 错误页（`#root` 0 子节点、无 JS 错误），与代码无关
+- Evidence：CDP 功能巡检 10/10（导航不弹回、history 不增长、歌单/音乐媒体库/
+  设置/音乐页渲染、转域入口在位、模式往返切回音乐竖屏、全程无 JS 错误）；
+  单测全量回归见提交；typecheck 双配置通过
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法
