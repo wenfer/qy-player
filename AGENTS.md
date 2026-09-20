@@ -62,6 +62,16 @@
 - **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId
 - **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）
 - **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默
+- **曲目时长**（QYP3-052）：`music_tracks.duration` 有两条来源，**都不要拆**——
+  ① 扫描期 `library-scanner/tag-parser.ts` 从文件头解析（FLAC STREAMINFO / m4a mvhd /
+  mp3 的 Xing·Info 总帧数，退化到 ID3 `TLEN`，再退化到"前 40 帧码率完全一致"的 CBR
+  估算；APE 读 `MAC ` 头）。**VBR mp3 没有 Xing 头时首帧码率毫无代表性**，按它估会差
+  2~4 倍，所以宁可留空；② 播放期回填：`stores/music-playback-store` 在拿到真实
+  duration 后经 `MUSIC.SET_TRACK_DURATION` 写回（每个 trackId 只报一次，服务器曲目
+  trackId=0 不报）——覆盖解析不出来的（ID3 标签 >512 KiB 超出读取窗口、WebDAV 源、
+  未知格式）。解析器升级后靠 `music.durationScanVersion` 闸门**强制补解析一轮**：
+  指纹没变的文件本来连标签都不读，不给这个闸门存量行永远补不上；视频来源的扫描
+  绝不能写这个版本号，否则音乐来源永远等不到补解析
 - **拾音器**：频谱来自 renderer 引擎 AnalyserNode（fftSize 2048、≤30fps）；mpv 引擎退化为按 时长+进度 绘制的播放波形（无缓存、无外部依赖）
 - **睡眠定时**：权威定时器在 main（`ui-shell/sleep-timer.ts`，会话内有效不持久化）；到点先 `autoNext.cancel()` 再暂停 mpv，并下发 `sleep:on-expired` 让 renderer 停 renderer 引擎音乐——**两个引擎都可能是"正在放的那个"**，只处理自己那侧
 

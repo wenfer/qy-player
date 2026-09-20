@@ -186,6 +186,9 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_FAVORITES, { limit }),
   setMusicFavorite: (trackId: number, favorite: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_FAVORITE, { trackId, favorite }),
+  /** 播放期回填真实时长（QYP3-052）：只对本地/WebDAV 曲目（trackId > 0）。 */
+  setMusicTrackDuration: (trackId: number, duration: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_TRACK_DURATION, { trackId, duration }),
   reportMusicProgress: (args: { mediaId: string; title?: string; position: number; duration?: number; isFinished?: boolean; mediaType?: 'local' | 'webdav' }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MUSIC.REPORT_PROGRESS, args),
   // 服务器音乐会话与进度（QYP3-038）：webaudio 播放不经 LOAD_FILE，

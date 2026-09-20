@@ -598,6 +598,16 @@ export function createCatalogRepository(db: Database.Database) {
       return favorite;
     },
 
+    /**
+     * QYP3-052：播放期回填真实时长。
+     *
+     * 扫描期解析不出来的（VBR 无 Xing 头、标签超出读取窗口、WebDAV 源）在
+     * 播放时由播放器给出真实值，这里直接覆盖——旧值本来就不准。
+     */
+    setMusicTrackDuration(trackId: number, duration: number): void {
+      db.prepare('UPDATE music_tracks SET duration = ? WHERE id = ?').run(duration, trackId);
+    },
+
     /** QYP3-008a：统一搜索——按标题/歌手/专辑匹配本地音乐。 */
     searchMusicTracks(sourceIds: number[], query: string, limit = 200): MusicTrackRow[] {
       if (sourceIds.length === 0 || query.trim().length === 0) return [];
@@ -735,10 +745,16 @@ export function createCatalogRepository(db: Database.Database) {
       return true;
     },
 
-    listMusicTracks(sourceId: number): Array<{ source_key: string; fingerprint: string }> {
+    listMusicTracks(
+      sourceId: number
+    ): Array<{ source_key: string; fingerprint: string; duration: number | null }> {
       return db
-        .prepare('SELECT source_key, fingerprint FROM music_tracks WHERE source_id = ?')
-        .all(sourceId) as Array<{ source_key: string; fingerprint: string }>;
+        .prepare('SELECT source_key, fingerprint, duration FROM music_tracks WHERE source_id = ?')
+        .all(sourceId) as Array<{
+        source_key: string;
+        fingerprint: string;
+        duration: number | null;
+      }>;
     },
 
     upsertMusicTrack(input: UpsertMusicTrackInput): number {

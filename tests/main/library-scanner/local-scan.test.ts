@@ -1,7 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository, type CatalogRepository } from '../../../src/main/modules/catalog/repository';
@@ -16,6 +17,7 @@ import {
   markAvailabilityAfterScan,
   walkSourceTree,
 } from '../../../src/main/modules/library-scanner/local-scanner';
+import { AUDIO_DURATION_PARSER_VERSION } from '../../../src/main/modules/library-scanner/tag-parser';
 
 // ---------------------------------------------------------------------------
 // classifier (pure functions)
@@ -362,6 +364,118 @@ describe('music ingest (QYP3-003)', () => {
     expect(rows[0].title).toBe('退后');
     expect(rows[0].artist).toBe('周杰伦');
     expect(rows[0].track_no).toBe(7);
+  });
+});
+
+/**
+ * 时长补解析闸门（QYP3-052）：指纹没变的文件本来一律跳过，解析器升级后
+ * 存量行的空时长就永远补不上——版本落后时给"缺时长"的行强制补一次。
+ */
+describe('duration refill (QYP3-052)', () => {
+  const FLAC = join(process.cwd(), 'tests/fixtures/audio/sample.flac');
+  const musicTree = { '周杰伦/叶惠美/03 - 晴天.flac': { size: 4000, mtime: 1 } };
+
+  function durationOf(sourceId: number): number | null {
+    const row = new Database(dbPath, { readonly: true })
+      .prepare('SELECT duration FROM music_tracks WHERE source_id = ?')
+      .get(sourceId) as { duration: number | null } | undefined;
+    return row?.duration ?? null;
+  }
+
+  it('re-parses an unchanged file that has no duration when the parser version is stale', async () => {
+    const sourceId = makeSource('music');
+    const adapter = makeTreeAdapter(musicTree);
+    // 第一轮：读不到标签（readAudio 返回 null）→ 行建好了但没有时长
+    await runScan(
+      scanningAdapterOf(adapter),
+      createLocalScanDriver({ repo, sourceId, purpose: 'music', readAudio: async () => null }),
+      sourceId
+    );
+    expect(durationOf(sourceId)).toBeNull();
+
+    // 第二轮：指纹没变，但版本落后 → 强制重解析一次并补齐
+    const versions: number[] = [];
+    const readAudio = vi.fn(async () => readFile(FLAC));
+    await runScan(
+      scanningAdapterOf(adapter),
+      createLocalScanDriver({
+        repo,
+        sourceId,
+        purpose: 'music',
+        readAudio,
+        durationScanVersion: 0,
+        onDurationScanVersion: (v) => versions.push(v),
+      }),
+      sourceId
+    );
+    expect(readAudio).toHaveBeenCalledTimes(1);
+    expect(durationOf(sourceId)).toBeCloseTo(20, 1);
+    expect(versions).toEqual([AUDIO_DURATION_PARSER_VERSION]);
+  });
+
+  it('does not re-read unchanged files once the version is current (or when a duration exists)', async () => {
+    const sourceId = makeSource('music');
+    const adapter = makeTreeAdapter(musicTree);
+    // 行已有时长：即便版本落后也不该再读一遍
+    await runScan(
+      scanningAdapterOf(adapter),
+      createLocalScanDriver({
+        repo,
+        sourceId,
+        purpose: 'music',
+        readAudio: async () => readFile(FLAC),
+      }),
+      sourceId
+    );
+    expect(durationOf(sourceId)).toBeCloseTo(20, 1);
+
+    const readAudio = vi.fn(async () => readFile(FLAC));
+    await runScan(
+      scanningAdapterOf(adapter),
+      createLocalScanDriver({
+        repo,
+        sourceId,
+        purpose: 'music',
+        readAudio,
+        durationScanVersion: 0,
+      }),
+      sourceId
+    );
+    expect(readAudio).not.toHaveBeenCalled();
+
+    // 版本已是最新：缺时长的行也不再重读（避免每次扫描都白读 512 KiB）
+    const db = new Database(dbPath);
+    db.prepare('UPDATE music_tracks SET duration = NULL WHERE source_id = ?').run(sourceId);
+    db.close();
+    const readAudio2 = vi.fn(async () => readFile(FLAC));
+    await runScan(
+      scanningAdapterOf(adapter),
+      createLocalScanDriver({
+        repo,
+        sourceId,
+        purpose: 'music',
+        readAudio: readAudio2,
+        durationScanVersion: AUDIO_DURATION_PARSER_VERSION,
+      }),
+      sourceId
+    );
+    expect(readAudio2).not.toHaveBeenCalled();
+  });
+
+  it('video sources never bump the audio parser version', async () => {
+    const sourceId = makeSource('video');
+    const versions: number[] = [];
+    await runScan(
+      scanningAdapterOf(makeTreeAdapter({ 'a.mkv': { size: 100, mtime: 1 } })),
+      createLocalScanDriver({
+        repo,
+        sourceId,
+        durationScanVersion: 0,
+        onDurationScanVersion: (v) => versions.push(v),
+      }),
+      sourceId
+    );
+    expect(versions).toEqual([]);
   });
 });
 

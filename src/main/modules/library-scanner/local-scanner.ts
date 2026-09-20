@@ -1,7 +1,7 @@
 import type { SourceAdapter, SourceEntry, ScanDriver } from '../library-sources/types';
 import type { CatalogFileRow, CatalogRepository } from '../catalog/repository';
 import { classifyPath, normalizeNameKey, type Classification } from './classifier';
-import { parseAudioTagsFromBuffer, type ParsedAudioTags } from './tag-parser';
+import { parseAudioTagsFromBuffer, AUDIO_DURATION_PARSER_VERSION, type ParsedAudioTags } from './tag-parser';
 import { saveCoverFromTags, saveLyricsFromTags } from './cover-service';
 import { parseCue } from './cue-parser';
 import { decodeNfoBuffer, parseNfoXml, NfoParseError } from '../metadata/nfo-parser';
@@ -218,6 +218,17 @@ export function createLocalScanDriver(deps: {
    * 'video' 只索引视频（跳过音频/CUE）。不支持混放，缺省按视频处理。
    */
   purpose?: 'music' | 'video';
+  /**
+   * 上次扫描时的**时长解析能力版本**（QYP3-052）。
+   *
+   * 指纹没变的文件本来一律跳过（连标签都不读），所以解析器升级后存量行的
+   * 空时长永远补不上。低于 `AUDIO_DURATION_PARSER_VERSION` 时，对"指纹没变
+   * 但仍缺时长"的曲目强制重解析一次，收尾时经 `onDurationScanVersion` 写回
+   * ——只补这一轮，之后恢复正常增量跳过。
+   */
+  durationScanVersion?: number;
+  /** 本轮扫描收尾时回调（写回新的时长解析能力版本）。 */
+  onDurationScanVersion?: (version: number) => void;
 }): LocalScanDriver {
   const { repo, sourceId } = deps;
   const purpose = deps.purpose ?? 'video';
@@ -227,9 +238,11 @@ export function createLocalScanDriver(deps: {
     repo.listFilesBySource(sourceId).map((f) => [f.relative_path, { fingerprint: f.fingerprint }])
   );
   // 音频指纹基线（QYP3-003）：music_tracks 自持，与视频 catalog_files 分离。
-  const musicIndex = new Map<string, { fingerprint: string }>(
+  const musicIndex = new Map<string, { fingerprint: string; duration: number | null }>(
     repo.listMusicTracks(sourceId).map((r) => [`audio:${r.source_key}`, r])
   );
+  // 时长解析能力升级过（QYP3-052）：这一轮要把存量行的空时长补上
+  const refillDuration = (deps.durationScanVersion ?? 0) < AUDIO_DURATION_PARSER_VERSION;
   const seen = new Set<string>();
   // NFO enrichment state (per run): "<dir>:<stem>" → itemId (dir-qualified:
   // same-named videos in different directories must never cross-match);
@@ -309,7 +322,11 @@ export function createLocalScanDriver(deps: {
         seen.add(entry.relativePath);
         const audioFingerprint = fingerprintFor(entry);
         const audioExisting = musicIndex.get(`audio:${entry.relativePath}`);
-        if (audioExisting && audioFingerprint && audioExisting.fingerprint === audioFingerprint) return;
+        if (audioExisting && audioFingerprint && audioExisting.fingerprint === audioFingerprint) {
+          // 指纹没变：除了"解析器升级后还要补空时长"这一种情况，一律跳过
+          const missingDuration = !(typeof audioExisting.duration === 'number' && audioExisting.duration > 0);
+          if (!(refillDuration && missingDuration)) return;
+        }
 
         let tags: ParsedAudioTags = {
           hasCover: false,
@@ -321,7 +338,9 @@ export function createLocalScanDriver(deps: {
           try {
             headBuf = await deps.readAudio(entry, signal);
             if (headBuf) {
-              tags = parseAudioTagsFromBuffer(headBuf, parsed.audio);
+              // fileSize 是**完整文件大小**（headBuf 只有前 512 KiB）：CBR mp3
+              // 靠它反推时长（QYP3-052）
+              tags = parseAudioTagsFromBuffer(headBuf, parsed.audio, entry.size);
             }
           } catch {
             // 标签读取失败：文件名启发式结果已就位，扫描不中断。
@@ -479,6 +498,12 @@ export function createLocalScanDriver(deps: {
     // 仅视频来源的批次里没有音频路径（QYP3-039），跑清理会把存量音轨
     // 全部误标删除——必须跳过；'all'/'music' 才允许收尾清理音轨。
     if (purpose !== 'video') cleanupMissingMusic();
+    // 补时长那一轮到此为止（QYP3-052）：写回版本号，下次扫描恢复增量跳过。
+    // 只有音乐来源真的解析过时长——视频来源的扫描绝不能把这个版本顶上去，
+    // 否则音乐来源永远等不到补解析。
+    if (refillDuration && purpose === 'music') {
+      deps.onDurationScanVersion?.(AUDIO_DURATION_PARSER_VERSION);
+    }
   }
 
   /** 音轨可用性（QYP3-014）：全量扫描收尾清理已消失的音轨。 */

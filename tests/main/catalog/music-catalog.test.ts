@@ -110,6 +110,18 @@ describe('music catalog queries (QYP3-008a)', () => {
     expect(repo.listFavoriteMusicTracks([sourceId])).toEqual([]);
   });
 
+  it('backfills a track duration (QYP3-052)', () => {
+    const target = repo.listMusicTracksPaged([sourceId], 0, 200).find((t) => t.title === '晴天')!;
+    repo.setMusicTrackDuration(target.id, 269.5);
+    expect(repo.listMusicTracksPaged([sourceId], 0, 200).find((t) => t.id === target.id)?.duration).toBe(269.5);
+    // 播放期给的是真实值，旧的估算值直接被覆盖
+    repo.setMusicTrackDuration(target.id, 271);
+    expect(repo.listMusicTracksPaged([sourceId], 0, 200).find((t) => t.id === target.id)?.duration).toBe(271);
+    // 顺带覆盖扫描器用来判断"要不要补时长"的投影
+    const index = repo.listMusicTracks(sourceId).find((r) => r.source_key === 'a1');
+    expect(index?.duration).toBe(271);
+  });
+
   it('searches music by title, artist and album', () => {
     expect(repo.searchMusicTracks([sourceId], '晴天').map((t) => t.title)).toEqual(['晴天']);
     expect(repo.searchMusicTracks([sourceId], '薛之谦').map((t) => t.title)).toEqual(['演员']);

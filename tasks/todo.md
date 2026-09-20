@@ -1143,6 +1143,45 @@
   与 `app-mode-store.ts` / `WindowProfileHost.tsx` 注释同时改写；音乐模式手动改的
   尺寸**仍不记忆**（每次重算标准 460×820，与"竖窄屏是固定形态"的既有设计一致）
 
+### QYP3-052 音乐列表时长（扫描期补齐 + 播放期回填）`[x]`
+- 诉求（用户）：音乐列表为什么有的显示时长有的不显示
+- 查证：`music_tracks.duration` 唯一来源是扫描期解析标签，而解析器**只对 FLAC
+  （STREAMINFO）与 moov 在头部的 m4a 算时长**。用户库 214 首里 67 首为空：65 首
+  mp3 全部为空（ID3 分支只取文字帧，不读 TLEN、不解析 MPEG 帧头）、1 首 APE
+  （无时长解析）、1 首 m4a（文件已从磁盘删除的残留行）
+- 方案（用户选定）：**补解析 + 播放时回填**（不做 ffprobe 逐个探测：老机太慢）
+- 改动：
+  - `tag-parser.ts`：mp3 时长优先级 **Xing/Info 总帧数 → ID3 TLEN → CBR 估算**；
+    CBR 估算必须"前 40 帧码率完全一致"才认——VBR 无 Xing 时首帧码率毫无代表性，
+    按它估实测差 2~4 倍（最大差 1125s），宁可留空；APE 读 `MAC ` 头的
+    blocksPerFrame/finalFrameBlocks/totalFrames/sampleRate（<3.98 的老布局不猜）；
+    `parseAudioTagsFromBuffer` 加 `fileSize` 第三参（CBR 估算用，缺省就不估）；
+    导出 `AUDIO_DURATION_PARSER_VERSION`
+  - 扫描器：增量跳过（指纹 size:mtime）会让重扫连标签都不读 → 加
+    `durationScanVersion` 闸门，落后时只对"缺时长"的行强制解析一次，收尾写回
+    版本号；**视频来源的扫描绝不写这个版本号**（否则音乐来源永远等不到补解析）
+  - 播放期回填：`repository.setMusicTrackDuration` + `MUSIC.SET_TRACK_DURATION`
+    + preload + store 里的 `maybeReportDuration()`（webaudio 的 `onTime` 与 mpv 桥
+    两个调用点都接；trackId>0、库里已有且差 ≤2s 不打扰、每曲一次哨兵、失败静默）
+- Evidence: tag-parser +8 例（Xing/TLEN/VBR 不猜/CBR+fileSize/无 fileSize/裸 mp3/
+  APE/老 APE 布局）、local-scan +3 例（版本落后补一次并回调、版本最新或已有时长
+  不重读、视频来源不写版本号）、music-catalog +1 例、渲染层 2 个文件 6 例（两条
+  时长落地路径都覆盖）；**真实库副本端到端**：214 首/67 缺 → 扫一次后 210 首/6 缺
+  （cleanupMissingMusic 顺带清掉 4 行失效行），解析成功的 58 首与 ffmpeg 误差 0；
+  typecheck 双配置 + 全量 1074 绿 + 三构建通过
+- 待目标机验证：重扫补齐、再扫不重读、播放回填、WebDAV 仍为空——已记入
+  `docs/TARGET-VERIFY.md`
+- 本轮记录在案但未做的缺口：
+  - **WebDAV 的 `readAudio` 仍未接**（网络读 512 KiB/首的成本，计划 §6 的原决定）
+    → WebDAV 曲目时长靠播放回填；若以后要扫描期就有，接
+    `WebDavSourceAdapter.open(locator, signal, 'bytes=0-524287')` 即可
+  - **搜索页不显示时长**：`unified-query.ts` 的 music 查询没 SELECT duration，
+    与"列表里有的显示有的不显示"是两回事
+  - **CUE 分轨无时长**：`music_cue_entries` 只有 start/end（最后一轨 end 为 null），
+    且 CUE 行不在列表里按时长展示；本机库里 0 条，未验证
+  - **ID3 标签 >512 KiB 的 mp3**（用户库 3 首，内嵌封面太大）扫描期读不到音频帧，
+    只能等播放回填；要覆盖得二次按偏移读
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

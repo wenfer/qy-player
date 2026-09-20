@@ -91,6 +91,11 @@ let engineSingleton: WebAudioEngine | null = null;
 let lastReportAt = 0;
 /** 播放令牌：新 playQueue 使旧 playCurrent 竞态失效（重复点击防护）。 */
 let playToken = 0;
+/**
+ * 时长回填哨兵（QYP3-052）：已经报告过真实时长的曲目 id。
+ * mpv 在重载/seek 后会重发 duration，没有这个哨兵就会反复写库。
+ */
+let durationReportedTrackId: number | null = null;
 
 /**
  * 离线频谱（QYP3-050）：mpv 音源的真频谱由主进程用 ffmpeg 预算，渲染层按
@@ -254,6 +259,7 @@ export function attachMusicMpvBridge(): void {
       if (typeof s.duration === 'number' && s.duration > 0) patch.duration = s.duration;
       if (typeof s.isPlaying === 'boolean') patch.isPlaying = s.isPlaying;
       if (Object.keys(patch).length > 0) useMusicPlaybackStore.setState(patch);
+      if (patch.duration !== undefined) maybeReportDuration(); // QYP3-052 时长回填
       // 离线频谱（QYP3-050）：每个位置事件都重置锚点，两次推送之间外推
       if (typeof s.currentTime === 'number') {
         spectrumAnchor = makeAnchor(
@@ -306,7 +312,9 @@ function getEngine(): WebAudioEngine {
     engineSingleton.onTime = (position, duration) => {
       const s = useMusicPlaybackStore.getState();
       if (s.engine === 'mpv') return; // mpv 引擎状态由主进程事件驱动
-      useMusicPlaybackStore.setState({ position, duration: duration || s.duration });
+      const known = duration || s.duration;
+      useMusicPlaybackStore.setState({ position, duration: known });
+      if (known > 0) maybeReportDuration(); // QYP3-052 时长回填
       pushDeskLyrics(position, true);
       const now = Date.now();
       if (now - lastReportAt >= 10_000) {
@@ -442,6 +450,29 @@ function reportProgress(opts: { final?: boolean } = {}): void {
     // FLAC 自救成功后 url 变 blob:，但那只会发生在本地曲目上
     mediaType: ext.url.startsWith('qy-stream://') ? 'webdav' : 'local',
   });
+}
+
+/**
+ * 播放期回填真实时长（QYP3-052）。
+ *
+ * 扫描期解析不出来的曲目（VBR mp3 没有 Xing 头、ID3 标签超出读取窗口、
+ * WebDAV 来源）列表里一直是空白，但播放器知道真实值——每个曲目报一次。
+ * 非关键路径：失败静默，绝不影响播放。
+ */
+function maybeReportDuration(): void {
+  const s = useMusicPlaybackStore.getState();
+  const trackId = s.currentSource?.trackId ?? 0;
+  // 服务器曲目不落本地库（trackId = 0），队列合成 id 是负数
+  if (!(trackId > 0)) return;
+  if (durationReportedTrackId === trackId) return;
+  const duration = s.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  const stored = s.current?.duration ?? 0;
+  if (stored > 0 && Math.abs(stored - duration) <= 2) return; // 库里已经够准，不打扰
+  durationReportedTrackId = trackId;
+  void Promise.resolve(window.electronAPI.setMusicTrackDuration?.(trackId, duration)).catch(
+    () => undefined
+  );
 }
 
 /** 音频链设备侧参数（主进程按此 set_property；P2 增加 ReplayGain 高级项）。 */

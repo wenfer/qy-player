@@ -1031,6 +1031,24 @@ export function registerIpcHandlers(
     }
   );
 
+  // 播放期回填真实时长（QYP3-052）：渲染层在拿到真实 duration 后报一次，
+  // 只对本地/WebDAV 曲目（服务器曲目 trackId = 0，不落本地库）
+  ipcMain.handle(
+    IPC_CHANNELS.MUSIC.SET_TRACK_DURATION,
+    (_event, args: { trackId: number; duration: number }) => {
+      const trackId = Number(args?.trackId);
+      const duration = Number(args?.duration);
+      if (!Number.isInteger(trackId) || trackId <= 0) {
+        return err('VALIDATION_FAILED', '参数不合法');
+      }
+      if (!Number.isFinite(duration) || duration <= 0 || duration > 24 * 3600) {
+        return err('VALIDATION_FAILED', '时长不合法');
+      }
+      catalogRepo.setMusicTrackDuration(trackId, duration);
+      return ok({ trackId, duration });
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
     return ok({
       skipIntro: storage.getConfig('playback.skipIntro') !== 'false',
@@ -2314,8 +2332,9 @@ function registerCatalogHandlers(
             // so a stored relative path can never escape the source root.
             readNfo: async (relativePath) =>
               readFile((adapter as LocalSourceAdapter).resolveInside(relativePath)),
-            // QYP3-004：本地音频读标签。只读头部 512 KiB（ID3v2/APIC/
-            // FLAC 元数据块都在头部；完整时长交给播放时 mpv/probe）
+            // QYP3-004：本地音频读标签。只读头部 512 KiB（ID3v2/APIC/FLAC
+            // 元数据块都在头部）。时长（QYP3-052）在扫描期尽力解析（mp3 的
+            // Xing/TLEN、APE 的 MAC 头），解析不出来的由播放期回填
             readAudio: async (entry) => {
               const fh = (await openFile(
                 (adapter as LocalSourceAdapter).resolveInside(entry.relativePath),
@@ -2333,6 +2352,16 @@ function registerCatalogHandlers(
             // QYP3-006：CUE 文本（小文件，整读）
             readText: async (entry) =>
               (await readFile((adapter as LocalSourceAdapter).resolveInside(entry.relativePath))) as Buffer,
+            // QYP3-052：时长解析能力版本——低于当前版本时，本轮会给"指纹没变
+            // 但缺时长"的曲目强制补解析一次（收尾写回，只补这一轮）
+            durationScanVersion: Number(storage.getConfig('music.durationScanVersion')) || 0,
+            onDurationScanVersion: (version) => {
+              try {
+                storage.setConfig('music.durationScanVersion', String(version));
+              } catch {
+                // 写不进去只影响下一轮是否重复解析，不影响扫描结果
+              }
+            },
           });
     const controller = new ScanJobController({
       repo,

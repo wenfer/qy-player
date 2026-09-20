@@ -11,6 +11,14 @@
 
 import { readFile } from 'node:fs/promises';
 
+/**
+ * 时长解析能力的版本（QYP3-052）。
+ *
+ * 扫描器用它决定"要不要给库里缺时长的老行强制补解析一次"：只有本文件的时长
+ * 解析能力变了才 +1，用户重扫一次媒体库即可补齐存量行（指纹没变本来会跳过）。
+ */
+export const AUDIO_DURATION_PARSER_VERSION = 1;
+
 export interface ParsedAudioTags {
   title?: string;
   artist?: string;
@@ -19,7 +27,12 @@ export interface ParsedAudioTags {
   trackNo?: number;
   discNo?: number;
   year?: number;
-  /** FLAC STREAMINFO / m4a mvhd；mp3 不可靠故不估。 */
+  /**
+   * 时长（秒）。来源：FLAC STREAMINFO / m4a mvhd / mp3 的 Xing·Info 帧
+   * （退化到 ID3 TLEN，再退化到"码率恒定的 CBR 按文件大小估"）/ APE MAC 头。
+   * 解析不出来的格式（VBR 无 Xing、ID3 标签超出读取窗口、未知格式）留空，
+   * 由播放期回填（QYP3-052）。
+   */
   duration?: number;
   lyrics?: string;
   hasCover: boolean;
@@ -42,6 +55,174 @@ function be32(buf: Uint8Array, offset: number): number {
 
 function le32(buf: Uint8Array, offset: number): number {
   return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
+}
+
+/** MPEG 音频帧头解析（mp3/mp2/mp1 时长用，QYP3-052）。 */
+interface MpegFrame {
+  offset: number;
+  /** 1 = MPEG1，2 = MPEG2/2.5（码率与每帧采样数的表不同）。 */
+  family: 1 | 2;
+  /** 真实层号：1 = Layer I，2 = Layer II，3 = Layer III。 */
+  layer: 1 | 2 | 3;
+  bitrateKbps: number;
+  sampleRate: number;
+  samplesPerFrame: number;
+  /** 1 = 单声道（决定 Xing 头前面的侧信息长度）。 */
+  mono: boolean;
+  padding: number;
+}
+
+/** 索引顺序 = 头里的 layer 位（1→Layer III、2→Layer II、3→Layer I）。 */
+const MPEG_BITRATE_KBPS: Record<1 | 2, readonly number[][]> = {
+  // MPEG1：Layer I / II / III
+  1: [
+    [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
+    [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+    [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  ],
+  // MPEG2 / 2.5：Layer I / II 同 MPEG1，Layer III 减半
+  2: [
+    [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
+    [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+    [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  ],
+};
+const MPEG_SAMPLE_RATES: readonly (readonly number[])[] = [
+  [44100, 48000, 32000], // MPEG1
+  [22050, 24000, 16000], // MPEG2
+  [11025, 12000, 8000], // MPEG2.5
+];
+/** 每帧采样数：MPEG1 的 Layer II/III 是 1152，MPEG2/2.5 的 Layer III 只有 576。 */
+const MPEG_SAMPLES_PER_FRAME: Record<1 | 2, readonly number[]> = {
+  1: [384, 1152, 1152],
+  2: [384, 1152, 576],
+};
+
+/** 最多向后找这么多字节的 MPEG 帧头（ID3 标签后可能还有残留字节）。 */
+const MPEG_SCAN_WINDOW = 200 * 1024;
+/** CBR 判定需要连续这么多帧码率一致，才敢用文件大小反推时长。 */
+const CBR_PROBE_FRAMES = 40;
+/** 时长合理区间（秒）：越界的解析结果一律丢弃。 */
+const MIN_DURATION_SEC = 1;
+const MAX_DURATION_SEC = 24 * 3600;
+
+function parseMpegFrame(buf: Uint8Array, offset: number): MpegFrame | null {
+  if (offset + 4 > buf.length) return null;
+  if (buf[offset] !== 0xff || (buf[offset + 1] & 0xe0) !== 0xe0) return null;
+  const versionBits = (buf[offset + 1] >> 3) & 0x03; // 3=MPEG1, 2=MPEG2, 0=MPEG2.5, 1=保留
+  const layerBits = (buf[offset + 1] >> 1) & 0x03; // 3=I, 2=II, 1=III, 0=保留
+  const bitrateBits = (buf[offset + 2] >> 4) & 0x0f;
+  const sampleRateBits = (buf[offset + 2] >> 2) & 0x03;
+  if (
+    versionBits === 1 ||
+    layerBits === 0 ||
+    bitrateBits === 0 ||
+    bitrateBits === 15 ||
+    sampleRateBits === 3
+  ) {
+    return null;
+  }
+  const family: 1 | 2 = versionBits === 3 ? 1 : 2;
+  const layer = (4 - layerBits) as 1 | 2 | 3;
+  // 表按真实层号排（0=Layer I / 1=II / 2=III），别用 layerBits 直接索引（顺序相反）
+  const bitrateKbps = MPEG_BITRATE_KBPS[family][layer - 1][bitrateBits];
+  const sampleRateIndex = versionBits === 3 ? 0 : versionBits === 2 ? 1 : 2;
+  const sampleRate = MPEG_SAMPLE_RATES[sampleRateIndex][sampleRateBits];
+  if (!bitrateKbps || !sampleRate) return null;
+  return {
+    offset,
+    family,
+    layer,
+    bitrateKbps,
+    sampleRate,
+    samplesPerFrame: MPEG_SAMPLES_PER_FRAME[family][layer - 1],
+    // 单声道是 3（单声道），其余（立体声/联合/双声道）侧信息更长
+    mono: ((buf[offset + 3] >> 6) & 0x03) === 3,
+    padding: (buf[offset + 2] >> 1) & 0x01,
+  };
+}
+
+/** 从 `from` 起找第一个合法的 MPEG 帧头（找不到返回 null）。 */
+function findMpegFrame(buf: Uint8Array, from: number): MpegFrame | null {
+  const end = Math.min(buf.length - 4, from + MPEG_SCAN_WINDOW);
+  for (let i = Math.max(0, from); i <= end; i++) {
+    const frame = parseMpegFrame(buf, i);
+    if (frame) return frame;
+  }
+  return null;
+}
+
+/** MPEG 一帧的字节数（Layer I 的 padding 以 4 字节为单位，实际文件几乎见不到）。 */
+function mpegFrameLength(frame: MpegFrame): number {
+  const slotBytes = frame.layer === 1 ? 4 : 1;
+  return (
+    Math.floor((frame.samplesPerFrame / 8) * frame.bitrateKbps * 1000 / frame.sampleRate) +
+    frame.padding * slotBytes
+  );
+}
+
+/** Xing/Info 帧里的总帧数 → 时长（精确，LAME/大多数编码器都会写）。 */
+function mp3FrameDuration(buf: Uint8Array, audioStart: number): number | null {
+  const frame = findMpegFrame(buf, audioStart);
+  if (!frame) return null;
+  // Xing 头在帧头 + 4 字节（CRC 位置）+ 侧信息之后；侧信息长度只与版本和声道数有关
+  const sideInfo = frame.family === 1 ? (frame.mono ? 17 : 32) : frame.mono ? 9 : 17;
+  const at = frame.offset + 4 + sideInfo;
+  if (at + 12 > buf.length) return null;
+  const tag = String.fromCharCode(buf[at], buf[at + 1], buf[at + 2], buf[at + 3]);
+  if (tag !== 'Xing' && tag !== 'Info') return null;
+  if ((be32(buf, at + 4) & 0x01) === 0) return null; // 没有帧数字段
+  const frames = be32(buf, at + 8);
+  if (frames === 0) return null;
+  return (frames * frame.samplesPerFrame) / frame.sampleRate;
+}
+
+/**
+ * CBR 估算：只有前 40 帧码率完全一致才认（真 CBR 文件的帧长固定，用文件大小
+ * 反推误差 < 1 帧）。**VBR 且没有 Xing 头时首帧码率毫无代表性**——按它估会差
+ * 2~4 倍（实测最大差 1125 秒），所以宁可留空等播放期回填。
+ */
+function mp3CbrDuration(buf: Uint8Array, audioStart: number, fileSize: number | undefined): number | null {
+  if (!fileSize || fileSize <= audioStart) return null;
+  const first = findMpegFrame(buf, audioStart);
+  if (!first) return null;
+  let offset = first.offset;
+  for (let i = 0; i < CBR_PROBE_FRAMES; i++) {
+    const frame = parseMpegFrame(buf, offset);
+    if (!frame || frame.bitrateKbps !== first.bitrateKbps || frame.sampleRate !== first.sampleRate) {
+      return null;
+    }
+    const length = mpegFrameLength(frame);
+    if (length < 4) return null;
+    offset += length;
+  }
+  return ((fileSize - audioStart) * 8) / (first.bitrateKbps * 1000);
+}
+
+/**
+ * APE（Monkey's Audio）音频时长：`MAC ` 描述符就在文件最前面（与文件尾的
+ * APEv2 标签是两回事）。3.98 之后头部布局固定；更老的版本布局不同，不猜。
+ */
+function apeAudioDuration(buf: Uint8Array): number | null {
+  if (buf.length < 76) return null;
+  if (!(buf[0] === 0x4d && buf[1] === 0x41 && buf[2] === 0x43 && buf[3] === 0x20)) return null;
+  const version = buf[4] | (buf[5] << 8);
+  if (version < 3980) return null;
+  const blocksPerFrame = le32(buf, 56);
+  const finalFrameBlocks = le32(buf, 60);
+  const totalFrames = le32(buf, 64);
+  const sampleRate = le32(buf, 72);
+  if (!blocksPerFrame || !totalFrames || !sampleRate) return null;
+  const samples =
+    totalFrames > 1 ? (totalFrames - 1) * blocksPerFrame + finalFrameBlocks : finalFrameBlocks;
+  if (samples <= 0) return null;
+  return samples / sampleRate;
+}
+
+/** 解析结果是否在合理区间（挡住解析错位得到的离谱数字）。 */
+function plausibleDuration(seconds: number | null): number | null {
+  if (seconds === null || !Number.isFinite(seconds)) return null;
+  return seconds >= MIN_DURATION_SEC && seconds <= MAX_DURATION_SEC ? seconds : null;
 }
 
 /** ID3 文本按编码字节解出字符串（支持 0/1/2/3 四种编码）。 */
@@ -73,7 +254,7 @@ function parsePair(value: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
-function parseId3(buf: Uint8Array): ParsedAudioTags | null {
+function parseId3(buf: Uint8Array, fileSize?: number): ParsedAudioTags | null {
   if (buf.length < 10) return null;
   if (!(buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33)) return null; // "ID3"
   const major = buf[3];
@@ -128,6 +309,13 @@ function parseId3(buf: Uint8Array): ParsedAudioTags | null {
       case 'TPOS':
         out.discNo = out.discNo ?? parsePair(decodeText(encoding, frameData.subarray(1)));
         break;
+      case 'TLEN':
+      case 'TLE': {
+        // 毫秒（iTunes 等非 LAME 编码器的 VBR 文件只有这个）
+        const ms = parsePair(decodeText(encoding, frameData.subarray(1)));
+        if (ms !== undefined && ms > 0) out.duration = out.duration ?? ms / 1000;
+        break;
+      }
       case 'TYER':
       case 'TDRC':
         out.year = out.year ?? parsePair(decodeText(encoding, frameData.subarray(1)));
@@ -159,6 +347,22 @@ function parseId3(buf: Uint8Array): ParsedAudioTags | null {
     pos += size;
   }
   if (!sawFrame) return null;
+  // 时长（QYP3-052）：Xing/Info 的总帧数最准 → 退到 ID3 的 TLEN → 再退到
+  // "前 40 帧码率完全一致"的 CBR 估算（VBR 无 Xing 的一律留空，见 mp3CbrDuration）
+  if (out.duration !== undefined && plausibleDuration(out.duration) === null) out.duration = undefined;
+  if (out.duration === undefined) {
+    // 音频起点 = 标签块结束（v2.4 带 footer 时再 +10）
+    const audioStart = Math.min(
+      limit + (major === 4 && (buf[5] & 0x10) !== 0 ? 10 : 0),
+      buf.length
+    );
+    const fromFrames = plausibleDuration(mp3FrameDuration(buf, audioStart));
+    if (fromFrames !== null) out.duration = fromFrames;
+    else {
+      const cbr = plausibleDuration(mp3CbrDuration(buf, audioStart, fileSize));
+      if (cbr !== null) out.duration = cbr;
+    }
+  }
   return out;
 }
 
@@ -390,21 +594,40 @@ export async function parseAudioTags(
   } catch {
     return mergeFilenameFallback({ hasCover: false, format: 'unknown' }, fallback);
   }
-  return parseAudioTagsFromBuffer(buf, fallback);
+  return parseAudioTagsFromBuffer(buf, fallback, buf.length);
 }
 
-/** 缓冲区入口：扫描器已经把字节读在手里时避免二次 IO。 */
+/**
+ * 缓冲区入口：扫描器已经把字节读在手里时避免二次 IO。
+ *
+ * `fileSize` 是**完整文件大小**（缓冲区可能只有头部 512 KiB）：CBR mp3 靠它
+ * 反推时长，缺省就不做这个估算（宁可留空）。
+ */
 export function parseAudioTagsFromBuffer(
   buf: Buffer,
-  fallback?: { title?: string; artist?: string; trackNo?: number }
+  fallback?: { title?: string; artist?: string; trackNo?: number },
+  fileSize?: number
 ): ParsedAudioTags {
   try {
     const parsed =
-      parseId3(buf) ??
+      parseId3(buf, fileSize) ??
       parseFlac(buf) ??
       parseM4a(buf) ??
       parseApe(buf) ??
       ({ hasCover: false, format: 'unknown' } as ParsedAudioTags);
+    if (parsed.duration === undefined) {
+      // APE 音频（`MAC ` 头）与"没有 ID3 头的裸 mp3"：时长不在标签里，单独取
+      const ape = plausibleDuration(apeAudioDuration(buf));
+      if (ape !== null) parsed.duration = ape;
+      else if (parsed.format === 'ape' || parsed.format === 'unknown') {
+        const bare = plausibleDuration(mp3FrameDuration(buf, 0));
+        if (bare !== null) parsed.duration = bare;
+        else {
+          const cbr = plausibleDuration(mp3CbrDuration(buf, 0, fileSize));
+          if (cbr !== null) parsed.duration = cbr;
+        }
+      }
+    }
     return mergeFilenameFallback(parsed, fallback);
   } catch {
     return mergeFilenameFallback({ hasCover: false, format: 'unknown' }, fallback);

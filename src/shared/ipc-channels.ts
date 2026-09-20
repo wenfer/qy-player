@@ -28,6 +28,8 @@ export const IPC_CHANNELS = {
     /** 收藏列表与收藏开关（QYP3-008a）。 */
     GET_FAVORITES: 'music:get-favorites',
     SET_FAVORITE: 'music:set-favorite',
+    /** 播放期回填真实时长（QYP3-052）：扫描解析不出来的曲目，播放时补上。 */
+    SET_TRACK_DURATION: 'music:set-track-duration',
     /** renderer 引擎进度上报（ADR-0007：webaudio 播放不经 mpv）。 */
     REPORT_PROGRESS: 'music:report-progress',
     /**
