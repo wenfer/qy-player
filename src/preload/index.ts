@@ -318,6 +318,8 @@ const electronAPI = {
   // 音乐模式（QYP3-044）：主窗口原地改成竖窄屏（同窗，不新开窗口）
   setMusicMode: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW.SET_MUSIC_MODE, enabled),
+  /** reload 后问主进程：窗口现在是浮窗还是竖屏（渲染层据此回填 store）。 */
+  getWindowProfile: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW.GET_PROFILE),
   // 系统资源压力（QYP3-036）：性能保护据此降帧
   getResourcePressure: () => ipcRenderer.invoke(IPC_CHANNELS.RESOURCE.GET_PRESSURE),
   onResourcePressure: (cb: (pressure: string) => void) => {

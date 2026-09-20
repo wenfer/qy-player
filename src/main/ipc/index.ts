@@ -110,7 +110,7 @@ import {
   setMusicEngineActive,
 } from '../modules/playback-engine/music-active';
 import { SleepTimer } from '../modules/ui-shell/sleep-timer';
-import { setCompactMode, setMusicMode } from '../modules/ui-shell/compact-window';
+import { setCompactMode, setMusicMode, getWindowProfile } from '../modules/ui-shell/compact-window';
 import { getResourcePressure } from '../modules/ui-shell/resource-guard';
 import {
   closeDeskLyrics,
@@ -607,6 +607,10 @@ export function registerIpcHandlers(
     const music = setMusicMode(getMainWindow?.(), Boolean(enabled));
     return ok({ music });
   });
+
+  // 渲染层 reload（dev 热重载）后回填：窗口几何在主进程，store 在渲染层，
+  // 不回填就会在小窗口里画出完整影视界面
+  ipcMain.handle(IPC_CHANNELS.WINDOW.GET_PROFILE, () => ok(getWindowProfile()));
 
   // 系统资源压力（QYP3-036）：性能保护据此降帧。取值为主进程最近一次采样，
   // 变化时由主进程主动推送（ON_PRESSURE）。

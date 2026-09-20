@@ -20,11 +20,12 @@ import PlayerControls from './components/PlayerControls';
 import MusicMiniBar from './components/MusicMiniBar';
 import CompactPlayer from './components/CompactPlayer';
 import ToastContainer from './components/Toast';
+import WindowProfileHost from './components/WindowProfileHost';
+import { useAppModeStore } from './stores/app-mode-store';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
 import { useCompactModeStore } from './stores/compact-mode-store';
-import { useAppModeStore } from './stores/app-mode-store';
 import { useMusicPlaybackStore } from './stores/music-playback-store';
 import { useResourceStore } from './stores/resource-store';
 
@@ -195,6 +196,7 @@ function App() {
       future={{ v7_startTransition: true, v7_relativeSplatPath: true } as object}
     >
       <CompactModeHost />
+      <WindowProfileHost />
       <ResourceHost />
       <Shell />
     </HashRouter>

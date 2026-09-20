@@ -9,9 +9,13 @@ vi.mock('electron', () => ({
   screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
 }));
 
+import type { BrowserWindow, Rectangle } from 'electron';
 import {
   compactBounds,
   musicBounds,
+  setCompactMode,
+  setMusicMode,
+  getWindowProfile,
   COMPACT_HEIGHT,
   COMPACT_MARGIN,
   COMPACT_WIDTH,
@@ -57,5 +61,69 @@ describe('musicBounds (QYP3-044)', () => {
     const b = musicBounds({ x: 1920, y: 100, width: 1280, height: 1024 });
     expect(b.x).toBe(1920 + (1280 - MUSIC_WIDTH) / 2);
     expect(b.y).toBe(100 + (1024 - MUSIC_HEIGHT) / 2);
+  });
+});
+
+/** 假窗口：只实现 setCompactMode / setMusicMode 用到的那几个方法。 */
+function fakeWin(bounds = { x: 100, y: 100, width: 1600, height: 900 }) {
+  const calls: string[] = [];
+  const win = {
+    bounds: { ...bounds },
+    resizable: true,
+    alwaysOnTop: false,
+    calls,
+    isDestroyed: () => false,
+    isResizable: () => win.resizable,
+    isAlwaysOnTop: () => win.alwaysOnTop,
+    isMaximized: () => false,
+    unmaximize: () => undefined,
+    getBounds: () => ({ ...win.bounds }),
+    setBounds: (b: Rectangle) => {
+      win.bounds = { ...b };
+      calls.push(`bounds:${b.width}x${b.height}`);
+    },
+    setResizable: (v: boolean) => {
+      win.resizable = v;
+    },
+    setAlwaysOnTop: (v: boolean) => {
+      win.alwaysOnTop = v;
+    },
+    setMinimumSize: (w: number, h: number) => calls.push(`min:${w}x${h}`),
+  };
+  return win as unknown as BrowserWindow & { bounds: Rectangle; calls: string[] };
+}
+
+/** 几何状态是模块级的：用例之间先归位，免得互相污染。 */
+function resetProfile(win: BrowserWindow): void {
+  setCompactMode(win, false);
+  setMusicMode(win, false);
+}
+
+describe('profile 回填与叠加（QYP3-044 修复）', () => {
+  it('reload 后主进程仍记得浮窗/竖屏，且重复下发不再挪动窗口', () => {
+    const win = fakeWin();
+    resetProfile(win);
+    setCompactMode(win, true);
+    expect(getWindowProfile()).toEqual({ compact: true, music: false });
+    // 渲染层 reload 后回填：先发 music（浮窗优先，不动几何），再发 compact
+    setMusicMode(win, true);
+    expect(getWindowProfile()).toEqual({ compact: true, music: true });
+    const afterEnter = win.calls.length;
+    setCompactMode(win, true); // 幂等
+    expect(win.calls.length).toBe(afterEnter);
+  });
+
+  it('退出浮窗回到竖屏而不是正常尺寸（音乐模式里开过浮窗）', () => {
+    const win = fakeWin();
+    resetProfile(win);
+    setMusicMode(win, true);
+    expect(win.bounds.width).toBe(MUSIC_WIDTH);
+    setCompactMode(win, true);
+    expect(win.bounds.width).toBe(COMPACT_WIDTH);
+    setCompactMode(win, false);
+    expect(win.bounds.width).toBe(MUSIC_WIDTH);
+    expect(getWindowProfile()).toEqual({ compact: false, music: true });
+    setMusicMode(win, false);
+    expect(win.bounds.width).toBe(1600); // 回到进音乐模式前的尺寸
   });
 });

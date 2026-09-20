@@ -93,7 +93,11 @@
   renderer 里，另开窗口就得把频谱跨进程转发。几何复用 `ui-shell/compact-window.ts`
   的 profile 机制（与精简浮窗共用同一份"正常几何"记忆；浮窗优先级更高，音乐
   模式里开浮窗再退出会回到竖屏而不是正常尺寸）。竖屏下侧栏收成 56px 图标轨
-  （导航项靠 `aria-label` 保名），内容区 `ml-14`、播放控制条 `left-14`
+  （导航项靠 `aria-label` 保名），内容区 `ml-14`、播放控制条 `left-14`。
+  **窗口形态的权威在主进程**：renderer reload（热重载）不重置主进程几何，渲染层
+  store 却会归零——启动时 `WindowProfileHost` 要用 `WINDOW.GET_PROFILE` 回填
+  `mode` / `compact`，否则小窗口里会画出完整影视界面。模式本身仍不持久化，
+  被回填的只是"当前窗口是哪种几何"
 - **精简模式 = 主窗口原地缩小，不新开窗口**（QYP3-035）。播放音频时可点迷你条
   的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗，
   渲染层切到 `components/CompactPlayer`（复用 `SpectrumGraph`）。**必须同窗

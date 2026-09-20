@@ -58,6 +58,17 @@ export function isCompactMode(): boolean {
   return profile === 'compact';
 }
 
+/**
+ * 当前窗口 profile（给渲染层回填用）。
+ *
+ * renderer reload（dev 热重载）不会重置主进程：窗口还是浮窗/竖屏尺寸，但渲染层
+ * 的 store 全归零，于是小窗口里画出完整影视界面。几何的主进程才是权威，渲染层
+ * 启动时得回来问一次。
+ */
+export function getWindowProfile(): { compact: boolean; music: boolean } {
+  return { compact: profile === 'compact', music: musicMode };
+}
+
 /** 竖窄屏音乐窗口在给定工作区的位置：水平居中、垂直尽量居中（纯函数，可测）。 */
 export function musicBounds(
   workArea: Pick<Rectangle, 'x' | 'y' | 'width' | 'height'>,
@@ -140,9 +151,13 @@ export function setCompactMode(win: BrowserWindow | null | undefined, enabled: b
  * 精简浮窗优先级更高——音乐模式里开了浮窗就先不打断它。
  */
 export function setMusicMode(win: BrowserWindow | null | undefined, enabled: boolean): boolean {
-  musicMode = Boolean(enabled);
+  const next = Boolean(enabled);
+  const wantProfile: 'music' | 'normal' = next ? 'music' : 'normal';
+  musicMode = next;
   if (!win || win.isDestroyed()) return musicMode;
   if (profile === 'compact') return musicMode;
-  applyProfile(win, musicMode ? 'music' : 'normal');
+  // 幂等：reload 后渲染层会回填一次，不该把用户摆好的窗口再挪一遍
+  if (profile === wantProfile) return musicMode;
+  applyProfile(win, wantProfile);
   return musicMode;
 }
