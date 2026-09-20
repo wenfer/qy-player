@@ -88,30 +88,38 @@ function SleepTimerHost() {
 /**
  * 精简模式宿主（QYP3-035）：手动进入由按钮触发；这里负责「播放音频时自动进入」
  * （设置项 `playback.autoCompact`）与「音乐会话结束后自动还原」。
+ *
+ * QYP3-051：精简态可以跨重启恢复（主进程按记忆把窗口开成浮窗，回填后
+ * `compact` 直接是 true 而 `engine` 还是 null）。所以还原条件必须是
+ * **会话真正结束**（engine 由非 null → null），不能写成 `compact && engine === null`
+ * ——那会在冷启动的第一帧就把恢复出来的浮窗撤销掉。两个副作用因此合并成一个
+ * effect：分开写的话"进入"那个会先把 `prevEngine` 写成新值，退出判断就失效了。
  */
-function CompactModeHost() {
+export function CompactModeHost() {
   const engine = useMusicPlaybackStore((s) => s.engine);
-  const compact = useCompactModeStore((s) => s.compact);
   const prevEngine = useRef<string | null>(null);
 
   useEffect(() => {
     const was = prevEngine.current;
     prevEngine.current = engine;
-    // 会话刚开始（null → 有引擎）且未处于精简模式：按设置自动进入
-    if (engine && !was && !useCompactModeStore.getState().compact) {
+
+    // 会话刚开始（null → 有引擎）：按设置自动进入精简模式
+    if (engine && !was) {
+      if (useCompactModeStore.getState().compact) return;
       void Promise.resolve(window.electronAPI.getSettings?.('playback.autoCompact'))
         .then((res) => {
           const v = (res as { data?: unknown } | undefined)?.data;
           if (v === true || v === 'true') useCompactModeStore.getState().enter();
         })
         .catch(() => undefined);
+      return;
+    }
+
+    // 会话结束（或视频接管 mpv）：自动还原，别把用户困在空的小窗里
+    if (!engine && was && useCompactModeStore.getState().compact) {
+      useCompactModeStore.getState().exit();
     }
   }, [engine]);
-
-  // 会话结束（或视频接管 mpv）：自动还原，别把用户困在空的小窗里
-  useEffect(() => {
-    if (compact && engine === null) useCompactModeStore.getState().exit();
-  }, [compact, engine]);
 
   return null;
 }

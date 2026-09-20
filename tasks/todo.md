@@ -1104,6 +1104,45 @@
 - 记录在案的红线变更：`docs/PHASE3-PLAN.md` §10 风险 4 原为"不引入 ffmpeg
   依赖"，因 mpv 编码模式实测不可用，改为**可选依赖 + 探测降级**
 
+### QYP3-051 窗口与模式记忆（下次启动保持上次的模式）`[x]`
+- 诉求（用户）：追加窗口和模式记忆，如果是音乐模式，或者精简窗口，下次打开需要
+  保持上次的模式
+- 澄清（用户选定）：① 精简浮窗**原样恢复**（启动就是右上角小窗，显示"未在播放"
+  + 两个「还原窗口」逃生口）；② 正常窗口的**大小/位置/最大化一起记**
+- 现状：此前**没有任何几何持久化**（`createWindow` 硬编码 1600×900），
+  `compact-window.ts` 的 `state/profile/musicMode` 是模块级内存、不跨进程
+- 改动：
+  - `src/main/modules/ui-shell/window-state.ts`（新）：`window.memory` =
+    `{profile, music, bounds, maximized}`；纯函数 `normalizeBounds` /
+    `parseWindowMemory`（坏 JSON、非法 profile、非整数、非正宽高一律 null）/
+    `resolveRestoreBounds`（留 80×48 可见、离屏回主屏居中、比屏大就缩到工作区）；
+    接线 `attachWindowMemory`（resize/move **debounce 500ms 且仅 profile==='normal'
+    且未最大化**、maximize/unmaximize 立即、close 同步 flush）+
+    `flushWindowMemory`（will-quit 兜底）+ `restoreWindowProfile`
+  - `compact-window.ts`：`getProfileName` / `minSizeForProfile` /
+    `setNormalBoundsSeed`（**关键**：不预置的话进音乐/浮窗时会把构造出来的窗口
+    bounds 当成"正常几何"，退出就回不到用户尺寸）/ `setProfileChangeListener`；
+    `applyProfile` 的快照改用 `getNormalBounds()`（最大化时 `getBounds()` 是最大化
+    矩形，退出音乐会留下"最大化大小但没最大化"的怪状态）
+  - `main/index.ts`：`createWindow` 里读记忆 → `resolveRestoreBounds` → 按 profile
+    给构造参数（**最小尺寸必须按 profile**，否则 1280×800 下限把浮窗顶回去）→
+    先 `attachWindowMemory` 再 `restoreWindowProfile`；`ready-to-show` 里按记忆
+    `maximize()` 再 `show()`
+  - `App.tsx`：`CompactModeHost` 两个 effect **合成一个**（分开写时"进入"那个会
+    先覆盖 `prevEngine`），退出条件改成 `!engine && was`——只在会话真正结束时还原，
+    否则冷启动回填的浮窗第一帧就被撤销；导出供测试
+- Evidence: 新增 `tests/main/ui/window-state.test.ts` 19 例、改
+  `tests/main/ui/compact-window.test.ts`（+5 例：seed 后退出音乐/浮窗回到记忆几何、
+  seed 只生效一次、形态通知、幂等不重复通知）、新增
+  `tests/renderer/music/window-restore.test.tsx` 6 例（**同时挂两个宿主**钉住竞态：
+  冷启动浮窗不被撤销、会话结束才还原、video 接管 mpv 也还原、自动进入不回归）；
+  typecheck 双配置 + 全量 1052 绿 + 三构建通过
+- 待目标机验证：最大化/浮窗/竖屏重启恢复、拔副屏后位置夹回、隐藏窗口期间
+  `maximize()` 在目标 WM 是否生效、记忆损坏回落——已记入 `docs/TARGET-VERIFY.md`
+- 记录在案的红线变更：AGENTS.md「模式不持久化」两处（窗口/托盘段与 UI 约定段）
+  与 `app-mode-store.ts` / `WindowProfileHost.tsx` 注释同时改写；音乐模式手动改的
+  尺寸**仍不记忆**（每次重算标准 460×820，与"竖窄屏是固定形态"的既有设计一致）
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

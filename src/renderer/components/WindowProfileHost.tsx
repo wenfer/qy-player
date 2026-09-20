@@ -7,8 +7,10 @@ import { useCompactModeStore } from '../stores/compact-mode-store';
  * 窗口几何不会重置——窗口还是浮窗/竖屏尺寸，但渲染层的 store 全归零，于是小
  * 窗口里画出完整影视界面。几何的主进程才是权威，启动时回来问一次。
  *
- * 注意：模式本身仍不持久化（退出应用再开还是影视模式），只有"当前这个窗口
- * 正在用哪种几何"被回填。
+ * QYP3-051：主进程启动时已经按 `window.memory` 把窗口开成记忆里的形态，这里
+ * 回填的 `compact` / `music` 就是那个形态（冷启动恢复浮窗也走这条路）。
+ * 两种模式都不再需要额外抑制：主进程 `setMusicMode`/`setCompactMode` 对
+ * "形态没变"是幂等的，重复下发不会挪窗。
  */
 export default function WindowProfileHost() {
   useEffect(() => {

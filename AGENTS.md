@@ -44,7 +44,7 @@
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
 │     playback-engine/          音乐：引擎选择/audio-url 协议桥/qy-stream 认证流代理/歌单 IO/LRC 解析/均衡器/ReplayGain（ADR-0007）
-│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时
+│     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时/窗口形态与几何记忆（QYP3-051）
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
 └─ mpv 0.32 子进程               ~/.local/bin/mpv 优先，系统 mpv 兜底；通信走 Unix Socket JSON IPC
@@ -97,8 +97,14 @@
   （导航项靠 `aria-label` 保名），内容区 `ml-14`、播放控制条 `left-14`。
   **窗口形态的权威在主进程**：renderer reload（热重载）不重置主进程几何，渲染层
   store 却会归零——启动时 `WindowProfileHost` 要用 `WINDOW.GET_PROFILE` 回填
-  `mode` / `compact`，否则小窗口里会画出完整影视界面。模式本身仍不持久化，
-  被回填的只是"当前窗口是哪种几何"
+  `mode` / `compact`，否则小窗口里会画出完整影视界面。**形态与几何跨重启记忆**
+  （QYP3-051）：`ui-shell/window-state.ts` 把 `{profile, music, bounds, maximized}`
+  存进 `app_config` 的 `window.memory`，`createWindow()` 里按 profile 给构造参数
+  （最小尺寸必须按 profile 给，否则 1280×800 的下限会把浮窗顶回去），再
+  `restoreWindowProfile()` 套用。**音乐模式下用户改的尺寸不记忆**（每次重算标准
+  460×820），边界用 `resolveRestoreBounds()` 夹回可见区域。记忆里的正常几何靠
+  `getNormalBounds()`（最大化时 `getBounds()` 是最大化矩形），且 profile 不是
+  normal 时绝不覆盖——否则退出音乐模式会回到竖屏尺寸
 - **精简模式 = 主窗口原地缩小，不新开窗口**（QYP3-035）。播放音频时可点迷你条
   的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗，
   渲染层切到 `components/CompactPlayer`（复用 `SpectrumGraph`）。**必须同窗
@@ -108,6 +114,12 @@
   退出原样恢复；进入先放宽 `setMinimumSize`（否则 1280×800 的下限会把浮窗顶回
   去），退出先 resize 回原尺寸再恢复下限。音乐会话结束（`engine` 变 null，含
   视频接管 mpv）由 `App.tsx` 的 `CompactModeHost` 自动还原，别把用户困在空小窗
+  ——**还原条件必须是"会话真正结束"（非 null → null）**，不能写成
+  `compact && engine === null`：浮窗可以跨重启恢复（QYP3-051），冷启动时
+  `compact` 已是 true 而 `engine` 还是 null，那样写会在第一帧就把浮窗撤销掉。
+  这也是 `CompactModeHost` 的进入/退出必须合成**一个** effect 的原因（分开写时
+  进入那个会先覆盖 `prevEngine`）。浮窗里没有浏览/播视频的入口，所以"空浮窗"
+  的逃生口只有两处「还原窗口」按钮（紧凑标题栏 + CompactPlayer 头部）
 - **性能保护**（QYP3-036）：主进程每 ~3s 采样 `loadavg()/核心数`
   （`ui-shell/resource-guard.ts`），分 normal/busy/critical 三档，**只在档位变化时**
   经 `RESOURCE.ON_PRESSURE` 推给渲染层；渲染层的 `useVisualizerFps`
@@ -253,7 +265,7 @@
   有音乐会话时 `MusicMiniBar` **停靠**在音乐窗口底部（`bottom-0 left-14 right-0`），
   在其他模式仍是居中浮卡。内容区在有会话时加 `pb-28` 给它让位。竖窄屏下控件行
   允许换行，不要加横向滚动
-- **应用顶层双模式**（QYP3-040/041）：视频模式（默认，`stores/app-mode-store`）与音乐模式完全隔离——切换即导航到该模式默认页（`/` 或 `/music`）；导航项、设置页签、媒体库入口随模式整组更换（音乐媒体库在 `/music-sources`）。**影视是主场景，音乐是可选功能**：模式入口是侧栏底部一个低调小按钮（「音乐模式」/「返回影视」），不要做成与影视并列的大分段控件。迷你条/精简浮窗**跨模式保留**（由音乐会话门禁，非页面门禁）；直达 hash 路由不做模式推断（只控制可见入口）。模式不持久化：每次启动都是视频模式
+- **应用顶层双模式**（QYP3-040/041）：视频模式（默认，`stores/app-mode-store`）与音乐模式完全隔离——切换即导航到该模式默认页（`/` 或 `/music`）；导航项、设置页签、媒体库入口随模式整组更换（音乐媒体库在 `/music-sources`）。**影视是主场景，音乐是可选功能**：模式入口是侧栏底部一个低调小按钮（「音乐模式」/「返回影视」），不要做成与影视并列的大分段控件。迷你条/精简浮窗**跨模式保留**（由音乐会话门禁，非页面门禁）；直达 hash 路由不做模式推断（只控制可见入口）。**模式跨重启记忆**（QYP3-051）：上次退出时在音乐模式就还是音乐模式（见「窗口/托盘」段的 `window.memory`）；首次启动/记忆损坏时才是视频模式
 - **设置页仅软件配置**（服务器、快捷键等）；媒体来源按模式拆分管理（QYP3-039/040/041）：视频模式「媒体库」（`/media-sources`）管媒体服务器与影视来源、音乐模式「音乐媒体库」（`/music-sources`）只管音乐来源（服务器配置入口只保留在影视模式，音乐模式给一句提示）。**来源只属于一域**：`purpose` 只有 `music|video`（不支持音乐与视频混放同一目录——视频源要读 NFO 归类，混在一起两边都差）；存量 `all` 由 migration 010 归一为 `video`。扫描严格按域：视频源索引视频+NFO 并跳过音频/CUE（且跳过 `cleanupMissingMusic`，否则会误删存量音轨），音乐源只索引音频+CUE；勿合并回单一页面或恢复"两者"选项
 - **设置页按模式分页签**（`Settings/index.tsx`：视频=播放/插件/快捷键，音乐=音乐/快捷键），一次只显示一个板块——影视与音乐是两套独立配置域，音乐项（引擎/音量链路/均衡器/拾音器/歌词/睡眠定时）只出现在音乐模式，勿塞回播放板块（用户明确要求两者不要混在一起）；快捷键是应用级配置，两种模式共用同一份 `ShortcutsContent`
 - **`SETTINGS.GET`/`SET` 是 JSON 对称契约**：SET 走 `JSON.stringify`，GET 走 `decodeConfigValue` 解析回来（解析失败退回裸串，兼容主进程裸值）。renderer 侧读设置**不要**再手动 `JSON.parse`，也**不要**假设返回字符串——历史上这条不对称让均衡器/ReplayGain/自定义预设/拾音器开关四项静默失效
