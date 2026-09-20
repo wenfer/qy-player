@@ -943,6 +943,31 @@
   `music-views.test.tsx` 增 1 例（失败态 → 重试后回到空态）；typecheck 双配置
   + 全量 953/953 绿，三构建通过
 
+### QYP3-044 音乐模式改成竖窄屏（同窗 resize）`[x]`
+- 诉求（用户）：复用 `compact-window.ts` 做"同窗竖屏"方案（D）——不新开窗口，
+  把主窗口原地改成竖窄屏
+- 背景：评估"音乐独立窗口"后选了 D：独立窗口的最大成本是 renderer 引擎的
+  `AnalyserNode` 频谱无法跨进程（mpv 引擎音乐反而无痛，状态本来就由主进程推），
+  其次是状态镜像、窗口生命周期与老机多一个 renderer 的内存。同窗 resize 零
+  跨进程同步——与 QYP3-035 精简浮窗同一个理由
+- 内容：
+  - `ui-shell/compact-window.ts` 扩成 profile 机制：`normal | compact | music`
+    共用一个 `applyProfile`，正常几何只记一次（音乐模式里再进浮窗不互相覆盖）；
+    浮窗优先级更高，`setCompactMode(false)` 会回到 `musicMode ? 'music' : 'normal'`
+  - `musicBounds()`：竖屏 460×820，水平居中、垂直尽量居中；矮屏先夹高度
+    （≥600、≤ 工作区高-48）再夹宽度
+  - IPC `WINDOW.SET_MUSIC_MODE` + preload `setMusicMode`；`app-mode-store.setMode`
+    负责下发意图（窗口不在时静默失败）
+  - 渲染层：音乐模式侧栏收成 56px 图标轨（导航项用 `aria-label` 保名、
+    `title` 兜提示），内容区 `ml-14`、播放控制条 `left-14`
+- Evidence: `tests/main/ui/compact-window.test.ts` 增 3 例（竖屏居中 / 768p
+  矮屏夹取 / 多显示器原点）；`app-mode.test.tsx` 增 1 例（图标轨：有名字、
+  无可见文字）+ 切模式断言 `setMusicMode(true/false)`；typecheck 双配置 +
+  全量绿，三构建通过
+- 待目标机验证：1366×768 与 1920×1080 下竖屏尺寸与位置、切回影视是否精确
+  还原原尺寸、最大化状态下切音乐模式、音乐模式里进精简浮窗再退出是否回到
+  竖屏——已记入 `docs/TARGET-VERIFY.md`
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

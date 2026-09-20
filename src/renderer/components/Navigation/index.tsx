@@ -78,15 +78,20 @@ export default function Navigation() {
     navigate(MODE_HOME[next]);
   };
 
+  // 音乐模式是竖窄屏（QYP3-044）：侧栏收成图标轨，把宽度让给内容
+  const rail = mode === 'music';
+
   return (
     <nav
-      className="fixed left-0 top-9 bottom-0 w-60 bg-card border-r border-border flex flex-col z-40"
+      className={`fixed left-0 top-9 bottom-0 ${
+        rail ? 'w-14' : 'w-60'
+      } bg-card border-r border-border flex flex-col z-40`}
       aria-label="主导航"
     >
       {/* 侧栏不再重复应用标识：标题栏已有 logo 与名称（QYP3-042） */}
 
       {/* Nav Items（按当前模式切换，QYP3-040） */}
-      <div className="flex-1 px-3 py-4 space-y-1">
+      <div className={`flex-1 py-4 space-y-1 ${rail ? 'px-2' : 'px-3'}`}>
         {NAV_BY_MODE[mode].map((item) => {
           const isActive = location.pathname === item.path;
           const Icon = item.icon;
@@ -94,15 +99,20 @@ export default function Navigation() {
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors focus-ring ${
+              className={`w-full flex items-center ${
+                rail ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5'
+              } rounded-lg text-sm font-medium transition-colors focus-ring ${
                 isActive
                   ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:text-foreground hover:bg-accent'
               }`}
               aria-current={isActive ? 'page' : undefined}
+              // 图标轨没有可见文字，必须给无障碍名称（title 兜住鼠标提示）
+              aria-label={rail ? item.label : undefined}
+              title={rail ? item.label : undefined}
             >
               <Icon size={18} strokeWidth={isActive ? 2.5 : 2} />
-              <span>{item.label}</span>
+              {!rail && <span>{item.label}</span>}
             </button>
           );
         })}
@@ -110,20 +120,24 @@ export default function Navigation() {
 
       {/* 模式入口（QYP3-041）：影视是主场景，音乐属于可选功能——入口放侧栏
           底部、小号弱化，不跟主导航抢视觉重心 */}
-      <div className="px-3 pb-2">
+      <div className={rail ? 'px-2 pb-2' : 'px-3 pb-2'}>
         <button
           type="button"
           onClick={() => handleModeChange(mode === 'video' ? 'music' : 'video')}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring"
+          className={`w-full flex items-center ${
+            rail ? 'justify-center px-0 py-2' : 'gap-2 px-3 py-1.5'
+          } rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring`}
+          aria-label={mode === 'video' ? '音乐模式' : '返回影视'}
+          title={mode === 'video' ? '音乐模式' : '返回影视'}
         >
-          {mode === 'video' ? <Music size={13} /> : <Clapperboard size={13} />}
-          {mode === 'video' ? '音乐模式' : '返回影视'}
+          {mode === 'video' ? <Music size={rail ? 16 : 13} /> : <Clapperboard size={rail ? 16 : 13} />}
+          {!rail && (mode === 'video' ? '音乐模式' : '返回影视')}
         </button>
       </div>
 
       {/* Footer */}
-      <div className="px-5 py-3 border-t border-border">
-        <p className="text-[11px] text-muted-foreground">{appVersion ? `v${appVersion}` : ""}</p>
+      <div className={`${rail ? 'px-1 text-center' : 'px-5'} py-3 border-t border-border`}>
+        <p className="text-[11px] text-muted-foreground">{appVersion ? `v${appVersion}` : ''}</p>
       </div>
     </nav>
   );

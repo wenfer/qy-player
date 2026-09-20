@@ -110,7 +110,7 @@ import {
   setMusicEngineActive,
 } from '../modules/playback-engine/music-active';
 import { SleepTimer } from '../modules/ui-shell/sleep-timer';
-import { setCompactMode } from '../modules/ui-shell/compact-window';
+import { setCompactMode, setMusicMode } from '../modules/ui-shell/compact-window';
 import { getResourcePressure } from '../modules/ui-shell/resource-guard';
 import {
   closeDeskLyrics,
@@ -599,6 +599,13 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.WINDOW.SET_COMPACT_MODE, (_event, enabled: boolean) => {
     const compact = setCompactMode(getMainWindow?.(), Boolean(enabled));
     return ok({ compact });
+  });
+
+  // 音乐模式窗口（QYP3-044）：主窗口原地改成竖窄屏；几何与精简浮窗共用
+  // 同一份"正常几何"记忆（ui-shell/compact-window.ts）
+  ipcMain.handle(IPC_CHANNELS.WINDOW.SET_MUSIC_MODE, (_event, enabled: boolean) => {
+    const music = setMusicMode(getMainWindow?.(), Boolean(enabled));
+    return ok({ music });
   });
 
   // 系统资源压力（QYP3-036）：性能保护据此降帧。取值为主进程最近一次采样，

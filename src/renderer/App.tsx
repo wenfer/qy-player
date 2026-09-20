@@ -24,6 +24,7 @@ import NextEpisodeCountdown from './components/NextEpisodeCountdown';
 import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
 import { useCompactModeStore } from './stores/compact-mode-store';
+import { useAppModeStore } from './stores/app-mode-store';
 import { useMusicPlaybackStore } from './stores/music-playback-store';
 import { useResourceStore } from './stores/resource-store';
 
@@ -120,6 +121,8 @@ function CompactModeHost() {
  */
 function Shell() {
   const compact = useCompactModeStore((s) => s.compact);
+  // 音乐模式侧栏收成图标轨（QYP3-044），内容区的左边距跟着变
+  const mode = useAppModeStore((s) => s.mode);
   const isDeskLyrics = window.location.hash.includes('/desk-lyrics');
   if (isDeskLyrics) return <DeskLyrics />;
 
@@ -142,7 +145,7 @@ function Shell() {
       <TitleBar />
       <div className="flex-1 min-h-0 flex">
         <Navigation />
-        <main className="flex-1 ml-60 min-h-0 overflow-y-auto">
+        <main className={`flex-1 min-h-0 overflow-y-auto ${mode === 'music' ? 'ml-14' : 'ml-60'}`}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/detail/:type/:serverId/:id" element={<Detail />} />

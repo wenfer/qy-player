@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Play, Pause, Volume2, VolumeX, Expand, PictureInPicture, Minimize2, Maximize } from 'lucide-react';
 import { usePlayerStore } from '../../stores/player-store';
+import { useAppModeStore } from '../../stores/app-mode-store';
 
 interface MpvTrack {
   id: number;
@@ -144,10 +145,17 @@ export default function PlayerControls() {
     setIsMaximized(next);
   }, [isMaximized]);
 
+  // 音乐模式侧栏收成图标轨（QYP3-044），控制条的左边界跟着变
+  const railOffset = useAppModeStore((s) => s.mode === 'music');
+
   if (!usePlayerStore.getState().isVisible || !window.electronAPI) return null;
 
   return (
-    <div className="fixed bottom-0 left-60 right-0 bg-background/95 backdrop-blur-md border-t border-border px-5 py-3 z-50">
+    <div
+      className={`fixed bottom-0 right-0 bg-background/95 backdrop-blur-md border-t border-border px-5 py-3 z-50 ${
+        railOffset ? 'left-14' : 'left-60'
+      }`}
+    >
       {/* Progress bar */}
       <div
         ref={progressRef}

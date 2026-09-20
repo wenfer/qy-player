@@ -11,8 +11,12 @@ import { useAppModeStore } from '../../../src/renderer/stores/app-mode-store';
  * 导航项随模式整组更换。
  */
 
+const setMusicMode = vi.fn(async () => ({ ok: true, data: { music: true } }));
+
 vi.stubGlobal('electronAPI', {
   getAppVersion: vi.fn(async () => ({ ok: true, data: { version: '0.0.0-test' } })),
+  // QYP3-044：切模式要把主窗口原地改成竖窄屏
+  setMusicMode,
 });
 
 function LocationProbe(): JSX.Element {
@@ -50,9 +54,10 @@ describe('app mode navigation (QYP3-040)', () => {
     expect(screen.queryByRole('radiogroup', { name: '模式切换' })).toBeNull();
   });
 
-  it('switching to music mode swaps the nav group and navigates to /music', () => {
+  it('switching to music mode swaps the nav group, navigates to /music and asks for the portrait window', () => {
     renderShell();
     fireEvent.click(screen.getByRole('button', { name: '音乐模式' }));
+    expect(setMusicMode).toHaveBeenCalledWith(true);
     expect(screen.getByRole('button', { name: '歌单' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '媒体库' })).toBeTruthy();
     // 视频域入口不可见
@@ -68,9 +73,20 @@ describe('app mode navigation (QYP3-040)', () => {
     renderShell();
     expect(screen.getByRole('button', { name: '歌单' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '返回影视' }));
+    expect(setMusicMode).toHaveBeenCalledWith(false);
     expect(screen.getByTestId('location').textContent).toBe('/');
     expect(screen.getByRole('button', { name: '首页' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '歌单' })).toBeNull();
+  });
+
+  it('collapses the sidebar to an icon rail in music mode (portrait window)', () => {
+    useAppModeStore.setState({ mode: 'music' });
+    renderShell();
+    // 导航项仍有无障碍名称，只是不再占宽度
+    expect(screen.getByRole('button', { name: '歌单' })).toBeTruthy();
+    expect(screen.queryByText('歌单')).toBeNull();
+    expect(screen.getByRole('button', { name: '返回影视' })).toBeTruthy();
+    expect(screen.queryByText('返回影视')).toBeNull();
   });
 
   it('music mode media library points at /music-sources and the window title follows', () => {

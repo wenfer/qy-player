@@ -115,6 +115,8 @@ export const IPC_CHANNELS = {
   WINDOW: {
     /** 精简模式浮窗（QYP3-035）：主窗口原地缩小/复原。 */
     SET_COMPACT_MODE: 'window:set-compact-mode',
+    /** 音乐模式（QYP3-044）：主窗口原地变竖窄屏，退出恢复原尺寸。 */
+    SET_MUSIC_MODE: 'window:set-music-mode',
     SET_FULLSCREEN: 'window:set-fullscreen',
     /** 无边框窗口（QYP3-042）：自绘标题栏的三个按钮。 */
     MINIMIZE: 'window:minimize',
