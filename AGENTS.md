@@ -4,7 +4,7 @@
 
 ## 项目定位（决定了所有技术约束）
 
-**专为老版本 Linux 打造的桌面媒体播放器**（Deepin 20.9 / Debian 10 / glibc 2.28），以 MPV 为内核，支持 Jellyfin / Emby。
+**专为老版本 Linux 打造的桌面媒体播放器**（Deepin 20.9 / Debian 10 / glibc 2.28），以 MPV 为内核，支持 Jellyfin / Emby。1.5.0 起兼容 Windows / macOS（三端打包），但 **Electron 与 mpv 的版本选择仍由 Linux 老系统决定**——跨平台改造绝不回退 Linux 兼容性。
 
 一切"看起来可以升级"的依赖都可能破坏对老系统的兼容性，见下方硬性约束。
 
@@ -35,6 +35,7 @@
 │     storage/db.ts              SQLite（better-sqlite3）+ MIGRATIONS
 │     online-connector/          Jellyfin/Emby REST 客户端（EmbyClient 继承 JellyfinClient，路径加 /emby 前缀）
 │     catalog/                   目录查询/仓储 + unified-query（四来源统一首页/搜索）
+│     platform/                  跨平台基础：mpv/ffmpeg 二进制定位（候选序列）+ mpv IPC 端点抽象（Unix socket / win32 命名管道，QYP3-061）+ qy-file URL 解析
 │     media-probe/               headless mpv 探测（ADR-0005，probe≤1）
 │     music-spectrum/            离线频谱：ffmpeg 解码 → 自研 FFT → 12fps×48 频带落盘（QYP3-050，并发 1）
 │     media-operations/          字幕导入 / 两阶段安全删除
@@ -47,7 +48,7 @@
 │     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时/窗口形态与几何记忆（QYP3-051）
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
-└─ mpv 0.32 子进程               ~/.local/bin/mpv 优先，系统 mpv 兜底；通信走 Unix Socket JSON IPC
+└─ mpv 0.32 子进程               经 platform/ipc-endpoint 抽象通信（Linux/mac Unix Socket，Windows 命名管道）JSON IPC；二进制按 binary-locator 候选序列查找
 ```
 
 数据流要点：
@@ -267,6 +268,37 @@
   「原名 → 同名其他扩展名」解析；目录包含校验留在协议层。测试夹具全是
   PNG，只加 PNG 用例会漏掉这条分支
 
+### 跨平台（QYP3-061~064，改相关代码前必读）
+- **Linux 行为逐字节不变是硬纪律**：`binary-locator` 的 linux 分支、
+  `playlist-io` 的 POSIX file URL、托盘/桌面歌词的默认行为都必须与 1.4.0
+  完全一致——单测里有逐字节断言，改平台代码先看这些断言红没红
+- **二进制查找唯一入口**是 `platform/binary-locator.ts`（mpv/ffmpeg 都走
+  它）：QY_MPV_PATH/QY_FFMPEG_PATH → 打包内置 `resourcesPath/mpv/` →
+  平台候选 → PATH 裸名。新功能不要自己写 candidates 数组
+- **mpv IPC 端点只经 `platform/ipc-endpoint.ts` 创建**：Windows 是命名
+  管道（connect-probe 判就绪），Unix 是 socket 文件（existsSync 轮询）。
+  `MpvIpcClient` 用 `net.createConnection`，两种端点通用，不要按平台分叉
+  客户端代码
+- **Windows 上 SIGTERM 等价 TerminateProcess**：杀 mpv 前必须先发 `quit`
+  IPC 命令优雅退出（1s 竞速），否则最后一段进度丢失（`player-core` quit）
+- **路径语义按目标平台注入**：跨平台单测断言 win32 路径形态时用
+  `path.win32`（`joinFor(platform)`）；**绝不用 `pathToFileURL`** 处理
+  Windows 路径——它按宿主平台解析，Linux 主机会把 `C:\...` 当相对路径
+  （`playlist-io/localTrackFileUrl` 手工构造）
+- **界面适配的平台分支**：darwin 红绿灯（`titleBarStyle:'hidden'` +
+  `trafficLightPosition`，裸 `frame:false` 会吞掉红绿灯，TitleBar 按
+  `electronAPI.platform` 避让 76px/64px）；托盘 darwin 用
+  `icon-tray-Template.png`（`setTemplateImage(true)`）；win 路径解析用
+  `path.win32.resolve`；`setIgnoreMouseEvents` 的 `forward` 仅 Windows
+  有效，非 win 传 `{}`
+- **打包**：`dist:win`（NSIS+portable，x64）先跑 `scripts/fetch-mpv-win.js`
+  （zhongfly/mpv-winbuild **固定 tag**，改 tag = 显式升级决策）；
+  `dist:mac`（dmg x64+arm64）先跑 `scripts/collect-mpv-mac.sh`（otool
+  dylib 闭包 + 重写引用 + ad-hoc 签名 + 冒烟；`QY_SKIP_MPV_BUNDLE=1`
+  是定义化兜底）。`electronDist` 已从 yml 移到 linux dist 脚本的
+  `-c.electronDist=`（mac 双架构必须按架构下载，固定本地目录只有宿主
+  架构）；测试脚本用 `cross-env`（Windows shell 不认 `VAR=1 cmd`）
+
 ## 新增功能的固定套路
 
 ### 加一个 IPC 接口
@@ -305,7 +337,9 @@
 ```bash
 npm run dev          # 开发（构建 main/preload + vite renderer + electron）
 npm run typecheck    # 提交前必跑
-npm run dist:all     # 全格式打包（AppImage/deb/rpm/pacman/tar）
+npm run dist:all     # Linux 全格式打包（AppImage/deb/rpm/pacman/tar）
+npm run dist:win     # Windows（NSIS + portable，x64；自动内置 mpv）
+npm run dist:mac     # macOS（dmg x64+arm64；需在 mac 上跑，自动收集 brew mpv）
 ```
 
 - renderer 构建必须用 `vite build --config vite.renderer.config.ts`（`index.html` 在 `src/renderer/`），`npm run build` 已串好，不要单独裸跑 `vite build`

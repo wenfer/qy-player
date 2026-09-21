@@ -1,5 +1,29 @@
 # Changelog
 
+## 未发布（1.5.0 目标：跨平台）
+
+### 新增
+- **跨平台支持（Windows / macOS）**：应用可在三端构建运行。mpv 子进程
+  通信抽象成统一端点（Linux/mac 走 Unix Socket，Windows 走命名管道），
+  mpv/ffmpeg 二进制按平台候选序列查找（环境变量 `QY_MPV_PATH`/
+  `QY_FFMPEG_PATH` 覆盖 → 安装包内置 → 平台常规位置 → PATH）。Linux 上
+  的查找行为与历史版本逐字节一致，老系统用户无感知。
+- **Windows 安装包内置 mpv**：NSIS 安装版与免安装 portable 版都直接
+  携带 mpv（zhongfly/mpv-winbuild 固定 tag 构建，静态链接），装完即用，
+  不要求用户自己装 mpv。
+- **macOS dmg（Intel + Apple Silicon）**：双架构 dmg；应用内打包
+  Homebrew mpv 及其全部依赖库（引用路径已重写并重签名）。首次打开需
+  右键 → 打开（应用未签名）。
+
+### 变更
+- **Windows 退出更可靠**：关闭应用时先通知 mpv 优雅退出再结束进程，
+  保证最后一段播放进度保存完整（Windows 上直接杀进程等价强制终止）。
+- **macOS 界面适配**：窗口预留系统红绿灯区域；托盘图标用 macOS 模板
+  规格（自动适配深浅色菜单栏）；桌面歌词鼠标穿透按平台启用。
+- 打包脚本三端齐备：`npm run dist:win`（NSIS + portable）、
+  `npm run dist:mac`（dmg 双架构）；测试命令改用 cross-env，Windows 本机
+  也能直接跑 `npm test`。
+
 ## 1.4.0（音乐模式竖屏、窗口记忆与频谱修正）
 
 ### 新增

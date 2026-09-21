@@ -1395,6 +1395,78 @@
   ETag 变化强制重索引但读取失败 → 标志保留）；typecheck 双配置 +
   test:main 68 文件 748 例绿
 
+### QYP3-061 平台基础模块：二进制定位与 mpv IPC 端点抽象 `[x]`
+- 背景：1.5.0 跨平台改造第一步。mpv 通信当前硬编码 Unix Socket、二进制
+  候选硬编码 Linux 路径；Windows 无 Unix socket（要用命名管道）、mpv 通常
+  不在 PATH
+- 改动：
+  ① `modules/platform/` 新增 `binary-locator.ts`——mpv/ffmpeg 跨平台候选
+  序列（QY_MPV_PATH/QY_FFMPEG_PATH 覆盖 → 打包内置
+  `resourcesPath/mpv/` → 平台常规位置 → PATH 裸名兜底）。**Linux 分支输出
+  与历史行为逐字节一致**（`~/.local/bin/mpv` + `LD_LIBRARY_PATH`，否则裸
+  `mpv`）——这是硬纪律，测试里有逐字节断言
+  ② `ipc-endpoint.ts`——`createIpcEndpoint()` 抽象：win32 命名管道
+  （connect-probe 判就绪）vs Unix socket（existsSync 轮询判就绪）；
+  `failed` 回调每个 tick 检查（SPAWN 失败可抢在超时前报告）
+  ③ `mpv-process.ts` 接线：每次 start() 建端点，readiness 走
+  `waitUntilReady(5000)`；`MpvIpcClient` 用 `net.createConnection`，两种
+  端点零改动通用；`mpv-probe-spike` 同步接入
+- 测试：binary-locator 11 例（含 Linux 逐字节断言 + win32 在 POSIX 主机上
+  用 `win32.join` 确定性断言）、ipc-endpoint 4 例；typecheck 双配置绿
+
+### QYP3-062 Windows 生命周期与路径硬化 `[x]`
+- 改动：
+  ① `player-core` quit()：Windows 上先发 mpv `quit` IPC 命令（1s 竞速）
+  再断连/杀进程——SIGTERM 在 Windows 等价 TerminateProcess，直接杀会丢
+  播放进度；Linux/mac 不变（SIGTERM 即优雅）
+  ② `playlist-io` 新增 `localTrackFileUrl()`：win 盘符路径 →
+  `file:///C:/...`（分段 encodeURIComponent）；POSIX 保持原 `encodeURI`
+  **逐字节不变**（历史导出兼容）。刻意不用 `pathToFileURL`——它按宿主
+  平台解析，Linux 主机上会把 `C:\music` 当相对路径
+  ③ `qy-file-url.ts` 抽出 `parseQyFileUrl()`（反斜杠归一/解码/去查询串），
+  主进程 qy-file handler 改用它（顺带清掉调试 console.log）
+  ④ `resource-guard` 拆 `cpuBusyRatio()` 纯函数；win32 用 `os.cpus()` 时间
+  增量采样（首样无基线按 normal 兜底）
+- 测试：qy-file-url 5 例、resource-guard-cpu 4 例、playlist-io file URL
+  4 例；test:main 全绿
+
+### QYP3-063 macOS/Windows 界面适配 `[x]`
+- 改动：
+  ① 托盘：darwin 用 `icon-tray-Template.png`（32px 黑色+alpha，
+  `setTemplateImage(true)`，缺失回退彩色 PNG）；win 路径解析用
+  `path.win32.resolve`（POSIX 主机 resolve 会毁坏 `C:\...`）
+  ② 桌面歌词：`setIgnoreMouseEvents` 的 `forward` 选项仅 Windows 有效，
+  非 win 传 `{}`（行为等价，不误导）
+  ③ 主窗口：darwin 加 `titleBarStyle: 'hidden'` + `trafficLightPosition`
+  （裸 `frame:false` 会吞掉红绿灯）；TitleBar 按
+  `electronAPI.platform`（preload 新增字段）避让 76px/64px
+  ④ `build/icon.png`（electron-builder 自动转 ico/icns 的源）
+- 测试：tray/desk-lyrics 平台条件断言更新；typecheck + 全部测试套绿
+
+### QYP3-064 三端打包配置与 mpv 预置脚本 `[x]`
+- 改动：
+  ① `scripts/fetch-mpv-win.js`——从 zhongfly/mpv-winbuild **固定 tag**
+  （默认 `2026-09-20-e76a35ec95`，`MPV_WINBUILD_TAG` 可覆盖）下载
+  `mpv-x86_64-*.7z`，解压后只留 `mpv.exe`/`mpv.com`（全静态构建，无
+  DLL 依赖）。幂等：`build/mpv-win/mpv.exe` 存在即跳过。**本机实测全流程
+  通过**（31MB 下载 → 解压 → 瘦身）
+  ② `scripts/collect-mpv-mac.sh`——brew mpv 的 otool dylib 闭包收集
+  （跳过 /usr/lib、/System），平铺进 `lib/` 并改写
+  `@executable_path/lib/`/`@loader_path/` 引用 + ad-hoc 重签名；Darwin
+  上现场冒烟 `--version`；`QY_SKIP_MPV_BUNDLE=1` 定义化兜底（不打包
+  mpv，运行时走 PATH）
+  ③ electron-builder.yml：win（NSIS 安装版 + portable，x64，未签名）+
+  mac（dmg x64+arm64，`identity: null`）段，各自 extraResources 挂 mpv
+  预置目录；`electronDist` 从 yml 移到 linux dist 脚本
+  `-c.electronDist=`（mac 双架构必须按架构下载 Electron，固定本地目录
+  只有宿主架构）
+  ④ package.json：`dist:win`/`dist:mac`/`fetch:mpv-win`/`collect:mpv-mac`
+  脚本；test 脚本改 `cross-env`（Windows shell 不认 `VAR=1 cmd` 语法）
+- 验证：`electron-builder --win --dir` 本机试打包成功——win-unpacked 里
+  `QY Player.exe`（PE32+，icon 转换 OK）+ `resources/mpv/mpv.exe` 就位，
+  与 binary-locator 候选路径精确吻合；签名步（winCodeSign 下载）本机网络
+  失败，留 CI 验证；test:main/shared/quality 全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

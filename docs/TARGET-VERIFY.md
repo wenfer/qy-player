@@ -319,6 +319,39 @@
 - [ ] 精简浮窗点「歌词」：面板铺满浮窗、随播放高亮、点行可跳转、可关闭；
       服务器曲目（Jellyfin）在浮窗里同样能拉到歌词
 
+## 跨平台三端（1.5.0 QYP3-061~064，Windows/macOS 实机验证；Linux 回归另验）
+
+### Windows（NSIS 安装版 + portable）
+- [ ] 安装版装完即用：**机器上没有 mpv** 时直接播放本地视频/音频，无黑窗、
+      无 401 静默失败（mpv 来自 `resources/mpv/mpv.exe`）
+- [ ] portable 版解压到无 mpv 的干净机器，同样能播
+- [ ] 播放中关窗退出 → 重开**进度完整恢复**（quit IPC 优雅退出生效；
+      若进度总是归零，查 quit 1s 竞速是否够）
+- [ ] mpv 窗口按键（滚轮音量/双击全屏等）可用；播放音视频正常、无卡死
+- [ ] 服务器（Jellyfin/Emby）播放、进度回传正常
+- [ ] 托盘图标显示正常（彩色 PNG）；桌面歌词鼠标穿透生效（forward 仅 win）
+- [ ] SmartScreen 首次运行提示属预期（未签名），右键运行可绕过
+- [ ] QY_MPV_PATH 指向自备 mpv 时优先生效
+
+### macOS（dmg，x64 + arm64 各验一遍）
+- [ ] 首次打开：右键 → 打开 绕过 Gatekeeper（未签名属预期）；两个架构
+      都能启动
+- [ ] 无 Homebrew mpv 的干净机器：播放走安装包内置 mpv（`resources/mpv/`），
+      视频音频正常——dylib 闭包完整性的最终验证就在这条
+- [ ] 红绿灯不与自绘标题栏重叠：按钮区可点、拖动区可拖、标题不压红绿灯
+      （titleBarStyle hidden + trafficLightPosition）
+- [ ] 托盘模板图标随系统深/浅色菜单栏自动变色；无模板图时回退彩色图
+- [ ] 桌面歌词：锁定时点击可穿透到下层窗口（mac 无 forward，行为靠主进程
+      窗口层级，确认锁定态不挡操作）
+- [ ] mpv 音乐（冷门格式）不弹黑窗；视频窗口正常
+
+### Linux 回归（1.4.0 已验项抽查）
+- [ ] mpv 查找顺序不变：`~/.local/bin/mpv` + LD_LIBRARY_PATH 仍优先生效，
+      系统无 mpv 时行为与 1.4.0 一致
+- [ ] 导出歌单的 file URL 与 1.4.0 逐字节一致
+- [ ] dist:deb/dist:rpm/dist:appimage/dist:pacman/dist:tar 产物与 1.4.0
+      一致（electronDist 移到脚本参数后本地打包仍免下载）
+
 ## 待人工决策（非安装项）
 
 - [ ] ADR-0006（豆瓣数据入口）三方评审签认——签认前豆瓣保持不可启用
