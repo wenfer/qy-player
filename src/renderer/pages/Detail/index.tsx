@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Play, Star, Calendar, Clock, ChevronLeft, Film, Users, Clapperboard, Tv } from 'lucide-react';
 import SeriesResumeButton from './SeriesResumeButton';
+import EpisodeSwitchButtons from './EpisodeSwitchButtons';
 import EpisodeGrid from './EpisodeGrid';
 import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/playback';
 import { useAutoNextStore, type NextEpisodeChoice } from '../../stores/auto-next-store';
@@ -266,24 +267,25 @@ export default function Detail() {
     loadEpisodes(seasonId);
   }, [loadEpisodes]);
 
-  // QYP2-035: register the next-episode provider for the auto-next
-  // countdown. The provider answers "given the currently-finished episode
-  // (season/episode from main's snapshot), what plays next?" using the
-  // series' full episode list + the main-side pure picker.
+  // QYP2-035 / QYP3-068q: register the next-episode provider for the
+  // auto-next countdown AND the manual prev/next controls. The provider
+  // answers "given the current episode (season/episode from main's
+  // snapshot), what plays next/previous?" using the series' full episode
+  // list + the main-side pure picker (direction-aware).
   const setAutoNextProvider = useAutoNextStore((s) => s.setProvider);
   useEffect(() => {
     if (!details || details.Type !== 'Series' || !Number.isInteger(serverId)) {
       setAutoNextProvider(null);
       return;
     }
-    setAutoNextProvider(async ({ mediaId, seasonNumber, episodeNumber }) => {
+    setAutoNextProvider(async ({ mediaId, seasonNumber, episodeNumber }, direction) => {
       try {
         const all = await window.electronAPI.getItems(details.Id, {
           includeItemTypes: 'Episode',
           recursive: true,
         }, serverId) as Episode[];
-        // EOF 的 media 必须属于本剧：A 剧详情页停留而 B 剧的集播完时，
-        // 这里返回 null → 取消倒计时（绝不跨剧误播）。
+        // EOF（或手动切集）的 media 必须属于本剧：A 剧详情页停留而 B 剧的集
+        // 播完时，这里返回 null → 取消倒计时（绝不跨剧误播）。
         if (!all.some((ep) => ep.Id === mediaId)) return null;
         const inputs = all.map((ep) => ({
           itemId: ep.Id,
@@ -296,6 +298,7 @@ export default function Detail() {
           episodes: inputs,
           seasonNumber: seasonNumber ?? null,
           episodeNumber: episodeNumber ?? null,
+          direction,
         })) as {
           ok: boolean;
           data?: NextEpisodeChoice | null;
@@ -460,6 +463,8 @@ export default function Detail() {
                     )
                   }
                 />
+                {/* 手动切集（QYP3-068q）：自动连播只在整集播完时触发，这里随时可切 */}
+                <EpisodeSwitchButtons />
               </div>
             ) : (
               <button

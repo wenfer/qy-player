@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Play, X } from 'lucide-react';
-import { useAutoNextStore } from '../stores/auto-next-store';
+import { useAutoNextStore, type NextEpisodeChoice } from '../stores/auto-next-store';
 
 /**
  * Auto-next countdown overlay (QYP2-035, plan §12.3).
@@ -29,7 +29,7 @@ interface AutoNextEvent {
   };
 }
 
-export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choice: { itemId: number | string; mediaSourceId?: string | null; position?: number }) => void }) {
+export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choice: NextEpisodeChoice) => void }) {
   const provider = useAutoNextStore((s) => s.provider);
   const [visible, setVisible] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(5);
@@ -50,19 +50,23 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
       const epoch = ++epochRef.current;
       if (event.type === 'countdown') {
         if (!provider || !event.media) return;
-        const next = await provider({
-          mediaType: event.media?.mediaType ?? '',
-          mediaId: event.media?.mediaId ?? '',
-          seasonNumber: event.media?.seasonNumber ?? null,
-          episodeNumber: event.media?.episodeNumber ?? null,
-        });
+        const next = await provider(
+          {
+            mediaType: event.media?.mediaType ?? '',
+            mediaId: event.media?.mediaId ?? '',
+            seasonNumber: event.media?.seasonNumber ?? null,
+            episodeNumber: event.media?.episodeNumber ?? null,
+          },
+          'next' // 自动连播只有一个方向（手动切集走 playAdjacentEpisode）
+        );
         // 迟到结果：provider 等待期间来了新事件（fire/取消/换集）→ 丢弃。
         if (epoch !== epochRef.current) return;
         if (!next) {
           void window.electronAPI.autoNextCancel('no-next-episode');
           return;
         }
-        nextRef.current = { itemId: next.itemId, mediaSourceId: next.mediaSourceId ?? undefined, position: 0 };
+        // 下一集从 0 开始（§12.2）：playEpisodeChoice 内部就是这么传的
+        nextRef.current = { itemId: next.itemId, mediaSourceId: next.mediaSourceId ?? undefined };
         setSecondsLeft(event.seconds ?? 5);
         setTotalSeconds(event.seconds ?? 5);
         setBusy(false);

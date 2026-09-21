@@ -7,6 +7,8 @@ export const IPC_CHANNELS = {
     GET_TRACKS: 'player:get-tracks',
     PROBE_ITEM: 'player:probe-item',
     ON_STATE_CHANGE: 'player:on-state-change',
+    /** 当前播放的媒体快照（QYP3-068q）：手动上一集/下一集据此定位当前集。 */
+    GET_MEDIA_CONTEXT: 'player:get-media-context',
   },
   LIBRARY: {
     OPEN_FILE: 'library:open-file',
@@ -207,6 +209,8 @@ export const IPC_CHANNELS = {
     CANCEL: 'auto-next:cancel',
     GET_ENABLED: 'auto-next:get-enabled',
     SET_ENABLED: 'auto-next:set-enabled',
+    /** main → renderer：全局快捷键要求切上一集/下一集（QYP3-068q）。 */
+    ON_COMMAND: 'auto-next:command',
   },
   APP: {
     GET_VERSION: 'app:get-version',

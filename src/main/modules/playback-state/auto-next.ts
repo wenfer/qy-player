@@ -60,6 +60,26 @@ export function pickNextEpisode(
 }
 
 /**
+ * 给定当前集（季/集号），在全集列表里选**上一集**（QYP3-068q）：与
+ * `pickNextEpisode` 完全对称（季集降序，跨季取上一季最后一集）。找不到 → null。
+ *
+ * 手动「上一集」与自动连播共用同一套排序键：渲染层不复制算法，只把方向
+ * 传给主进程。
+ */
+export function pickPreviousEpisode(
+  episodes: AutoNextEpisodeLike[],
+  currentSeason: number | null | undefined,
+  currentEpisode: number | null | undefined
+): AutoNextEpisodeLike | null {
+  const [cs, ce] = orderKey(currentSeason, currentEpisode);
+  const candidates = episodes
+    .map((entry) => ({ entry, key: orderKey(entry.seasonNumber, entry.episodeNumber) }))
+    .filter(({ key }) => key[0] < cs || (key[0] === cs && key[1] < ce))
+    .sort((a, b) => b.key[0] - a.key[0] || b.key[1] - a.key[1]);
+  return candidates[0]?.entry ?? null;
+}
+
+/**
  * 事件面（plan §12.3「手动停止/崩溃/退出不触发」的接线固化）：
  * - 仅 eof 进入倒计时；
  * - disconnect（mpv 关窗/被杀）与 crashed 立即取消 pending 倒计时——

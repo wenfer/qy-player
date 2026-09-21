@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import {
   AutoNextController,
   pickNextEpisode,
+  pickPreviousEpisode,
   wireAutoNext,
   type AutoNextEpisodeLike,
   type AutoNextEvent,
@@ -42,6 +43,26 @@ describe('pickNextEpisode (下一集选择, 纯函数)', () => {
   it('last episode → null (renderer must not show a countdown)', () => {
     expect(pickNextEpisode(episodes(), 2, 1)).toBeNull();
     expect(pickNextEpisode([], 1, 1)).toBeNull();
+  });
+});
+
+/** 手动「上一集」（QYP3-068q）与下一集完全对称：季集降序取前一集。 */
+describe('pickPreviousEpisode (上一集选择, 纯函数)', () => {
+  it('same-season previous', () => {
+    expect(pickPreviousEpisode(episodes(), 1, 2)?.itemId).toBe('s1e1');
+  });
+
+  it('season premiere → previous season last episode', () => {
+    // 集内排序：S1E1 之前是 S0E1（特别篇与正片同一排序，与 pickNextEpisode 对称）
+    expect(pickPreviousEpisode(episodes(), 1, 1)?.itemId).toBe('sp');
+    // S2E1 之前是 S1E2（上一季的最后一集）
+    expect(pickPreviousEpisode(episodes(), 2, 1)?.itemId).toBe('s1e2');
+  });
+
+  it('first episode / empty list → null（按钮会提示"已经是第一集"）', () => {
+    expect(pickPreviousEpisode(episodes(), 0, 1)).toBeNull();
+    expect(pickPreviousEpisode(episodes(), null, null)).toBeNull();
+    expect(pickPreviousEpisode([], 1, 2)).toBeNull();
   });
 });
 

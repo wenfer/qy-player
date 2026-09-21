@@ -55,6 +55,16 @@ export function registerGlobalShortcuts(
         mainWindow.webContents.send(IPC_CHANNELS.MUSIC.ON_COMMAND, 'favorite');
       }
     },
+    // 手动切集（QYP3-068q）："下一集是哪一集"只有 renderer 知道（剧集列表 +
+    // 主进程的纯选择器），这里只把方向转过去；音乐会话激活时不抢键。
+    prevEpisode: () => {
+      if (isMusicEngineActive()) return;
+      mainWindow.webContents.send(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, 'prev');
+    },
+    nextEpisode: () => {
+      if (isMusicEngineActive()) return;
+      mainWindow.webContents.send(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, 'next');
+    },
     toggleWindow: () => {
       if (mainWindow.isVisible()) mainWindow.hide();
       else {

@@ -40,6 +40,18 @@ export const GLOBAL_SHORTCUTS: ShortcutDef[] = [
     fixed: true,
   },
   {
+    id: 'prevEpisode',
+    label: '上一集',
+    description: '影视剧集播放中切到上一集（需要停在剧集页面，音乐模式下无效）',
+    defaultAccelerator: 'CommandOrControl+Shift+Left',
+  },
+  {
+    id: 'nextEpisode',
+    label: '下一集',
+    description: '影视剧集播放中切到下一集（同上；整集播完的自动连播另有开关）',
+    defaultAccelerator: 'CommandOrControl+Shift+Right',
+  },
+  {
     id: 'toggleWindow',
     label: '显示 / 隐藏主窗口',
     description: '在任意应用前台时快速唤起或隐藏本播放器',

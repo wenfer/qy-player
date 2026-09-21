@@ -58,6 +58,8 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.PLAYER.CONTROL, action, ...args),
   playerGetState: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.GET_STATE),
   playerGetTracks: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.GET_TRACKS),
+  // 当前播放的媒体快照（QYP3-068q）：手动上一集/下一集定位当前集用
+  getMediaContext: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.GET_MEDIA_CONTEXT),
   onPlayerStateChange: (callback: (state: unknown) => void) => {
     const handler = (_event: unknown, state: unknown) => callback(state);
     ipcRenderer.on(IPC_CHANNELS.PLAYER.ON_STATE_CHANGE, handler);
@@ -168,6 +170,13 @@ const electronAPI = {
     const handler = (_event: unknown, payload: unknown) => callback(payload);
     ipcRenderer.on(IPC_CHANNELS.AUTO_NEXT.EVENT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.AUTO_NEXT.EVENT, handler);
+  },
+  // 手动切集（QYP3-068q）：全局快捷键在主进程收键，方向转给渲染层执行
+  onAutoNextCommand: (callback: (direction: 'next' | 'prev') => void) => {
+    const handler = (_event: unknown, payload: unknown) =>
+      callback(payload === 'prev' ? 'prev' : 'next');
+    ipcRenderer.on(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, handler);
   },
   autoNextCancel: (reason?: 'user' | 'no-next-episode') =>
     ipcRenderer.invoke(IPC_CHANNELS.AUTO_NEXT.CANCEL, reason ?? 'user'),
@@ -307,8 +316,13 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes, undefined),
   resolveSeriesResumeOfType: (episodes: unknown[], mediaType: 'jellyfin' | 'emby') =>
     ipcRenderer.invoke(IPC_CHANNELS.RESUME.SERIES, episodes, mediaType),
-  pickNextEpisode: (input: { episodes: unknown[]; seasonNumber?: number | null; episodeNumber?: number | null }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.RESUME.NEXT, input),
+  pickNextEpisode: (input: {
+    episodes: unknown[];
+    seasonNumber?: number | null;
+    episodeNumber?: number | null;
+    /** QYP3-068q：手动「上一集」传 'prev'（省略 = 下一集）。 */
+    direction?: 'next' | 'prev';
+  }) => ipcRenderer.invoke(IPC_CHANNELS.RESUME.NEXT, input),
   // Scrape jobs (QYP2-032)
   scrapeStart: (pluginId: string, itemIds: number[], jobId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.START, pluginId, itemIds, jobId),

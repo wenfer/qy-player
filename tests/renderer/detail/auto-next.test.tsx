@@ -58,19 +58,23 @@ describe('NextEpisodeCountdown (§12.3)', () => {
     expect(screen.queryByText(/秒后播放下一集/)).toBeNull();
   });
 
-  it('fire → plays the picked next episode through the handoff (explicit 0)', async () => {
+  // QYP3-068q：显式 0（换集从头开始）下沉到 utils/play-episode 的
+  // playEpisodeChoice，倒计时这层只负责把"选中哪一集"交出去
+  it('fire → plays the picked next episode through the handoff (direction 恒为 next)', async () => {
     const onPlayNext = vi.fn();
-    useAutoNextStore.getState().setProvider(async () => ({
+    const provider = vi.fn(async () => ({
       itemId: 'ep-3',
       mediaSourceId: 'ms-3',
       provider: 'jellyfin',
       serverId: 7,
     }));
+    useAutoNextStore.getState().setProvider(provider);
     render(<NextEpisodeCountdown onPlayNext={onPlayNext} />);
     await push({ type: 'countdown', seconds: 5, media: MEDIA });
+    expect(provider).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 'ep-2' }), 'next');
     await push({ type: 'fire', media: MEDIA });
     await waitFor(() =>
-      expect(onPlayNext).toHaveBeenCalledWith({ itemId: 'ep-3', mediaSourceId: 'ms-3', position: 0 })
+      expect(onPlayNext).toHaveBeenCalledWith({ itemId: 'ep-3', mediaSourceId: 'ms-3' })
     );
     expect(screen.queryByText(/秒后播放下一集/)).toBeNull();
   });

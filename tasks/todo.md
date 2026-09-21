@@ -1711,6 +1711,26 @@
   点「返回影视」后 engine=null、条消失、`music.nowPlaying` 落盘值清空；
   新增用例 3 例（清恢复态 / mpv 显式 stop / 无会话空转）
 
+### QYP3-068q 手动切集：上一集/下一集按钮 + 全局快捷键 `[x]`
+- 用户：影视模式播放剧集时怎么切下一集 → 选择"按钮 + 快捷键都要"
+- 改动：
+  ① 主进程：`pickPreviousEpisode` 纯函数（与 next 对称，季集降序）；
+  `RESUME.NEXT` 支持 `direction`（省略 = next，向后兼容）；新增
+  `PLAYER.GET_MEDIA_CONTEXT` 暴露 `PlaybackStateManager.getMediaSnapshot()`
+  ——只有主进程知道"正在播哪一集"；`AUTO_NEXT.ON_COMMAND`（main→renderer）
+  + 两个全局快捷键（Ctrl+Shift+←/→，默认值在 `shortcut-defs`，可在设置页改）
+  ② 渲染层：`utils/play-episode.ts` 单点实现（快照 → provider → resolve →
+  loadFile 显式 0）；`auto-next-store` 的 provider 增加 `direction` 参数；
+  Detail 页 provider 透传方向；`EpisodeSwitchButtons`（详情页左栏）+
+  `EpisodeShortcutHost`（常驻，无 provider 时静默）
+- **踩坑**：最初把按钮加在 `PlayerControls`（播放条），实测发现那条自绘控制条
+  从不显示——`player-store.isVisible` 无人置位，影视播放走独立 mpv 窗口。
+  已撤掉并改放剧集页（用户在这里才点得到）
+- 验证：CDP 端到端——剧集页出现两个按钮；播第 91 集（1430s）→ 点「下一集」→
+  第 92 集（1276s，仍在播）→ 点「上一集」→ 回到第 91 集；用例 8 例
+  （快照/provider 方向/显式 0/无相邻集提示/无 provider 静默/按钮与快捷键宿主）；
+  typecheck 双配置 + test:main 782 + test:render 344 全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

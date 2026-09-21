@@ -58,6 +58,7 @@
 - **续播**：位置/原因只由 `playback-state/resume-resolver.ts` 纯函数决定（30s/90%/看完下一集/重播）——renderer 不得复制算法；「从头播放」显式传 0（LOAD_FILE 区分显式 0 与未指定）。**音乐没有 per-track 续播**（QYP3-053：`resolveMusicResumeTarget` 已删，音乐分支 `startPosition` 恒为 0）；音乐只有"当前播放状态"用于恢复播放条
 - **当前播放的音乐**（QYP3-053）：`playback-state/now-playing.ts` 在 `app_config` 里存**一条**记录（曲目 + 进度，本地按 `(sourceId, trackId)`、服务器按 `(serverId, itemId)` 定位，不存 path/绝对路径）。渲染层经 `MUSIC.SET_NOW_PLAYING`（节流 5s，暂停/跳曲/停止立即）写入，启动时 `MUSIC.GET_NOW_PLAYING` 读回 → `NowPlayingHost` 恢复播放条（**engine 保持 null，不自动出声**）。**只在上次退出时是音乐模式才恢复**（QYP3-068p）：`GET_NOW_PLAYING` 读 `window.memory.music`，不是音乐模式就作废记录并返回 null——影视界面不该挂着一条不属于它的播放条。恢复态**不算音乐会话**（否则会误触自动精简、抢走全局媒体键），点播放走 `resumeRestored()` 从上次位置起播，并按「全部曲目」**重建完整队列**（本地/WebDAV，恢复曲落在曲库原位；曲库读取失败或服务器曲目退回单曲队列，QYP3-068d）
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
+- **手动切集**（QYP3-068q）：剧集详情页左栏的「上一集/下一集」按钮（`pages/Detail/EpisodeSwitchButtons`）与全局快捷键（Ctrl+Shift+←/→，`components/EpisodeShortcutHost`）走同一条路——`utils/play-episode.ts` 读主进程的媒体快照（`PLAYER.GET_MEDIA_CONTEXT`：只有主进程知道"正在播哪一集"）→ 问 Detail 注册的 provider（`auto-next-store`，它手上是整部戏的剧集列表）→ `resolvePlayback` + `loadFile`（**显式 0**）。方向由调用方给，排序算法只在主进程（`pickNextEpisode`/`pickPreviousEpisode`）。**没有 provider（不在剧集页）快捷键静默**；电影详情页不注册 provider 也不渲染按钮。**别把按钮放 `PlayerControls`**：影视播放走独立 mpv 窗口，主窗口那条自绘控制条的 `player-store.isVisible` 无人置位、从不显示（QYP3-068q 实测）
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（转码/CUE/兼容性优先/非直解格式 → mpv；spectrum-first 且直连格式 → renderer 引擎——QYP3-037 起服务器/WebDAV 音频经 `qy-stream://` 认证流代理也走 renderer 引擎，`sourceKind` 不再强制 mpv）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次；引擎队列**按需懒解析**单曲 URL，服务器整队预解析是 N 次网络请求）
@@ -85,7 +86,7 @@
 - 历史缩略图**不落库**：展示时按归属服务器现场拼 `…/Items/{id}/Images/Primary?maxHeight=200`（不带 tag，Emby 返回当前主图，见 `pages/History`）
 
 ### 快捷键
-- 全局快捷键：定义在 `shared/shortcut-defs.ts`；用户配置存 `app_config` 的 `shortcuts` 键（Electron accelerator 原文，如 `CommandOrControl+Shift+Q`）；注册失败要返回 failed 列表并由 UI 提示冲突
+- 全局快捷键：定义在 `shared/shortcut-defs.ts`；用户配置存 `app_config` 的 `shortcuts` 键（Electron accelerator 原文，如 `CommandOrControl+Shift+Q`）；注册失败要返回 failed 列表并由 UI 提示冲突。主进程能自己办的（mpv 操作、窗口显隐）直接在 handler 里做，**需要"当前剧集/页面上下文"的动作（如切集）只把意图转给 renderer**（`AUTO_NEXT.ON_COMMAND`），别在主进程猜
 - **显示层必须格式化**：`CommandOrControl` → `Ctrl`（Mac 为 `Cmd`），`MediaPlayPause/Next/PreviousTrack` → `⏯/⏭/⏮`。不要把 Electron 内部术语直接亮给用户
 - MPV 窗口按键：主进程按 `MPV_BINDINGS` 定义**动态生成** `userData/mpv-input.conf`（未配置的条目用 defaultKeys），启动时 `--input-conf` 加载；修改后用 `set_property('input-conf', path)` 热重载，失败则下次启动生效
 - MPV 固定项（滚轮音量、双击全屏、a/c 菜单、Ctrl+1~5 比例预设）不可录制，UI 里归入"固定按键"区

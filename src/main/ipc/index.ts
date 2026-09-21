@@ -141,7 +141,12 @@ import {
   createUnifiedQueryService,
   type OnlineContinueInput,
 } from '../modules/catalog/unified-query';
-import { AutoNextController, pickNextEpisode, wireAutoNext } from '../modules/playback-state/auto-next';
+import {
+  AutoNextController,
+  pickNextEpisode,
+  pickPreviousEpisode,
+  wireAutoNext,
+} from '../modules/playback-state/auto-next';
 import { SkipController, parseMediaSegments, type SkipSegment } from '../modules/playback-state/skip-segments';
 import type { AutoNextEpisodeLike } from '../modules/playback-state/auto-next';
 import type { ResumeEpisodeInput } from '../../shared/types/playback';
@@ -1719,6 +1724,12 @@ export function registerIpcHandlers(
     return player.getState();
   });
 
+  // 当前播放的媒体快照（QYP3-068q）：手动上一集/下一集要拿它定位当前集
+  // （渲染层只持有详情页那份剧集列表，不知道"正在播哪一集"）。
+  ipcMain.handle(IPC_CHANNELS.PLAYER.GET_MEDIA_CONTEXT, () => {
+    return ok(playbackStateManager?.getMediaSnapshot() ?? null);
+  });
+
   ipcMain.handle(IPC_CHANNELS.PLAYER.GET_TRACKS, async () => {
     if (!player.isReady()) return [];
     try {
@@ -2680,16 +2691,17 @@ function registerCatalogHandlers(
     return ok(resolveSeriesResume(inputs));
   });
 
-  // ---- Next-episode pick (QYP2-035; pure main-side; renderer owns the
-  // episode list it already loaded for the series page) ----
-  // Next-episode pick (pure, main-side; renderer owns the episode list it
-  // already loaded for the series page).
+  // ---- Next/previous-episode pick (QYP2-035 / QYP3-068q; pure main-side;
+  // renderer owns the episode list it already loaded for the series page) ----
+  // 方向由渲染层给（自动连播恒为 next；手动上一集传 prev），排序算法只在
+  // 主进程这侧一份。
   ipcMain.handle(IPC_CHANNELS.RESUME.NEXT, (_event, input: unknown) => {
     if (typeof input !== 'object' || input === null) return err('VALIDATION_FAILED', '参数不合法');
-    const { episodes, seasonNumber, episodeNumber } = input as {
+    const { episodes, seasonNumber, episodeNumber, direction } = input as {
       episodes?: unknown;
       seasonNumber?: unknown;
       episodeNumber?: unknown;
+      direction?: unknown;
     };
     if (!Array.isArray(episodes)) return err('VALIDATION_FAILED', '单集列表不合法');
     const clean: AutoNextEpisodeLike[] = [];
@@ -2703,12 +2715,13 @@ function registerCatalogHandlers(
         clean.push(item as unknown as AutoNextEpisodeLike);
       }
     }
-    const next = pickNextEpisode(
-      clean,
-      typeof seasonNumber === 'number' ? seasonNumber : null,
-      typeof episodeNumber === 'number' ? episodeNumber : null
-    );
-    return ok(next);
+    const season = typeof seasonNumber === 'number' ? seasonNumber : null;
+    const episode = typeof episodeNumber === 'number' ? episodeNumber : null;
+    const picked =
+      direction === 'prev'
+        ? pickPreviousEpisode(clean, season, episode)
+        : pickNextEpisode(clean, season, episode);
+    return ok(picked);
   });
 
   // ---- Plugin config (QYP2-027, plan §11.1/§11.3) ----

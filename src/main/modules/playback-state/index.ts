@@ -144,6 +144,31 @@ export class PlaybackStateManager {
     this.currentPlaySessionId = playSessionId ?? null;
   }
 
+  /**
+   * 当前播放的媒体快照（QYP3-068q）：手动「上一集/下一集」要拿它定位当前集
+   * （渲染层不持有"正在播哪一集"，它只知道详情页的剧集列表）。
+   */
+  getMediaSnapshot(): {
+    mediaType: string;
+    mediaId: string;
+    title: string | null;
+    seriesName: string | null;
+    seasonNumber: number | null;
+    episodeNumber: number | null;
+    mediaSourceId: string | null;
+  } | null {
+    if (!this.currentMediaType || !this.currentMediaId) return null;
+    return {
+      mediaType: this.currentMediaType,
+      mediaId: this.currentMediaId,
+      title: this.currentTitle,
+      seriesName: this.currentSeriesName,
+      seasonNumber: this.currentSeasonNumber,
+      episodeNumber: this.currentEpisodeNumber,
+      mediaSourceId: this.currentMediaSourceId,
+    };
+  }
+
   clearCurrentMedia(): void {
     this.currentMediaType = null;
     this.currentMediaId = null;

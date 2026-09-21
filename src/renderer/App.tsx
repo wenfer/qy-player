@@ -22,12 +22,14 @@ import CompactPlayer from './components/CompactPlayer';
 import MusicToolbar from './components/MusicToolbar';
 import ToastContainer from './components/Toast';
 import WindowProfileHost from './components/WindowProfileHost';
+import EpisodeShortcutHost from './components/EpisodeShortcutHost';
 import { useAppModeStore } from './stores/app-mode-store';
 import NextEpisodeCountdown from './components/NextEpisodeCountdown';
-import { useToastStore } from './stores/toast-store';
 import { useSleepTimerStore } from './stores/sleep-timer-store';
 import { useCompactModeStore } from './stores/compact-mode-store';
 import { attachMusicMpvBridge, useMusicPlaybackStore } from './stores/music-playback-store';
+import { playEpisodeChoice } from './utils/play-episode';
+import type { NextEpisodeChoice } from './stores/auto-next-store';
 import { useResourceStore } from './stores/resource-store';
 
 /**
@@ -36,40 +38,9 @@ import { useResourceStore } from './stores/resource-store';
  * with explicit 0 (下一集从 0 开始, §12.2/§12.3).
  */
 function AutoNextHost() {
-  const addToast = useToastStore((s) => s.addToast);
-  const handlePlayNext = async (choice: {
-    itemId: number | string;
-    mediaSourceId?: string | null;
-    provider?: string;
-    serverId?: number;
-  }) => {
-    try {
-      if (!choice.provider || typeof choice.serverId !== 'number') {
-        addToast('无法确定下一集的媒体来源', 'error');
-        return;
-      }
-      const result = (await window.electronAPI.resolvePlayback(
-        { provider: choice.provider, serverId: choice.serverId, itemId: String(choice.itemId) },
-        { mode: 'direct', ...(choice.mediaSourceId ? { mediaSourceId: choice.mediaSourceId } : {}) }
-      )) as {
-        ok: boolean;
-        data?: { url: string; streamSessionId?: string; mediaContext: unknown };
-        error?: { message: string };
-      };
-      if (!result.ok || !result.data) {
-        addToast(result.error?.message ?? '无法获取下一集播放地址', 'error');
-        return;
-      }
-      await window.electronAPI.playerLoadFile(
-        result.data.url,
-        0,
-        undefined,
-        result.data.mediaContext as import('../shared/types/catalog').ResolvedMediaContext,
-        result.data.streamSessionId
-      );
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : '自动连播失败', 'error');
-    }
+  // 播下一集的实现与手动切集共用（QYP3-068q）：见 utils/play-episode
+  const handlePlayNext = (choice: NextEpisodeChoice) => {
+    void playEpisodeChoice(choice);
   };
   return <NextEpisodeCountdown onPlayNext={handlePlayNext} />;
 }
@@ -259,6 +230,7 @@ function App() {
       <ResourceHost />
       <NowPlayingHost />
       <MusicSessionModeHost />
+      <EpisodeShortcutHost />
       <Shell />
     </HashRouter>
   );

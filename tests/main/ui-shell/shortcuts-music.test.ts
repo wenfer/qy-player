@@ -72,4 +72,25 @@ describe('global shortcuts (QYP3-013a)', () => {
     registered.get('MediaNextTrack')!();
     expect(player.seek).toHaveBeenCalledWith(30, 'relative');
   });
+
+  // 手动切集（QYP3-068q）：主进程不下判断，只把方向转给 renderer
+  // （"下一集是谁"要剧集列表 + 当前集快照，只有渲染层凑得齐）。
+  it('forwards prev/next episode to the renderer, and stays silent during music', () => {
+    registerGlobalShortcuts(mainWindow as never, player as never);
+    const next = GLOBAL_SHORTCUTS.find((d) => d.id === 'nextEpisode')!;
+    const prev = GLOBAL_SHORTCUTS.find((d) => d.id === 'prevEpisode')!;
+
+    registered.get(next.defaultAccelerator)!();
+    registered.get(prev.defaultAccelerator)!();
+    expect(sent).toEqual([
+      { channel: 'auto-next:command', payload: 'next' },
+      { channel: 'auto-next:command', payload: 'prev' },
+    ]);
+
+    // 音乐会话激活时不抢键（音乐模式下这两个键没有剧集语义）
+    sent.length = 0;
+    setMusicEngineActive(true);
+    registered.get(next.defaultAccelerator)!();
+    expect(sent).toEqual([]);
+  });
 });
