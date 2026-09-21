@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import CompactPlayer, {
+import CompactPlayer from '../../../src/renderer/components/CompactPlayer';
+import {
   nextRepeat,
   repeatLabel,
-} from '../../../src/renderer/components/CompactPlayer';
-import { useMusicPlaybackStore } from '../../../src/renderer/stores/music-playback-store';
+  useMusicPlaybackStore,
+} from '../../../src/renderer/stores/music-playback-store';
 import { useCompactModeStore } from '../../../src/renderer/stores/compact-mode-store';
 import { useResourceStore } from '../../../src/renderer/stores/resource-store';
 

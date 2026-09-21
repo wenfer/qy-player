@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Gauge, Maximize2, Mic2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
-import { useMusicPlaybackStore } from '../../stores/music-playback-store';
+import { useMusicPlaybackStore, nextRepeat, repeatLabel } from '../../stores/music-playback-store';
 import { useCompactModeStore } from '../../stores/compact-mode-store';
 import { useResourceStore } from '../../stores/resource-store';
 import { pressureLabel } from '../../../shared/resource-pressure';
@@ -20,15 +20,6 @@ function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-/** 循环模式顺序：off → all → one → off。 */
-export function nextRepeat(mode: 'off' | 'all' | 'one'): 'off' | 'all' | 'one' {
-  return mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off';
-}
-
-export function repeatLabel(mode: 'off' | 'all' | 'one'): string {
-  return mode === 'all' ? '列表循环' : mode === 'one' ? '单曲循环' : '顺序播放';
 }
 
 const BTN =

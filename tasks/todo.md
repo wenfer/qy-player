@@ -1589,6 +1589,15 @@
   全库仅 APE 1 首走 mpv 引擎，触发面极小；若未来 mpv 音源占比升高再引入
   方向感知的跳过
 
+### QYP3-068g 播放条补循环模式按钮 `[x]`
+- 用户发现循环切换按钮"没了"——实际是播放条（MusicMiniBar）从未有过，
+  它只存在于精简浮窗（CompactPlayer）
+- 改动：`nextRepeat`/`repeatLabel` 从 CompactPlayer 挪到 music-playback-store
+  （状态归属地，CompactPlayer 改为导入）；MusicMiniBar 收藏按钮旁补
+  循环模式按钮（Repeat/Repeat1 图标，开启高亮，title 显示当前模式文案）
+- 测试：compact-mode 测试导入路径更新；typecheck + test:render 332 例全绿；
+  CDP 实测按钮点击循环 off→all→one→off，store 状态同步正确
+
 ---
 
 ## 纪律提醒（动工前重读）

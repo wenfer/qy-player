@@ -225,6 +225,16 @@ function pushDeskLyrics(position: number, isPlaying: boolean): void {
   });
 }
 
+/** 循环模式顺序（QYP3-068g）：off → all → one → off。 */
+export function nextRepeat(mode: 'off' | 'all' | 'one'): 'off' | 'all' | 'one' {
+  return mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off';
+}
+
+/** 循环模式的用户可读文案（播放条/浮窗共用）。 */
+export function repeatLabel(mode: 'off' | 'all' | 'one'): string {
+  return mode === 'all' ? '列表循环' : mode === 'one' ? '单曲循环' : '顺序播放';
+}
+
 /** MediaRef 构造（QYP3-025）：服务器曲目按 serverId 严格路由。 */
 export function refOfTrack(t: MusicTrackInput): MediaRef {
   if (t.serverId && t.itemId) {
