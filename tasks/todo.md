@@ -1577,6 +1577,18 @@
   （qlen 200、qidx 1→2→3、pos 持续前进、零 unhandled 异常）；
   typecheck + test:render 332 例 + test:main 782 例 + build:renderer 全绿
 
+#### QYP3-068f 实机复验：上一曲/单曲循环/列表循环 `[x]`
+- CDP 实测（200 首曲库，mpv 音源起播）：
+  ① 单曲循环：next 重播同一首、进度归零 ✓
+  ② 列表循环：next 前进 ✓；队尾 eof 自动回卷（199→0，index 0 为 mpv 音源
+  按既有设计跳到下一首 webaudio 曲目落 qidx 1）✓
+  ③ 上一曲：顺序播放 idx 3 → prev → idx 2 ✓；引擎跨 mpv↔webaudio 切换
+  全程无 unhandled 异常 ✓
+- 记录在案的边角（不修）：webaudio 队列里 prev 落在 mpv 音源曲目上时，
+  onResolveError 的跳过方向恒向前（index+1）——表现为 prev"弹回"原曲。
+  全库仅 APE 1 首走 mpv 引擎，触发面极小；若未来 mpv 音源占比升高再引入
+  方向感知的跳过
+
 ---
 
 ## 纪律提醒（动工前重读）
