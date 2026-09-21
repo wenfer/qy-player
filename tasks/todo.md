@@ -1517,6 +1517,14 @@
 - 测试：bars-painter 断言只依赖数量与相对位置，取整不影响；typecheck +
   test:render 330 例全绿
 
+### QYP3-068c 频谱柱配色改纯琥珀黄（去掉高度渐变） `[x]`
+- 用户问渐变来源后拍板：改 `cellColor` 为纯琥珀黄
+- 改动：bars-painter 删 `cellColor` 与三段 `BAR_COLORS`（low/mid/high），
+  换单一 `BAR_COLOR`（rgba(255,209,102,0.95)）；点亮格循环外置一次
+  fillStyle；峰值帽亮白不变。播放条拾音器与精简浮窗频谱同源生效
+- 测试：bars-painter 断言全部格子为 BAR_COLOR；visualizer 引用同步改名，
+  删 cellColor 用例；typecheck + test:render 49 文件 329 例全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

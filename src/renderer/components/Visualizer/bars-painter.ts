@@ -6,25 +6,14 @@
  * 无数据（mpv 引擎）时上层组件画静态进度线，这里不画任何假跳动。
  */
 
-/** 柱体颜色：由下往上 琥珀 → 橙 → 红（经典分段配色）。 */
-export const BAR_COLORS = {
-  low: 'rgba(255, 209, 102, 0.95)',
-  mid: 'rgba(255, 153, 61, 0.95)',
-  high: 'rgba(239, 68, 68, 0.95)',
-} as const;
+/** 柱体颜色：纯琥珀黄（用户偏好——不再用"底黄→顶红"的高度分段渐变）。 */
+export const BAR_COLOR = 'rgba(255, 209, 102, 0.95)';
 
 /** 峰值帽颜色（比柱体亮，视觉上"浮"在顶端）。 */
 export const PEAK_COLOR = 'rgba(255, 243, 214, 0.9)';
 
 /** 峰值帽下落速度（每秒下落的画面高度比例）。 */
 export const FALL_PER_SEC = 0.55;
-
-/** 某一段（0=底，1=顶）的颜色。 */
-export function cellColor(t: number): string {
-  if (t < 0.55) return BAR_COLORS.low;
-  if (t < 0.8) return BAR_COLORS.mid;
-  return BAR_COLORS.high;
-}
 
 /** 点亮的格数：电平 0..1 → 0..segments（至少 0，最大 segments）。 */
 export function litCells(level: number, segments: number): number {
@@ -91,10 +80,12 @@ export function createBarsPainter(
         const bw = Math.max(1, Math.round(barW * 0.68));
 
         const lit = litCells(level, segments);
-        for (let s = 0; s < lit; s += 1) {
-          ctx.fillStyle = cellColor(segments > 1 ? s / (segments - 1) : 0);
-          const y = Math.round(h - (s + 1) * cellH + gap / 2);
-          ctx.fillRect(x, y, bw, Math.max(1, Math.round(cellH - gap)));
+        if (lit > 0) {
+          ctx.fillStyle = BAR_COLOR;
+          for (let s = 0; s < lit; s += 1) {
+            const y = Math.round(h - (s + 1) * cellH + gap / 2);
+            ctx.fillRect(x, y, bw, Math.max(1, Math.round(cellH - gap)));
+          }
         }
 
         if (peaks[i] > 0.02) {

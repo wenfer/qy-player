@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  BAR_COLORS,
+  BAR_COLOR,
   PEAK_COLOR,
-  cellColor,
   createBarsPainter,
   createSpectrumDecay,
   downsamplePeaks,
@@ -48,21 +47,16 @@ describe('bars-painter helpers (QYP3-047)', () => {
     expect(litCells(2, 8)).toBe(8); // 钳制
     expect(litCells(0.5, 8)).toBe(4);
   });
-
-  it('cellColor goes amber → orange → red bottom-up', () => {
-    expect(cellColor(0)).toBe(BAR_COLORS.low);
-    expect(cellColor(0.6)).toBe(BAR_COLORS.mid);
-    expect(cellColor(0.9)).toBe(BAR_COLORS.high);
-  });
 });
 
 describe('createBarsPainter (QYP3-047)', () => {
-  it('lights one LED cell per level step', () => {
+  it('lights one LED cell per level step, all in the single amber color', () => {
     const { ctx, rects } = fakeCtx();
     const painter = createBarsPainter(ctx, { bars: 1, segments: 8 });
     painter.paint(100, 80, new Uint8Array([255]), 16);
-    // 8 段全亮 + 1 条峰值帽
+    // 8 段全亮 + 1 条峰值帽；纯琥珀黄（用户偏好，无高度渐变）
     expect(rects.filter((r) => r.style !== PEAK_COLOR).length).toBe(8);
+    expect(rects.filter((r) => r.style !== PEAK_COLOR).every((r) => r.style === BAR_COLOR)).toBe(true);
   });
 
   it('drops the peak cap gradually instead of snapping to zero', () => {

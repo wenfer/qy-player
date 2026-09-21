@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Visualizer, { type VisualizerMode } from '../../../src/renderer/components/Visualizer';
 import {
-  BAR_COLORS,
+  BAR_COLOR,
   PEAK_COLOR,
 } from '../../../src/renderer/components/Visualizer/bars-painter';
 
@@ -138,9 +138,8 @@ describe('visualizer (QYP3-023/033)', () => {
       getSpectrum: () => data,
       getWaveform: () => null,
     });
-    // 分段 LED：底段琥珀、顶段红，外加峰值帽
-    expect(frames[0]).toContain(BAR_COLORS.low);
-    expect(frames[0]).toContain(BAR_COLORS.high);
+    // 分段 LED：纯琥珀黄（用户偏好，无高度渐变），外加峰值帽
+    expect(frames[0]).toContain(BAR_COLOR);
     expect(frames[0]).toContain(PEAK_COLOR);
   });
 
@@ -155,18 +154,18 @@ describe('visualizer (QYP3-023/033)', () => {
       timeline: Array.from({ length: 66 }, (_, i) => 40 * (i + 1)),
       playFrames: 3,
     });
-    expect(frames[0]).toContain(BAR_COLORS.low);
+    expect(frames[0]).toContain(BAR_COLOR);
     rerender({ isPlaying: false });
     flush(66);
 
     // 暂停初期柱体仍在（指数衰减刚开始）——是"回落"，不是瞬间清空
     const paused = frames.slice(3);
-    expect(paused[0]).toContain(BAR_COLORS.low);
+    expect(paused[0]).toContain(BAR_COLOR);
     // 全程不退化成静音底线（有数据源 ≠ 无数据源）
     expect(paused.every((f) => !f.includes(IDLE))).toBe(true);
     // 落定：最后一帧既无柱体也无峰值帽（rAF 已停，帧数不再增长）
     const last = paused[paused.length - 1];
-    expect(last).not.toContain(BAR_COLORS.low);
+    expect(last).not.toContain(BAR_COLOR);
     expect(last).not.toContain(PEAK_COLOR);
     expect(last.length).toBe(0);
   });
@@ -181,7 +180,7 @@ describe('visualizer (QYP3-023/033)', () => {
       isPlaying: false, // 未起播就暂停：没有缓存过真实数据
     });
     expect(frames[0]).toContain(IDLE);
-    expect(frames[0]).not.toContain(BAR_COLORS.low);
+    expect(frames[0]).not.toContain(BAR_COLOR);
   });
 
   it('falls back to silence after pause in waveform mode too (QYP3-059)', () => {
