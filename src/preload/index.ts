@@ -382,6 +382,9 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY, overrides),
   applyMpvShortcuts: (overrides: Record<string, string>) =>
     ipcRenderer.invoke(IPC_CHANNELS.SHORTCUTS.APPLY_MPV, overrides),
+
+  // 平台标识（QYP3-063）：渲染层做 mac 红绿灯避让等平台微调
+  platform: process.platform as NodeJS.Platform,
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

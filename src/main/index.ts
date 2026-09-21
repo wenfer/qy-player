@@ -75,6 +75,11 @@ function createWindow(): BrowserWindow {
     // 无边框（QYP3-042）：标题栏与缩放热区由渲染层自绘，见
     // components/TitleBar；最小化/最大化/关闭走 WINDOW.* IPC
     frame: false,
+    // QYP3-063：macOS 用 hidden 标题栏保留系统红绿灯（纯 frame:false 会把
+    // 红绿灯整个吞掉）；红绿灯悬在自绘标题栏左端，渲染层配合避让
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 10, y: 10 } }
+      : {}),
     webPreferences: {
       preload: resolve(__dirname, 'preload.cjs'),
       contextIsolation: true,

@@ -19,4 +19,14 @@ describe('resolveTrayIconPath', () => {
       '/opt/QY Player/resources/app.asar/resources/icon.png'
     );
   });
+
+  it('uses the monochrome template image on macOS (QYP3-063)', () => {
+    expect(resolveTrayIconPath('/workspace/qy-player', 'darwin')).toBe(
+      '/workspace/qy-player/resources/icon-tray-Template.png'
+    );
+  });
+
+  it('windows keeps the colored png (tray accepts png, no ico needed)', () => {
+    expect(resolveTrayIconPath('C:\\app', 'win32')).toBe('C:\\app\\resources\\icon.png');
+  });
 });

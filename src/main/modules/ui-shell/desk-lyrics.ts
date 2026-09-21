@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron';
 import { resolve } from 'path';
+import { isWin } from '../platform';
 import { IPC_CHANNELS } from '../../../shared/ipc-channels';
 
 /**
@@ -44,8 +45,9 @@ export function isDeskLyricsOpen(): boolean {
 
 function applyMouseState(locked: boolean): void {
   if (!window || window.isDestroyed()) return;
-  // 锁定 → 穿透（forward：mousemove 仍转发给页面，hover 样式可用）
-  window.setIgnoreMouseEvents(locked, { forward: true });
+  // 锁定 → 穿透（forward：mousemove 仍转发给页面，hover 样式可用）。
+  // forward 仅 Windows 支持（QYP3-063）；mac 上退化成纯穿透，无 hover 转发。
+  window.setIgnoreMouseEvents(locked, isWin ? { forward: true } : {});
 }
 
 export function openDeskLyrics(opts: { x?: number; y?: number; style: DeskLyricsStyle }): boolean {

@@ -103,9 +103,11 @@ describe('desk lyrics window (QYP3-022)', () => {
   it('locked → mouse pass-through; unlocked → interactive (draggable)', () => {
     openDeskLyrics({ style: { fontSize: 28, locked: true } });
     const win = windows[0];
-    expect(win.setIgnoreMouseEvents).toHaveBeenCalledWith(true, { forward: true });
+    // forward 仅 Windows 生效（QYP3-063）；Linux/Win 行为不变，此处按本机平台断言
+    const expectedOpts = process.platform === 'win32' ? { forward: true } : {};
+    expect(win.setIgnoreMouseEvents).toHaveBeenCalledWith(true, expectedOpts);
     setDeskLyricsStyle({ fontSize: 28, locked: false });
-    expect(win.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    expect(win.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, expectedOpts);
     expect(win.webContents.send).toHaveBeenCalledWith('desklyrics:event', {
       type: 'style',
       style: { fontSize: 28, locked: false },

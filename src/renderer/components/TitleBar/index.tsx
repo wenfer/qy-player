@@ -32,6 +32,8 @@ const CLOSE_BTN_SMALL =
 export default function TitleBar({ compact = false }: { compact?: boolean }) {
   const [maximized, setMaximized] = useState(false);
   const exitCompact = useCompactModeStore((s) => s.exit);
+  // QYP3-063：macOS 的系统红绿灯悬在自绘标题栏左端，标题内容要让位
+  const isMac = window.electronAPI?.platform === 'darwin';
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +59,7 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
       data-testid="title-bar"
     >
       <div
-        className="flex items-center gap-2 px-3 min-w-0 flex-1"
+        className={`flex items-center gap-2 min-w-0 flex-1 ${isMac ? (compact ? 'pl-[64px]' : 'pl-[76px]') : 'px-3'}`}
         onDoubleClick={() => {
           if (!compact) void window.electronAPI.toggleMaximizeWindow();
         }}
