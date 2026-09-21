@@ -14,7 +14,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { ffmpegCandidates as platformFfmpegCandidates } from '../platform/binary-locator';
 
 export type FfmpegProbe = (bin: string) => Promise<boolean>;
 
@@ -25,6 +25,8 @@ export interface FfmpegLocatorDeps {
   exists?: (path: string) => boolean;
   /** 候选可执行性检查（测试注入；默认跑一次 `-version`）。 */
   probe?: FfmpegProbe;
+  /** 平台（QYP3-061，测试注入）。 */
+  platform?: NodeJS.Platform;
 }
 
 export interface FfmpegLocator {
@@ -36,9 +38,12 @@ export interface FfmpegLocator {
 
 const PROBE_TIMEOUT_MS = 5000;
 
-/** 候选顺序：自建目录优先（与 mpv 查找策略一致）→ PATH。 */
-export function ffmpegCandidates(homeDir: string): string[] {
-  return [join(homeDir, '.local', 'bin', 'ffmpeg'), 'ffmpeg'];
+/** 候选顺序（QYP3-061 起委托平台模块）：linux 自建目录优先 → PATH；win/mac 走各自常规位置。 */
+export function ffmpegCandidates(
+  homeDir: string,
+  deps?: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }
+): string[] {
+  return platformFfmpegCandidates({ homeDir, platform: deps?.platform, env: deps?.env });
 }
 
 /** 跑一次 `-version`，退出码 0 才算可用（ENOENT/超时/非 0 都算没有）。 */
@@ -81,7 +86,7 @@ export function createFfmpegLocator(deps: FfmpegLocatorDeps = {}): FfmpegLocator
       if (detected) return resolved;
       if (inflight) return inflight;
       const pending = (async (): Promise<string | null> => {
-        for (const candidate of ffmpegCandidates(homeDir)) {
+        for (const candidate of ffmpegCandidates(homeDir, { platform: deps.platform })) {
           // PATH 上的名字不做 existsSync（由 spawn/退出码判定）
           if (candidate.includes('/') && !exists(candidate)) continue;
           // eslint-disable-next-line no-await-in-loop

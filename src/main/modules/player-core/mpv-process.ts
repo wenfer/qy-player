@@ -2,18 +2,19 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdirSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, existsSync } from 'fs';
 import { getGeneratedConfPath } from '../ui-shell/mpv-bindings';
+import { resolveMpvBinary } from '../platform/binary-locator';
+import { createIpcEndpoint, type IpcEndpoint } from '../platform/ipc-endpoint';
 
 export interface MpvOptions {
-  socketPath?: string;
   extraArgs?: string[];
 }
 
 export class MpvProcessManager extends EventEmitter {
   private process: ChildProcess | null = null;
-  private socketPath: string;
   private sockDir: string;
+  private endpoint: IpcEndpoint;
   private crashed = false;
 
   constructor() {
@@ -22,7 +23,8 @@ export class MpvProcessManager extends EventEmitter {
     if (!existsSync(this.sockDir)) {
       mkdirSync(this.sockDir, { recursive: true });
     }
-    this.socketPath = join(this.sockDir, `mpv-${Date.now()}.sock`);
+    // 地址在 start() 时重新生成（构造期的只作占位）
+    this.endpoint = createIpcEndpoint(this.sockDir, 'qy-player-mpv');
   }
 
   async start(options?: MpvOptions): Promise<string> {
@@ -30,15 +32,11 @@ export class MpvProcessManager extends EventEmitter {
       await this.quit();
     }
 
-    // Fresh socket path on every start - a leftover socket file from a
+    // Fresh endpoint on every start - a leftover socket file from a
     // previous mpv session would pass the existsSync() check before the
     // new mpv has bound it, causing ECONNREFUSED on connect.
-    this.socketPath = options?.socketPath || join(this.sockDir, `mpv-${Date.now()}.sock`);
-    try {
-      rmSync(this.socketPath, { force: true });
-    } catch {
-      // ignore - file may not exist
-    }
+    this.endpoint = createIpcEndpoint(this.sockDir, 'qy-player-mpv');
+    this.endpoint.cleanup();
     this.crashed = false;
 
     // Modern UI: uosc 2.17 (replacement for the built-in osc). Verified
@@ -66,20 +64,17 @@ export class MpvProcessManager extends EventEmitter {
       'osc-seekrangealpha=200',
     ].join(',');
 
-    // Prefer the self-built mpv (>= 0.32 with modern OSC); fall back to
-    // the system mpv. The self-built binary needs our local libs on the
-    // loader path (built without rpath).
-    const homeMpv = join(process.env.HOME || '/home', '.local', 'bin', 'mpv');
-    const mpvBinary = existsSync(homeMpv) ? homeMpv : 'mpv';
-    const mpvEnv = existsSync(homeMpv)
-      ? {
-          ...process.env,
-          LD_LIBRARY_PATH: join(process.env.HOME || '/home', '.local', 'lib'),
-        }
-      : process.env;
+    // Prefer the bundled mpv (win/mac installers), then platform-specific
+    // locations, then the self-built mpv (>= 0.32 with modern OSC); fall
+    // back to the system mpv. The self-built binary needs our local libs on
+    // the loader path (built without rpath). QYP3-061：候选序与平台差异
+    // 收敛在 binary-locator，Linux 行为与历史逐字节一致。
+    const mpv = resolveMpvBinary();
+    const mpvBinary = mpv.path;
+    const mpvEnv = mpv.env;
 
     const args = [
-      '--input-ipc-server=' + this.socketPath,
+      '--input-ipc-server=' + this.endpoint.address,
       '--idle',
       // 不在启动时强制开窗：音频经 mpv 解码（服务器 / WebDAV / 冷门格式 /
       // 本地兜底）若任由 mpv 开窗会露黑屏（内嵌封面被当成 video 轨）。窗口
@@ -124,39 +119,43 @@ export class MpvProcessManager extends EventEmitter {
       this.process.stderr?.on('data', () => {});
 
       let started = false;
+      let settled = false;
 
-      // Wait for socket file to be created
-      const checkSocket = setInterval(() => {
-        if (existsSync(this.socketPath)) {
-          clearInterval(checkSocket);
+      // Wait for the endpoint to accept connections (unix: socket file
+      // exists; win32: named pipe connects). QYP3-061
+      this.endpoint
+        .waitUntilReady(5000)
+        .then(() => {
+          if (settled) return;
+          settled = true;
           started = true;
-          resolve(this.socketPath);
-        }
-      }, 100);
-
-      // Timeout after 5s
-      setTimeout(() => {
-        if (!started) {
-          clearInterval(checkSocket);
+          resolve(this.endpoint.address);
+        })
+        .catch(() => {
+          if (settled) return;
+          settled = true;
           this.kill();
           reject(new Error('MPV failed to start within 5 seconds'));
-        }
-      }, 5000);
+        });
 
       this.process.on('error', (err) => {
-        clearInterval(checkSocket);
+        if (settled) return;
+        settled = true;
         reject(err);
       });
 
       this.process.on('exit', (code, signal) => {
-        clearInterval(checkSocket);
         this.process = null;
-        if (!started) {
-          reject(new Error(`MPV exited early with code ${code}, signal ${signal}`));
-        } else if (!this.crashed) {
-          this.crashed = true;
-          this.emit('crashed', code, signal);
+        if (settled) {
+          // 已就绪过的意外退出 = 崩溃（沿用历史语义）
+          if (started && !this.crashed) {
+            this.crashed = true;
+            this.emit('crashed', code, signal);
+          }
+          return;
         }
+        settled = true;
+        reject(new Error(`MPV exited early with code ${code}, signal ${signal}`));
       });
     });
   }
@@ -187,7 +186,7 @@ export class MpvProcessManager extends EventEmitter {
   }
 
   getSocketPath(): string {
-    return this.socketPath;
+    return this.endpoint.address;
   }
 
   isRunning(): boolean {

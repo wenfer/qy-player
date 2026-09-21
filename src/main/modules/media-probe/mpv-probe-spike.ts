@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { MpvIpcClient } from '../player-core/mpv-ipc-client';
+import { resolveMpvBinary as resolveMpvBinaryFromPlatform } from '../platform/binary-locator';
+import { createIpcEndpoint, type IpcEndpoint } from '../platform/ipc-endpoint';
 
 /**
  * mpv probe spike (plan §10, QYP2-017).
@@ -27,11 +29,9 @@ export class ProbeError extends Error {
   }
 }
 
-/** Resolve the mpv binary the same way playback does (self-built first). */
+/** Resolve the mpv binary the same way playback does (QYP3-061 委托平台模块). */
 export function resolveMpvBinary(homeDir?: string): string {
-  const home = homeDir ?? process.env.HOME ?? '/home';
-  const homeMpv = join(home, '.local', 'bin', 'mpv');
-  return existsSync(homeMpv) ? homeMpv : 'mpv';
+  return resolveMpvBinaryFromPlatform({ homeDir }).path;
 }
 
 /**
@@ -247,21 +247,24 @@ export function spawnProbeProcess(binary: string, args: string[]): ProbeSpawn {
 }
 
 async function waitForSocket(
-  socketPath: string,
+  endpoint: IpcEndpoint,
   timeoutMs: number,
   failed?: () => Error | null
 ): Promise<void> {
-  const started = Date.now();
-  for (;;) {
-    if (existsSync(socketPath)) return;
-    const spawnError = failed?.();
-    if (spawnError) {
-      throw new ProbeError('SPAWN', `mpv 启动失败: ${spawnError.message}`);
+  const spawnError = failed?.();
+  if (spawnError) {
+    throw new ProbeError('SPAWN', `mpv 启动失败: ${spawnError.message}`);
+  }
+  try {
+    await endpoint.waitUntilReady(timeoutMs, failed);
+  } catch (err) {
+    // 失败探针优先：进程挂了报 SPAWN，而不是干等到 TIMEOUT
+    const lateSpawnError = failed?.();
+    if (lateSpawnError) {
+      throw new ProbeError('SPAWN', `mpv 启动失败: ${lateSpawnError.message}`);
     }
-    if (Date.now() - started > timeoutMs) {
-      throw new ProbeError('TIMEOUT', 'mpv 探测 socket 超时');
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (err instanceof ProbeError) throw err;
+    throw new ProbeError('TIMEOUT', 'mpv 探测 socket 超时');
   }
 }
 
@@ -352,14 +355,11 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
   } catch {
     // exists / raced - mpv will surface a real error if binding fails
   }
-  const socketPath = join(socketDir, `probe-${process.pid}-${Date.now()}.sock`);
-  try {
-    rmSync(socketPath, { force: true });
-  } catch {
-    // ignore
-  }
+  // QYP3-061：端点抽象（win32 命名管道 / unix socket），地址与就绪判定收敛
+  const endpoint = createIpcEndpoint(socketDir, 'qy-probe');
+  endpoint.cleanup();
   const binary = deps.mpvBinary ?? resolveMpvBinary();
-  const args = buildProbeArgs(socketPath, deps.target, deps.httpHeaders);
+  const args = buildProbeArgs(endpoint.address, deps.target, deps.httpHeaders);
   const spawnFn = deps.spawnFn ?? spawnProbeProcess;
 
   let spawned: ProbeSpawn;
@@ -371,11 +371,7 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
   const deadline = Date.now() + timeoutMs;
   const finish = (): void => {
     killChild(spawned.child);
-    try {
-      rmSync(socketPath, { force: true });
-    } catch {
-      // ignore
-    }
+    endpoint.cleanup();
   };
   let spawnError: Error | null = null;
   let earlyExit: string | null = null;
@@ -386,14 +382,14 @@ export async function runProbeSpike(deps: ProbeDeps): Promise<ProbeResult> {
     earlyExit = `code=${code ?? 'null'} signal=${signal ?? 'null'}`;
   });
   try {
-    await waitForSocket(socketPath, Math.min(5000, timeoutMs), () => {
+    await waitForSocket(endpoint, Math.min(5000, timeoutMs), () => {
       if (spawnError) return spawnError;
       if (earlyExit !== null) {
         return new Error(`mpv 提前退出 (${earlyExit})，无法解析目标`);
       }
       return null;
     });
-    const ipc = new MpvIpcClient(socketPath);
+    const ipc = new MpvIpcClient(endpoint.address);
     try {
       // connect() resolves on 'connect' and rejects on pre-connect socket
       // errors; the deadline race keeps a hung accept from blocking.
