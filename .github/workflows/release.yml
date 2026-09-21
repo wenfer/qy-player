@@ -39,17 +39,126 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-builds
-          path: dist/
+          path: dist/*
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # dist:win 内部会跑 scripts/fetch-mpv-win.js（GitHub API 查 release →
+      # 下载 7z → 解压到 build/mpv-win）；GitHub runner 自带 7-Zip
+      - name: Build and package
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: dist/*
+          if-no-files-found: error
+
+  # mac 的 x64/arm64 必须分架构构建：better-sqlite3 原生模块按 runner
+  # 宿主架构编译，arm64 runner 上打出的 x64 包里会是 arm64 模块（Intel
+  # 机器上 better-sqlite3 直接加载失败）
+  build-mac-x64:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install mpv (Homebrew)
+        run: brew install mpv
+
+      - name: Build and package
+        run: |
+          npm run typecheck
+          npm run build:main
+          npm run build:preload
+          npm run build:renderer
+          bash scripts/collect-mpv-mac.sh
+          npx electron-builder --mac dmg --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-x64-builds
+          path: dist/*
+          if-no-files-found: error
+
+  build-mac-arm64:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install mpv (Homebrew)
+        run: brew install mpv
+
+      - name: Build and package
+        run: |
+          npm run typecheck
+          npm run build:main
+          npm run build:preload
+          npm run build:renderer
+          bash scripts/collect-mpv-mac.sh
+          npx electron-builder --mac dmg --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64-builds
+          path: dist/*
+          if-no-files-found: error
 
   release:
-    needs: build-linux
+    needs:
+      - build-linux
+      - build-windows
+      - build-mac-x64
+      - build-mac-arm64
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: linux-builds
           path: dist/
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
