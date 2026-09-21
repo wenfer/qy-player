@@ -23,17 +23,24 @@ const h = vi.hoisted(() => ({
 
 vi.mock('../../../src/renderer/player/web-audio-engine', () => {
   class WebAudioEngine {
-    queueState = { length: 0, index: 0, currentTrackId: null, repeat: 'off', shuffle: false };
-    onError?: (e?: unknown) => void;
+    queueState = { length: 0, index: 0, currentTrackId: null as number | null, repeat: 'off', shuffle: false };
+    onError?: (e?: unknown, track?: { id: number }) => void;
     onTime?: unknown;
     onEnded?: unknown;
     onPlaying?: unknown;
     setEq = vi.fn();
     setVolume = vi.fn();
-    playQueue = vi.fn(async () => {
+    playQueue = vi.fn(async (tracks: Array<{ id: number }>, startIndex: number) => {
+      // 真实引擎在起播前就把队列推进到当前曲（QYP3-068d：onError 要带上它）
+      this.queueState = {
+        ...this.queueState,
+        length: tracks.length,
+        index: startIndex,
+        currentTrackId: tracks[startIndex]?.id ?? null,
+      };
       if (h.behavior.unsupported) {
         // 与 Chromium 实测时序一致：先 error 事件，再 play() rejection
-        this.onError?.(new Event('error'));
+        this.onError?.(new Event('error'), tracks[startIndex]);
         throw new DOMException('Failed to load because no supported source was found.', 'NotSupportedError');
       }
       if (h.behavior.decodeErrorNoEvent) {
@@ -258,6 +265,34 @@ describe('direct → mpv fallback (QYP3-030)', () => {
 
     expect(useMusicPlaybackStore.getState().errorMessage).toBe('解析播放地址失败');
     expect(api.playerLoadFile).not.toHaveBeenCalled();
+  });
+
+  it('next() with a failing track falls back to THAT track and never throws unhandled (QYP3-068d)', async () => {
+    resolveDirectThenMpv();
+    const a = flacTrack(12, '海屿你');
+    const b = flacTrack(13, '嘲笑');
+    h.behavior.unsupported = false;
+    await useMusicPlaybackStore.getState().playQueue([a, b], 0);
+    expect(useMusicPlaybackStore.getState().current?.title).toBe('海屿你');
+
+    // 模拟下一曲 B 起播失败：引擎队列已前进到 B，error 事件带上 B，
+    // play() rejection 随后——store.next() 必须吞掉它且兜底重播 B
+    const engine = h.engine.instance as {
+      queueState: Record<string, unknown>;
+      onError?: (e?: unknown, track?: { id: number }) => void;
+      next: ReturnType<typeof vi.fn>;
+    };
+    engine.next.mockImplementation(async () => {
+      engine.queueState = { ...engine.queueState, index: 1, currentTrackId: 13 };
+      engine.onError?.(new Event('error'), { id: 13 });
+      throw new DOMException('Failed to load because no supported source was found.', 'NotSupportedError');
+    });
+
+    // 不冒泡 = 不会变成 unhandled rejection（用户看到的白板场景）
+    await expect(useMusicPlaybackStore.getState().next()).resolves.toBeUndefined();
+
+    await vi.waitFor(() => expect(api.playerLoadFile).toHaveBeenCalledTimes(1));
+    expect(api.playerLoadFile.mock.calls[0][0]).toBe('/home/qiuyuan/Music/曲13.flac');
   });
 });
 

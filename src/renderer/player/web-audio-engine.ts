@@ -180,7 +180,11 @@ export class WebAudioEngine {
   /** 上次剥离封面生成的 blob URL，换曲/自救前释放，避免内存泄漏。 */
   private lastBlobUrl: string | null = null;
 
-  onError?: (err: unknown) => void;
+  /**
+   * 解码失败（QYP3-068d）：带上引擎队列当前曲目。换曲窗口里引擎队列已
+   * 前进、调用方的 store.current 还是上一首——按 store 识别会认领错曲。
+   */
+  onError?: (err: unknown, track?: QueueTrack) => void;
   onEnded?: () => void;
   onTime?: (position: number, duration: number) => void;
   onPlaying?: (isPlaying: boolean) => void;
@@ -259,7 +263,7 @@ export class WebAudioEngine {
     });
     this.audio.addEventListener?.('play', () => this.onPlaying?.(true));
     this.audio.addEventListener?.('pause', () => this.onPlaying?.(false));
-    this.audio.addEventListener?.('error', (e) => this.onError?.(e));
+    this.audio.addEventListener?.('error', (e) => this.onError?.(e, this.queue.current ?? undefined));
   }
 
   /**

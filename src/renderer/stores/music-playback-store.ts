@@ -361,11 +361,25 @@ function getEngine(): WebAudioEngine {
       if (s.engine === 'mpv') return;
       useMusicPlaybackStore.setState({ isPlaying });
     };
-    engineSingleton.onError = () => {
+    engineSingleton.onError = (_err, track) => {
       const s = useMusicPlaybackStore.getState();
       if (s.engine === 'mpv') return; // 已在兼容引擎上，无兜底可谈
-      const failed = s.current as EngineExtTrack | null;
+      const instance = engineSingleton;
+      if (!instance) return;
+      // 失败曲目以引擎报上来的为准（QYP3-068d）：换曲窗口里引擎队列已前进、
+      // store.current 还是上一首——按 store 识别会认领错曲。快照条目才是
+      // 权威 EngineExtTrack（带 musicInput），按 id 回查
+      const snapshot = useMusicPlaybackStore.getState().queueSnapshot;
+      const trackId = instance.queueState.currentTrackId;
+      const failed =
+        (track && (snapshot.find((q) => q.id === track.id) as EngineExtTrack | undefined)) ??
+        (track as EngineExtTrack | null) ??
+        (trackId !== null
+          ? (snapshot.find((q) => q.id === trackId) as EngineExtTrack | undefined) ?? null
+          : null);
       if (!failed || !failed.musicInput) return;
+      // 引擎已不在这一首上（用户又点了别的曲）：这次错误属于过去，不再处理
+      if (instance.queueState.currentTrackId !== failed.id) return;
       // QYP3-033：FLAC 因内嵌封面非法被 Chromium 拒绝时，先剥离封面
       // 在内置引擎重播——保留真频谱/真波形，且不必兜底 mpv（也避免黑窗）。
       // QYP3-037：服务器/WebDAV 的 qy-stream URL 不带扩展名，只能靠 codec
@@ -375,13 +389,20 @@ function getEngine(): WebAudioEngine {
       if (flacRecoveringQueueId === failed.id) return;
       if (failed.codec === 'flac' || isLocalFlacUrl(failed.url)) {
         flacRecoveringQueueId = failed.id;
-        void getEngine()
+        void instance
           .recoverFlac(failed)
           .then((recovered) => {
-            // 期间用户换了曲：这次自救/兜底不再适用于当前会话
-            if (useMusicPlaybackStore.getState().current !== failed) return;
+            // 期间引擎已不在这一首上（用户换了曲/视频接管）：自救作废
+            if (
+              useMusicPlaybackStore.getState().engine !== 'webaudio' ||
+              instance.queueState.currentTrackId !== failed.id
+            ) {
+              return;
+            }
             if (recovered) {
-              // 自救成功：保持 webaudio 引擎（真频谱/真波形都在这里）
+              // 自救成功：引擎队列停在 failed 上，store 对齐它（换曲窗口里
+              // current 还是上一首），真频谱/真波形都留在内置引擎
+              syncFromEngine(instance);
               useMusicPlaybackStore.setState({ engine: 'webaudio', isPlaying: true, errorMessage: null });
               return;
             }
@@ -975,8 +996,14 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       reportServerProgress({ final: true });
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
-      await engineInstance.next(false);
-      syncFromEngine(engineInstance);
+      try {
+        await engineInstance.next(false);
+        syncFromEngine(engineInstance);
+      } catch {
+        // 换曲失败（解码/加载）由 onError → 自救/兜底接管（QYP3-068d）：
+        // 这里吞掉 rejection，否则就是 unhandled——兜底已按引擎报上的
+        // 失败曲目重播，不需要也不能再把"换曲"报成"播放失败"
+      }
     } else if (s.engine === 'mpv') {
       // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则单曲处理。
       // QYP3-035：循环模式在此落实（one=重播当前 / all=队尾回卷），否则精简
@@ -999,8 +1026,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     if (s.engine === 'webaudio') {
       const engineInstance = engineSingleton;
       if (!engineInstance) return;
-      await engineInstance.prev();
-      syncFromEngine(engineInstance);
+      try {
+        await engineInstance.prev();
+        syncFromEngine(engineInstance);
+      } catch {
+        // 同 next：失败由 onError → 自救/兜底接管，这里不冒泡（QYP3-068d）
+      }
     } else if (s.engine === 'mpv') {
       if (s.serverQueue.length > 0 && s.serverIndex - 1 >= 0) {
         await get().playServerAt(s.serverIndex - 1);

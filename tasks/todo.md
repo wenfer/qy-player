@@ -1536,6 +1536,27 @@
   queueIndex=249 + next 可推进；getMusicTracks 拒绝 → 退单曲且正常起播）；
   typecheck + test:render 331 例 + test:main 782 例全绿
 
+### QYP3-068e 修复：换曲到坏曲目时兜底认领错曲（下一曲卡死） `[x]`
+- 用户复测下一曲仍无反应，devtools 报 `Uncaught (in promise) DOMException:
+  NotSupportedError`（store 的 next 函数）——下一首解码失败且兜底没接住
+- 根因（两个缺陷叠加）：
+  ① `onError` 按 `store.current` 识别失败曲目，但 next() 期间引擎队列已
+  前进到 B、store.current 还是 A——认领错曲，自救/兜底整个落空；上一轮
+  排查时记过这条低概率竞态，恢复态重建大曲库后"下一曲命中坏曲目"从低概率
+  变成必现路径
+  ② `store.next()/prev()` 没有 catch——失败直接冒泡成 unhandled rejection
+- 改动：
+  ① `WebAudioEngine.onError` 增加 track 参数（`this.queue.current`，即
+  正在加载失败的那首）；store 的 onError 优先用引擎上报的曲目并按 id 回查
+  快照（权威 EngineExtTrack），守卫改看引擎队列位置（engine 仍在这首上）；
+  自救成功后 syncFromEngine 把 store 对齐到引擎队列
+  ② store.next()/prev() 包 try/catch——失败由 onError 接管，rejection
+  不再冒泡
+- 测试：direct-fallback 新增 1 例（next() 失败 → 兜底重播 B 且 next()
+  不冒泡）；mock 引擎更新为真实语义（playQueue 记录 currentTrackId、
+  onError 带 track）；typecheck + test:render 332 例 + test:main 782 例
+  全绿
+
 ---
 
 ## 纪律提醒（动工前重读）
