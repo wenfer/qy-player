@@ -29,7 +29,9 @@ export function webdavFingerprint(entry: SourceEntry): string | undefined {
 async function collectBounded(
   resource: NodeJS.ReadableStream | AsyncIterable<Uint8Array>,
   maxBytes: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** 超限报错里的资源名（NFO / 音频头部 / CUE），只为报错可读。 */
+  label = 'NFO'
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -41,14 +43,14 @@ async function collectBounded(
         throw err;
       }
       bytes += chunk.length;
-      if (bytes > maxBytes) throw new Error(`NFO 响应超过 ${maxBytes} 字节上限`);
+      if (bytes > maxBytes) throw new Error(`${label} 响应超过 ${maxBytes} 字节上限`);
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
   }
   const stream = resource as NodeJS.ReadableStream & { destroy?: (e?: Error) => void };
   await new Promise<void>((resolve, reject) => {
-    const oversized = new Error(`NFO 响应超过 ${maxBytes} 字节上限`);
+    const oversized = new Error(`${label} 响应超过 ${maxBytes} 字节上限`);
     const onData = (chunk: Buffer): void => {
       bytes += chunk.length;
       if (bytes > maxBytes) {
@@ -102,6 +104,12 @@ export function createWebDavScanDriver(deps: {
   adapter: SourceAdapter;
   /** 来源用途标记（QYP3-039/041），透传给底层 driver。 */
   purpose?: 'music' | 'video';
+  /** QYP3-060：封面/歌词落盘目录（与本地驱动共用同一份缓存分区）。 */
+  coversDir?: string;
+  lyricsDir?: string;
+  /** QYP3-060：时长解析能力版本闸门（QYP3-052），语义同本地驱动。 */
+  durationScanVersion?: number;
+  onDurationScanVersion?: (version: number) => void;
 }): LocalScanDriver {
   if (deps.adapter.kind !== 'webdav') {
     throw new Error('createWebDavScanDriver 需要 WebDAV adapter');
@@ -112,14 +120,31 @@ export function createWebDavScanDriver(deps: {
     sourceId: deps.sourceId,
     purpose: deps.purpose,
     fingerprintOf: webdavFingerprint,
+    coversDir: deps.coversDir,
+    lyricsDir: deps.lyricsDir,
+    durationScanVersion: deps.durationScanVersion,
+    onDurationScanVersion: deps.onDurationScanVersion,
     readNfo: async (relativePath, signal) => {
       const resource = await adapter.open({ sourceId: deps.sourceId, relativePath }, signal);
       return collectBounded(resource.stream, 2 * 1024 * 1024, signal);
     },
+    // QYP3-060：音频头部走 bounded GET——Range 0-524287 与播放解析的 range
+    // 探针同款，窗口与本地驱动一致（512 KiB，ID3v2/APIC/FLAC 元数据块都在
+    // 头部）。服务器忽略 Range 返回 200 全量时 collectBounded 会在窗口处
+    // 抛错，由上层按"读取失败"退化文件名启发式，扫描不中断（增量跳过在
+    // readAudio 之前，未变文件零成本）
+    readAudio: async (entry, signal) => {
+      const resource = await adapter.open(
+        { sourceId: deps.sourceId, relativePath: entry.relativePath },
+        signal,
+        'bytes=0-524287'
+      );
+      return collectBounded(resource.stream, 512 * 1024, signal, '音频头部');
+    },
     // QYP3-006：CUE 文本走 bounded GET（64 KiB 上限——CUE 从未这么大）
     readText: async (entry, signal) => {
       const resource = await adapter.open({ sourceId: deps.sourceId, relativePath: entry.relativePath }, signal);
-      return collectBounded(resource.stream, 64 * 1024, signal);
+      return collectBounded(resource.stream, 64 * 1024, signal, 'CUE');
     },
   });
 }

@@ -2349,7 +2349,24 @@ function registerCatalogHandlers(
     const purpose = repo.getSource(sourceId)?.purpose ?? 'video';
     const driver =
       adapter.kind === 'webdav'
-        ? createWebDavScanDriver({ repo, sourceId, adapter, purpose })
+        ? createWebDavScanDriver({
+            repo,
+            sourceId,
+            adapter,
+            purpose,
+            // QYP3-060：WebDAV 音频与本地同待遇——头部标签解析（bounded GET，
+            // Range 0-524287）、封面/歌词落盘、时长解析版本闸门
+            coversDir: join(app.getPath('userData'), 'covers'),
+            lyricsDir,
+            durationScanVersion: Number(storage.getConfig('music.durationScanVersion')) || 0,
+            onDurationScanVersion: (version) => {
+              try {
+                storage.setConfig('music.durationScanVersion', String(version));
+              } catch {
+                // 写不进去只影响下一轮是否重复解析，不影响扫描结果
+              }
+            },
+          })
         : createLocalScanDriver({
             repo,
             sourceId,

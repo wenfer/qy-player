@@ -100,8 +100,8 @@ export interface UpsertMusicTrackInput {
   duration?: number;
   codec?: string;
   bitrate?: number;
-  hasCover?: boolean;
-  hasLyrics?: boolean;
+  hasCover?: boolean | null;
+  hasLyrics?: boolean | null;
   fingerprint?: string;
 }
 
@@ -813,7 +813,7 @@ export function createCatalogRepository(db: Database.Database) {
         `INSERT INTO music_tracks (source_id, source_key, path, server_type, server_id, item_id,
              title, artist, album, albumartist, track_no, disc_no, year, duration, codec, bitrate,
              has_cover, has_lyrics, fingerprint, owner_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), ?, ?)
          ON CONFLICT(owner_key) DO UPDATE SET
            path = COALESCE(excluded.path, path),
            title = COALESCE(excluded.title, title),
@@ -826,8 +826,13 @@ export function createCatalogRepository(db: Database.Database) {
            duration = COALESCE(excluded.duration, duration),
            codec = COALESCE(excluded.codec, codec),
            bitrate = COALESCE(excluded.bitrate, bitrate),
-           has_cover = excluded.has_cover,
-           has_lyrics = excluded.has_lyrics,
+           -- QYP3-060：tri-state——绑定的原始值 null = "这一轮没读到"（网络失败/
+           -- 无读取钩子），COALESCE 保留旧值；true/false 是确定性结论，照常覆盖。
+           -- 注意不能写成 COALESCE(excluded.has_cover, has_cover)：excluded 里
+           -- 拿到的是 VALUES 侧 COALESCE(?,0) 兜底后的 0，tri-state 会被吞掉，
+           -- 所以 UPDATE 分支用同值再绑一次的裸参数
+           has_cover = COALESCE(?, has_cover),
+           has_lyrics = COALESCE(?, has_lyrics),
            fingerprint = COALESCE(excluded.fingerprint, fingerprint),
            updated_at = unixepoch()`
       ).run(
@@ -847,10 +852,14 @@ export function createCatalogRepository(db: Database.Database) {
         input.duration ?? null,
         input.codec ?? null,
         input.bitrate ?? null,
-        input.hasCover === true ? 1 : 0,
-        input.hasLyrics === true ? 1 : 0,
+        // tri-state（QYP3-060）：null = 本轮未判定；列 NOT NULL，真插入时兜底 0
+        input.hasCover === true ? 1 : input.hasCover === false ? 0 : null,
+        input.hasLyrics === true ? 1 : input.hasLyrics === false ? 0 : null,
         input.fingerprint ?? null,
-        ownerKey
+        ownerKey,
+        // UPDATE 分支复用原始 tri-state 值（见上方注释）
+        input.hasCover === true ? 1 : input.hasCover === false ? 0 : null,
+        input.hasLyrics === true ? 1 : input.hasLyrics === false ? 0 : null
       );
       const row = db.prepare('SELECT id FROM music_tracks WHERE owner_key = ?').get(ownerKey) as {
         id: number;

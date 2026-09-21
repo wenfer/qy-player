@@ -196,3 +196,76 @@ describe('music domain scoping (QYP3-055)', () => {
     expect(repo.listMusicSourceIds()).toEqual([videoId]);
   });
 });
+
+describe('upsert tri-state flags (QYP3-060)', () => {
+  it('undefined/null preserves previous flags; definitive false overwrites', () => {
+    const id = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'tri',
+      path: '/music/tri.mp3',
+      title: '回归',
+      artist: '周杰伦',
+      codec: 'mp3',
+      hasCover: true,
+      hasLyrics: true,
+      fingerprint: 'fp-tri',
+    });
+    const get = () => repo.getMusicTrack(sourceId, id)!;
+    expect(get().has_cover).toBe(1);
+    expect(get().has_lyrics).toBe(1);
+
+    // 本轮没读到（读取钩子缺位/失败）→ undefined：保留上一轮的成果
+    repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'tri',
+      path: '/music/tri.mp3',
+      title: '回归',
+      artist: '周杰伦',
+      codec: 'mp3',
+      fingerprint: 'fp-tri',
+    });
+    expect(get().has_cover).toBe(1);
+    expect(get().has_lyrics).toBe(1);
+
+    // 显式 false 是确定性结论（这一轮真读到了，文件里确实没有）→ 覆盖
+    repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'tri',
+      path: '/music/tri.mp3',
+      title: '回归',
+      artist: '周杰伦',
+      codec: 'mp3',
+      fingerprint: 'fp-tri',
+      hasCover: false,
+      hasLyrics: false,
+    });
+    expect(get().has_cover).toBe(0);
+    expect(get().has_lyrics).toBe(0);
+
+    // 之后再传 null：0 也是旧值，保留
+    repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'tri',
+      path: '/music/tri.mp3',
+      title: '回归',
+      artist: '周杰伦',
+      codec: 'mp3',
+      fingerprint: 'fp-tri',
+      hasCover: null,
+      hasLyrics: null,
+    });
+    expect(get().has_cover).toBe(0);
+    expect(get().has_lyrics).toBe(0);
+
+    // 新行 + 未判定：落列默认 0
+    const id2 = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'tri2',
+      path: '/music/tri2.mp3',
+      title: '新歌',
+      codec: 'mp3',
+      fingerprint: 'fp-tri2',
+    });
+    expect(repo.getMusicTrack(sourceId, id2)!.has_cover).toBe(0);
+  });
+});

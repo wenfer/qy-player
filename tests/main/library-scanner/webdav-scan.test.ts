@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDatabaseAtPath } from '../../../src/main/modules/storage/db';
 import { createCatalogRepository, type CatalogRepository } from '../../../src/main/modules/catalog/repository';
 import { ScanJobController } from '../../../src/main/modules/library-scanner/job-controller';
@@ -25,11 +26,12 @@ interface FakeFile {
   size: number;
   mtime: number;
   etag?: string;
-  content?: string;
+  content?: string | Buffer;
 }
 
 function makeWebDavTree(files: Record<string, Omit<FakeFile, 'isDir'> & Partial<Pick<FakeFile, 'isDir'>>>) {
   const nodes = new Map<string, FakeFile>();
+  const ranges: string[] = []; // 收到的 Range 头（QYP3-060 断言用）
   for (const [path, meta] of Object.entries(files)) {
     nodes.set(path, { isDir: meta.isDir ?? false, size: meta.size, mtime: meta.mtime, ...(meta.etag ? { etag: meta.etag } : {}), ...(meta.content !== undefined ? { content: meta.content } : {}) });
     const segments = path.split('/');
@@ -38,7 +40,7 @@ function makeWebDavTree(files: Record<string, Omit<FakeFile, 'isDir'> & Partial<
       if (!nodes.has(dir)) nodes.set(dir, { isDir: true, size: 0, mtime: 0 });
     }
   }
-  const adapter: SourceAdapter & { setNode(path: string, patch: Partial<FakeFile>): void; remove(path: string): void } = {
+  const adapter: SourceAdapter & { setNode(path: string, patch: Partial<FakeFile>): void; remove(path: string): void; ranges(): string[] } = {
     kind: 'webdav',
     async *list(relativePath: string, signal: AbortSignal): AsyncGenerator<SourceEntry> {
       const prefix = relativePath === '' ? '' : `${relativePath}/`;
@@ -62,13 +64,19 @@ function makeWebDavTree(files: Record<string, Omit<FakeFile, 'isDir'> & Partial<
       return { canSeek: true, canDelete: false, supportsEtag: true, supportsRange: true };
     },
     stat: async () => ({ supportsRange: true }),
-    async open(locator, signal: AbortSignal) {
+    async open(locator, signal: AbortSignal, rangeHeader?: string) {
       const node = nodes.get(locator.relativePath);
       if (!node || node.content === undefined) throw new Error('not found');
       void signal;
-      const buffer = Buffer.from(node.content, 'utf8');
+      if (rangeHeader) ranges.push(rangeHeader);
+      const buffer = Buffer.isBuffer(node.content) ? node.content : Buffer.from(node.content, 'utf8');
+      // 真实服务器的 206 语义：按 Range 切片（bytes=a-b 闭区间）
+      const m = rangeHeader?.match(/^bytes=(\d+)-(\d+)$/);
+      const body = m
+        ? buffer.subarray(Number(m[1]), Math.min(Number(m[2]) + 1, buffer.length))
+        : buffer;
       const stream = new (require('stream').Readable as typeof import('stream').Readable)();
-      stream.push(buffer);
+      stream.push(body);
       stream.push(null);
       return { stream, size: buffer.length, supportsRange: true };
     },
@@ -82,6 +90,7 @@ function makeWebDavTree(files: Record<string, Omit<FakeFile, 'isDir'> & Partial<
         if (p.startsWith(`${path}/`)) nodes.delete(p);
       }
     },
+    ranges: (): string[] => ranges,
   };
   return adapter;
 }
@@ -352,5 +361,84 @@ describe('webdav adapter scan integration', () => {
     // HTTP behaviors live in webdav-client.test.ts.
     const adapter = WebDavSourceAdapter.fromSource(1, 'http://127.0.0.1:1/dav', null);
     expect(adapter.kind).toBe('webdav');
+  });
+});
+
+describe('webdav audio tags (QYP3-060)', () => {
+  const fixture = (name: string): Buffer =>
+    readFileSync(join(fileURLToPath(import.meta.url), '../../../fixtures/audio', name));
+
+  it('reads the audio head via a bounded Range GET and stores tags + cover', async () => {
+    const sourceId = repo.createSource({
+      kind: 'webdav',
+      name: '云音乐',
+      root: 'http://127.0.0.1:1/dav',
+      purpose: 'music',
+    });
+    const coversDir = join(dbDir, 'covers');
+    const onDurationScanVersion = vi.fn();
+    const tree = makeWebDavTree({
+      '音乐/晴天.mp3': { size: 500, mtime: 10, etag: 'e-audio', content: fixture('sample-id3v23.mp3') },
+    });
+    const driver = createWebDavScanDriver({
+      repo,
+      sourceId,
+      adapter: tree,
+      purpose: 'music',
+      coversDir,
+      lyricsDir: join(dbDir, 'lyrics'),
+      durationScanVersion: 0,
+      onDurationScanVersion,
+    });
+    const runId = await runScan(sourceId, tree, driver);
+    expect(repo.getScanRun(runId)!.status).toBe('completed');
+
+    // Range 探针与播放解析同款：bytes=0-524287（512 KiB 头部窗口）
+    expect(tree.ranges()).toContain('bytes=0-524287');
+
+    // 标签从 WebDAV 头部解析出来（文件名启发式不可能给出专辑/专辑歌手）
+    const track = repo.listMusicTracksPaged([sourceId]).find((t) => t.path === '音乐/晴天.mp3')!;
+    expect(track.title).toBe('晴天');
+    expect(track.artist).toBe('周杰伦');
+    expect(track.album).toBe('叶惠美');
+    expect(track.has_cover).toBe(1);
+    expect(track.has_lyrics).toBe(1);
+
+    // 封面/歌词落盘到与本地驱动同一套缓存分区
+    expect(readdirSync(coversDir).length).toBeGreaterThan(0);
+    const lrcs = readdirSync(join(dbDir, 'lyrics'));
+    expect(lrcs.some((f) => f.endsWith('.lrc'))).toBe(true);
+
+    // 时长解析版本写回（收尾一次）
+    expect(onDurationScanVersion).toHaveBeenCalledWith(1);
+  });
+
+  it('keeps previous cover/lyrics flags when the head read fails this round', async () => {
+    const sourceId = repo.createSource({
+      kind: 'webdav',
+      name: '云音乐',
+      root: 'http://127.0.0.1:1/dav',
+      purpose: 'music',
+    });
+    const tree = makeWebDavTree({
+      '音乐/晴天.mp3': { size: 500, mtime: 10, etag: 'e-audio', content: fixture('sample-id3v23.mp3') },
+    });
+    await runScan(
+      sourceId,
+      tree,
+      createWebDavScanDriver({ repo, sourceId, adapter: tree, purpose: 'music', durationScanVersion: 1 })
+    );
+    expect(repo.listMusicTracksPaged([sourceId])[0].has_cover).toBe(1);
+
+    // ETag 变化强制重索引，但这一轮 open 抛错（服务器抖动）→ 标志保留
+    tree.setNode('音乐/晴天.mp3', { etag: 'e-audio2', content: undefined });
+    await runScan(
+      sourceId,
+      tree,
+      createWebDavScanDriver({ repo, sourceId, adapter: tree, purpose: 'music', durationScanVersion: 1 })
+    );
+    const after = repo.listMusicTracksPaged([sourceId])[0];
+    expect(after.has_cover).toBe(1);
+    expect(after.has_lyrics).toBe(1);
   });
 });

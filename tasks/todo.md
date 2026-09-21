@@ -1367,15 +1367,33 @@
   TARGET-VERIFY）
 
 ### 本轮记录在案但未修的缺口
-- WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
-  （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法
-  是把 `WebDavSourceAdapter.open(locator, signal, 'bytes=0-524287')` 接到
-  `readAudio`（播放解析已用同款 range 探针），增量跳过在 `readAudio`
-  之前所以未变文件零成本；属功能补齐，未在本次"只修 bug"范围内
-- `upsertMusicTrack` 的 `has_cover`/`has_lyrics` 是无条件覆盖
-  （`repository.ts:761-762`），读取失败时无法区分"真没有"与"这次没读到"
-- `qy-file://audio` 协议处理器每次请求打 3 行 console.log
-  （`main/index.ts`，调试残留）
+- `upsertMusicTrack` 的 `duration` 播放期回填是无条件覆盖（与 QYP3-052
+  语义一致：旧值本来就不准），但若未来有"更权威"的时长来源需要另行约束
+
+### QYP3-060 WebDAV 音频接上真标签：readAudio/封面/歌词 `[x]`
+- 背景（记录在案的缺口，用户要求继续推进后处理）：WebDAV 没有
+  `readAudio`/`coversDir`/`lyricsDir` 接线，标签/封面/歌词全靠目录启发式
+- 改动：
+  ① `createWebDavScanDriver` 新增 `readAudio` 钩子——
+  `adapter.open(locator, signal, 'bytes=0-524287')`（与播放解析同款 range
+  探针）+ bounded GET（512 KiB 窗口与本地一致）；服务器忽略 Range 返回
+  200 全量时在窗口处抛错，上层按读取失败退化启发式，扫描不中断
+  ② `coversDir`/`lyricsDir`/`durationScanVersion`/`onDurationScanVersion`
+  四个依赖透传（ipc 层与本地驱动同源），封面/歌词落同一套缓存分区；
+  增量跳过在 readAudio 之前，未变文件零成本
+  ③ 顺带修掉同清单里的语义缺口：`upsertMusicTrack` 的
+  `has_cover`/`has_lyrics` 改 **tri-state**（undefined/null = "本轮没读
+  到"→ COALESCE 保留旧值；true/false = 确定性结论 → 覆盖）。扫描器只在
+  真的读到并解析了头部时才传布尔值
+  - 实现陷阱（踩过并写入注释）：UPDATE 分支不能写
+    `COALESCE(excluded.has_cover, has_cover)`——`excluded` 拿到的是
+    VALUES 侧 `COALESCE(?,0)` 兜底后的 0，tri-state 会被吞；UPDATE 分支
+    用同值再绑一次的裸参数
+- Evidence：仓储 tri-state 单测（undefined 保留 / false 覆盖 / null 保留
+  0 / 新行兜底 0）；webdav-scan 新增 2 例（fixture 真字节经 bounded Range
+  GET 解出 标题/歌手/专辑 + 封面歌词落盘 + Range 头断言 + 版本写回；
+  ETag 变化强制重索引但读取失败 → 标志保留）；typecheck 双配置 +
+  test:main 68 文件 748 例绿
 
 ---
 

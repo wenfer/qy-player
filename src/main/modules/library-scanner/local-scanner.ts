@@ -346,6 +346,10 @@ export function createLocalScanDriver(deps: {
             // 标签读取失败：文件名启发式结果已就位，扫描不中断。
           }
         }
+        // QYP3-060：本轮真的读到并解析了头部，has_cover/has_lyrics 才算
+        // "已判定"；读取失败/无读取钩子时传 undefined（= 未判定），仓储层
+        // COALESCE 保留旧值——网络抖动一次不该抹掉上一轮辛苦提取的封面/歌词
+        const tagsKnown = deps.readAudio !== undefined && headBuf !== null;
         const ext = entry.relativePath.split('.').pop()?.toLowerCase() ?? '';
         const dirs = entry.relativePath.split('/').slice(0, -1);
         const trackId = repo.upsertMusicTrack({
@@ -362,8 +366,8 @@ export function createLocalScanDriver(deps: {
           year: tags.year,
           duration: tags.duration,
           codec: ext || undefined,
-          hasCover: tags.hasCover,
-          hasLyrics: tags.lyrics !== undefined,
+          hasCover: tagsKnown ? tags.hasCover : undefined,
+          hasLyrics: tagsKnown ? tags.lyrics !== undefined : undefined,
           fingerprint: audioFingerprint,
         });
         // 封面落盘（QYP3-005）：内嵌 picture 优先；失败静默（占位图兜底）
