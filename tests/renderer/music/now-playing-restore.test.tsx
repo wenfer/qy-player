@@ -76,6 +76,9 @@ const api = {
   onPlayerStateChange: vi.fn(() => () => undefined),
   onMusicSessionEnd: vi.fn(() => () => undefined),
   onMusicCommand: vi.fn(() => () => undefined),
+  getMusicTracks: vi.fn((_offset?: number, _limit?: number) =>
+    Promise.resolve({ ok: true, data: { tracks: [] } })
+  ),
 };
 
 vi.stubGlobal('electronAPI', api);
@@ -225,6 +228,96 @@ describe('now-playing restore (QYP3-053)', () => {
     expect(api.playerLoadFile.mock.calls[0][1]).toBe(77);
     expect(useMusicPlaybackStore.getState().engine).toBe('mpv');
     expect(useMusicPlaybackStore.getState().restored).toBe(false);
+  });
+
+  it('resumeRestored rebuilds the full library queue so next/prev traverse it (QYP3-068d)', async () => {
+    api.getNowPlaying.mockResolvedValue({
+      ok: true,
+      data: { record: { type: 'track', position: 42, duration: 200, updatedAt: 1, input: localInput } },
+    });
+    api.resolvePlayback.mockResolvedValue({
+      ok: true,
+      data: {
+        kind: 'music-direct',
+        url: 'qy-file://audio/5/Music/song.flac',
+        startPosition: 0,
+        engine: { engine: 'webaudio', reason: 'direct-codec' },
+        mediaContext: { mediaType: 'local', mediaId: 'Music/song.flac' },
+      },
+    });
+    // 两页曲库（200 + 50）：恢复的曲目（trackId=12）独占一个 id，在最后
+    const page = (n: number, from: number): Record<string, unknown>[] =>
+      Array.from({ length: n }, (_, i) => ({
+        id: from + i,
+        source_id: 5,
+        path: `Music/t${from + i}.mp3`,
+        title: `曲目${from + i}`,
+        artist: null,
+        album: null,
+        albumartist: null,
+        track_no: null,
+        duration: 100,
+        codec: 'mp3',
+        favorite: 0,
+      }));
+    const first = page(200, 1000);
+    const second = page(49, 1200);
+    second.push({
+      id: 12,
+      source_id: 5,
+      path: 'Music/song.flac',
+      title: '云上歌',
+      artist: null,
+      album: null,
+      albumartist: null,
+      track_no: null,
+      duration: 200,
+      codec: 'flac',
+      favorite: 0,
+    });
+    api.getMusicTracks = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, data: { tracks: first } })
+      .mockResolvedValueOnce({ ok: true, data: { tracks: second } });
+
+    await useMusicPlaybackStore.getState().initNowPlaying();
+    await useMusicPlaybackStore.getState().resumeRestored();
+    await flush();
+
+    const s = useMusicPlaybackStore.getState();
+    expect(s.queueLength).toBe(250);
+    expect(s.queueIndex).toBe(249); // 恢复的那首落在曲库原位
+    expect(s.current?.title).toBe('云上歌');
+    // 队列走完了，下一曲就有路可走
+    await s.next();
+    expect(h.engine.instance.next).toHaveBeenCalled();
+  });
+
+  it('resumeRestored falls back to a single-track queue when the library cannot be read', async () => {
+    api.getNowPlaying.mockResolvedValue({
+      ok: true,
+      data: { record: { type: 'track', position: 42, duration: 200, updatedAt: 1, input: localInput } },
+    });
+    api.resolvePlayback.mockResolvedValue({
+      ok: true,
+      data: {
+        kind: 'music-direct',
+        url: 'qy-file://audio/5/Music/song.flac',
+        startPosition: 0,
+        engine: { engine: 'webaudio', reason: 'direct-codec' },
+        mediaContext: { mediaType: 'local', mediaId: 'Music/song.flac' },
+      },
+    });
+    api.getMusicTracks = vi.fn().mockRejectedValue(new Error('db gone'));
+
+    await useMusicPlaybackStore.getState().initNowPlaying();
+    await useMusicPlaybackStore.getState().resumeRestored();
+    await flush();
+
+    const s = useMusicPlaybackStore.getState();
+    expect(s.engine).toBe('webaudio'); // 起播不受影响
+    expect(s.queueLength).toBe(1);
+    expect(s.current?.title).toBe('云上歌');
   });
 
   it('a plain playQueue starts from 0 (no per-track resume anymore)', async () => {

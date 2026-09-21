@@ -3,6 +3,7 @@ import { WebAudioEngine, type QueueTrack, type RepeatMode } from '../player/web-
 import { isLocalFlacUrl } from '../player/flac-strip';
 import { estimatePosition, makeAnchor, type PositionAnchor } from '../player/spectrum-anchor';
 import type { MediaRef } from '../../shared/types/catalog';
+import type { MusicTrackRow } from '../../shared/types/music';
 import type { GetSpectrumResult, SpectrumReadyEvent } from '../../shared/types/music-spectrum';
 
 /**
@@ -1151,11 +1152,49 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     }
   },
 
-  /** 恢复态起播（QYP3-053）：从上次的进度继续（点播放条上的「播放」）。 */
+  /** 恢复态起播（QYP3-053）：从上一次的进度继续（点播放条上的「播放」）。 */
   resumeRestored: async () => {
     const s = get();
     if (s.engine !== null || !s.restored || !s.restoreInput) return;
-    await get().playQueue([s.restoreInput], 0, { startPosition: s.restorePosition });
+    const input = s.restoreInput;
+    // 下一曲/上一曲要能走完整个曲库（用户预期"默认播放全部曲目"）：本地/
+    // WebDAV 恢复态按「全部曲目」的同一排序重建完整队列，恢复的那首落在
+    // 原位；只取到一页或多页里找不到它（已删除）时退回单曲队列。
+    // 服务器曲目不在全部曲目域内，保持单曲队列（上个会话的队列已不可考）。
+    let queue: MusicTrackInput[] = [input];
+    let startIndex = 0;
+    if (!input.serverId) {
+      try {
+        const rows: MusicTrackRow[] = [];
+        const limit = 200;
+        for (let offset = 0; ; offset += limit) {
+          const res = (await window.electronAPI.getMusicTracks(offset, limit)) as {
+            ok?: boolean;
+            data?: { tracks: MusicTrackRow[] };
+          };
+          const page = res?.data?.tracks ?? [];
+          rows.push(...page);
+          if (page.length < limit) break;
+        }
+        const idx = rows.findIndex((t) => t.id === input.trackId);
+        if (rows.length > 1 && idx !== -1) {
+          queue = rows.map((t) => ({
+            trackId: t.id,
+            sourceId: t.source_id,
+            title: t.title,
+            artist: t.artist,
+            albumartist: t.albumartist,
+            duration: t.duration,
+            path: t.path,
+            codec: t.codec,
+          }));
+          startIndex = idx;
+        }
+      } catch {
+        // 曲库读取失败不阻塞恢复起播：退回单曲队列
+      }
+    }
+    await get().playQueue(queue, startIndex, { startPosition: s.restorePosition });
   },
 
   stop: () => {

@@ -1525,6 +1525,17 @@
 - 测试：bars-painter 断言全部格子为 BAR_COLOR；visualizer 引用同步改名，
   删 cellColor 用例；typecheck + test:render 49 文件 329 例全绿
 
+### QYP3-068d 修复：恢复态起播后下一曲没反应（单曲队列） `[x]`
+- 用户报告：点下一曲没反应，默认应该播放全部曲目
+- 根因：`resumeRestored` 只把恢复的那一首放进队列（`playQueue([input], 0)`），
+  单曲队列 + repeat off 下 `queue.next()` 返回 null——下一曲无路可走
+- 改动：resumeRestored 对本地/WebDAV 恢复按「全部曲目」分页拉全（200/页）
+  重建完整队列，恢复曲按 trackId 落回曲库原位；多页里找不到（已删除）或
+  读取失败退回单曲队列，不阻塞起播；服务器曲目不在全部曲目域，保持单曲
+- 测试：now-playing-restore 新增 2 例（250 首两页曲库 → queueLength/
+  queueIndex=249 + next 可推进；getMusicTracks 拒绝 → 退单曲且正常起播）；
+  typecheck + test:render 331 例 + test:main 782 例全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

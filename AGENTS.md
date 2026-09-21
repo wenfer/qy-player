@@ -56,7 +56,7 @@
 - **进度**：主进程每 10s 从内存态保存（读 `player.getState()`，不走 IPC）→ 本地 SQLite + 经 `reportProgress` 回传 Emby/Jellyfin（`/Sessions/Playing/Progress|Stopped`）。**音乐例外**（QYP3-053）：`PlaybackStateManager` 的 `isMusic` 门禁（接 `isMpvMusicActive()`）跳过本地两张表，只保留服务器回传
 - **历史**：`watch_history` 表按 `(media_type, media_id)` upsert；剧集记录含 `series_name/season_number/episode_number`。**音乐不进历史**（QYP3-053，migration 011 清过存量）
 - **续播**：位置/原因只由 `playback-state/resume-resolver.ts` 纯函数决定（30s/90%/看完下一集/重播）——renderer 不得复制算法；「从头播放」显式传 0（LOAD_FILE 区分显式 0 与未指定）。**音乐没有 per-track 续播**（QYP3-053：`resolveMusicResumeTarget` 已删，音乐分支 `startPosition` 恒为 0）；音乐只有"当前播放状态"用于恢复播放条
-- **当前播放的音乐**（QYP3-053）：`playback-state/now-playing.ts` 在 `app_config` 里存**一条**记录（曲目 + 进度，本地按 `(sourceId, trackId)`、服务器按 `(serverId, itemId)` 定位，不存 path/绝对路径）。渲染层经 `MUSIC.SET_NOW_PLAYING`（节流 5s，暂停/跳曲/停止立即）写入，启动时 `MUSIC.GET_NOW_PLAYING` 读回 → `NowPlayingHost` 恢复播放条（**engine 保持 null，不自动出声**）。恢复态**不算音乐会话**（否则会误触自动精简、抢走全局媒体键），点播放走 `resumeRestored()` 从上次位置起播
+- **当前播放的音乐**（QYP3-053）：`playback-state/now-playing.ts` 在 `app_config` 里存**一条**记录（曲目 + 进度，本地按 `(sourceId, trackId)`、服务器按 `(serverId, itemId)` 定位，不存 path/绝对路径）。渲染层经 `MUSIC.SET_NOW_PLAYING`（节流 5s，暂停/跳曲/停止立即）写入，启动时 `MUSIC.GET_NOW_PLAYING` 读回 → `NowPlayingHost` 恢复播放条（**engine 保持 null，不自动出声**）。恢复态**不算音乐会话**（否则会误触自动精简、抢走全局媒体键），点播放走 `resumeRestored()` 从上次位置起播，并按「全部曲目」**重建完整队列**（本地/WebDAV，恢复曲落在曲库原位；曲库读取失败或服务器曲目退回单曲队列，QYP3-068d）
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
 - **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
