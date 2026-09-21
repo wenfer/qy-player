@@ -417,9 +417,11 @@ export default function MusicPage() {
   );
 
   return (
-    // QYP3-068j：窄屏下页面级间距也收紧（内边距 24→16，标题与页签更紧凑）
-    <div className="h-full overflow-y-auto p-4">
-      <h1 className="text-lg font-bold tracking-tight mb-3">音乐</h1>
+    // QYP3-068m：去掉占一整行的大标题（音乐模式顶部工具条已经有「音乐」页签），
+    // 右侧内边距比左侧小——窄屏里滚动条也在右边，两侧留一样宽会显得右边空。
+    <div className="h-full overflow-y-auto pl-4 pr-2 pt-3 pb-4">
+      {/* 标题不再可见，但页面仍需一个 h1 供屏幕阅读器与标题层级（AGENTS.md UI 约定） */}
+      <h1 className="sr-only">音乐</h1>
 
       {/* 来源切换（QYP3-025）：本地库 / 各服务器的音乐库 */}
       {serverLibs.length > 0 && (
