@@ -17,7 +17,7 @@ export const BAR_COLORS = {
 export const PEAK_COLOR = 'rgba(255, 243, 214, 0.9)';
 
 /** 峰值帽下落速度（每秒下落的画面高度比例）。 */
-const FALL_PER_SEC = 0.55;
+export const FALL_PER_SEC = 0.55;
 
 /** 某一段（0=底，1=顶）的颜色。 */
 export function cellColor(t: number): string {
@@ -58,6 +58,8 @@ export interface BarsPainterOptions {
 export interface BarsPainter {
   /** w/h 为画布设备像素；dtMs 用于峰值帽下落（时间驱动，掉帧也不跳）。 */
   paint: (w: number, h: number, data: Uint8Array | null, dtMs: number) => void;
+  /** 所有峰值帽都已落到底（暂停回落完成后可停帧，QYP3-059）。 */
+  settled: () => boolean;
 }
 
 export function createBarsPainter(
@@ -99,5 +101,49 @@ export function createBarsPainter(
         }
       }
     },
+    settled() {
+      for (let i = 0; i < bars; i += 1) {
+        if (peaks[i] > 0.02) return false;
+      }
+      return true;
+    },
+  };
+}
+
+/**
+ * 暂停回落（QYP3-059）：暂停不能冻结最后一帧——会让人误以为还在出声。
+ * 播放中缓存最新一帧频谱；暂停后按指数衰减（τ≈150ms）把缓存喂回 painter，
+ * 柱体平滑回落、峰值帽随后落底（painter.settled()），然后调用方停帧不空转。
+ */
+export interface SpectrumDecay {
+  /**
+   * 每帧调用：播放中缓存 live 并原样返回（live 为 null 时返回 null）；
+   * 暂停中返回衰减后的缓存快照（没有缓存过就返回 null）。
+   */
+  feed: (live: Uint8Array | null, playing: boolean, dtMs: number) => Uint8Array | null;
+  /** 是否缓存过真实数据（决定暂停时走"回落"还是"无数据提示"）。 */
+  hasSnapshot: () => boolean;
+}
+
+export function createSpectrumDecay(tauMs = 150): SpectrumDecay {
+  let buf: Uint8Array | null = null;
+  return {
+    feed(live, playing, dtMs) {
+      if (playing) {
+        if (live && live.length > 0) {
+          if (!buf || buf.length !== live.length) buf = new Uint8Array(live.length);
+          buf.set(live);
+          return live;
+        }
+        return null;
+      }
+      if (!buf) return null;
+      const f = Math.exp(-Math.max(0, dtMs) / tauMs);
+      for (let i = 0; i < buf.length; i += 1) {
+        buf[i] = Math.floor(buf[i] * f);
+      }
+      return buf;
+    },
+    hasSnapshot: () => buf !== null,
   };
 }

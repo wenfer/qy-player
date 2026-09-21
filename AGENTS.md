@@ -196,9 +196,12 @@
   不是"画成空白"。
   **QYP3-049 起**：`Visualizer` **不再**在无真实数据时画进度线（进度归播放条
   自己的那一行），只画一根静音底线——所以它不再收 `position`/`duration`。
-  **暂停 ≠ 没数据**：最后一帧真实数据会冻结在画布上（`frozenRef`，只重画一次），
-  冻结帧与 `painter` 都必须放在 ref 里跨 effect 重跑存活——effect 依赖里
-  一旦带上 `position`，进度每走一秒就把峰值打回当前电平、暂停也冻不住画面
+  **QYP3-059 起：暂停 ≠ 冻结最后一帧**——暂停后频谱/波形**整体回落**：频谱走
+  `createSpectrumDecay`（τ≈150ms 指数衰减快照喂 painter）、波形柱高线性回落
+  （`FALL_PER_SEC`），峰值帽落底（`painter.settled()`）后**停掉 rAF 不空转**；
+  复播从活数据立即恢复。`painter`/decay 缓存/波形柱高必须放 ref 里跨 effect
+  重跑存活（依赖里有 `isPlaying`）。**dt 必须钳制（≤100ms）**：effect 重跑后
+  `last` 从 0 起算，首帧 dt 是页面运行时长，不钳会把回落快照一帧清空
   **QYP3-050 起**：mpv 音源不再永远是静音底线——主进程用外部 **ffmpeg** 离线
   预算一份频谱（`music-spectrum/`：ffmpeg 解 PCM → 手写 radix-2 FFT → 12fps ×
   48 频带字节矩阵落盘，一首 4 分钟 ≈138KB），渲染层按 mpv 报回的进度（1Hz 离散

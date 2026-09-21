@@ -1,7 +1,12 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Activity } from 'lucide-react';
 import { useVisualizerFps } from '../../stores/resource-store';
-import { createBarsPainter, type BarsPainter } from '../Visualizer/bars-painter';
+import {
+  createBarsPainter,
+  createSpectrumDecay,
+  type BarsPainter,
+  type SpectrumDecay,
+} from '../Visualizer/bars-painter';
 
 /**
  * 播放频谱图（QYP3-034 / QYP3-047）：经典风格的弹跳柱状频谱（分段 LED + 峰值帽）。
@@ -41,6 +46,8 @@ export default function SpectrumGraph({
   headerExtra,
 }: SpectrumGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 暂停回落缓存（QYP3-059）：跨 effect 重跑存活（isPlaying 在依赖里）
+  const decayRef = useRef<SpectrumDecay | null>(null);
   // 性能保护（QYP3-036）：CPU 紧张时降帧，优先保证播放不卡
   const frameMs = 1000 / Math.max(1, useVisualizerFps(30));
   /**
@@ -51,13 +58,15 @@ export default function SpectrumGraph({
   const hasData = engine === 'webaudio' || getSpectrum() !== null;
 
   useEffect(() => {
-    // 暂停时冻结上一帧（画布内容保留）；没有真实数据时面板显示提示
-    if (!hasData || !isPlaying) return;
+    // 有数据就起循环：播放中画实时帧；暂停（QYP3-059）不冻结最后一帧——
+    // 喂指数衰减的快照让柱体平滑回落、峰值帽落底，落定后停掉循环不空转
+    if (!hasData) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return; // jsdom / 无 2D 上下文：静默跳过
 
+    const decay = (decayRef.current ??= createSpectrumDecay());
     const dpr = Math.min(2, typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
     const resize = (): void => {
       canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
@@ -73,12 +82,21 @@ export default function SpectrumGraph({
     const draw = (now: number): void => {
       raf = requestAnimationFrame(draw);
       if (now - last < frameMs) return; // ≤30fps（性能保护下更低）
+      // 先算 dt 再推进 last，否则峰值帽永远不落。钳到 100ms：effect 重跑
+      // （暂停/恢复）后 last 从 0 起算，首帧 dt 会是页面运行时长——不钳的话
+      // 暂停回落快照会被一帧清空（QYP3-059）
+      const dt = Math.min(now - last, 100);
+      last = now;
       painter ??= createBarsPainter(ctx, { bars: BARS, segments: SEGMENTS });
       // painter 只画"点亮的 LED 格 + 峰值帽"，不负责清底——不 clearRect 的
       // 话上一帧的柱子残留并与新帧叠加（QYP3-058，精简浮窗里尤其明显）
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      painter.paint(canvas.width, canvas.height, getSpectrum(), now - last);
-      last = now;
+      const feed = decay.feed(isPlaying ? getSpectrum() : null, isPlaying, dt);
+      painter.paint(canvas.width, canvas.height, feed, dt);
+      if (!isPlaying && painter.settled()) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
     };
 
     raf = requestAnimationFrame(draw);

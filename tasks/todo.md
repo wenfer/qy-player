@@ -1341,6 +1341,31 @@
 - 待目标机验证：主窗口歌词面板完整露出频谱上方；浮窗频谱无残影；
   浮窗歌词开合正常（已记入 TARGET-VERIFY）
 
+### QYP3-059 暂停时频谱整体回落（不再冻结最后一帧） `[x]`
+- 诉求（用户）：暂停的时候，频谱图应该全部回落
+- 原行为（QYP3-049 引入）：暂停把最后一帧真实数据冻结在画布上（Visualizer
+  `frozenRef` 只重画一次；SpectrumGraph effect 早退保留画布）——用户反馈
+  冻结看着像还在出声
+- 改动：
+  ① bars-painter 加 `settled()`（峰值帽全部 ≤0.02）并导出 `FALL_PER_SEC`；
+  新增 `createSpectrumDecay`（播放中缓存最新快照，暂停后按 τ≈150ms 指数
+  衰减喂回 painter——柱体平滑回落、峰值帽随后落底）
+  ② Visualizer 频谱模式接 decay；波形模式新增柱高缓冲按同款速率线性回落；
+  落定后 `cancelAnimationFrame` 停帧不空转；复播从活数据立即恢复
+  ③ SpectrumGraph 同款接入（painter 改为 effect 内局部、decay 走 ref）
+  ④ **dt 钳制 ≤100ms**（CDP 实测踩到的关键坑）：effect 重跑（暂停/恢复
+  触发，isPlaying 在依赖里）后 `last` 从 0 起算，首帧 dt 是页面运行时长，
+  `exp(-dt/150)≈0` 会把回落快照一帧清空——柱子瞬间消失而非回落
+- 无真实数据的音源（mpv 无离线频谱）行为不变：仍画静音底线；未起播就暂停
+  也是底线（没有可回落的东西）
+- Evidence：painter `settled()`/decay 单测；visualizer 测试重构（假 rAF 队列
+  + 真实 cancel 语义 + getContext 跨 rerender 存活，"播放→暂停"时序可测）；
+  CDP 实测 8/8（受信任点击起播→画布有内容→暂停 0.35s 仍在回落→2.85s 全空
+  →复播立即恢复→无 JS 异常）；test:render 49 文件 328 例绿；typecheck 双
+  配置 + build:renderer 通过
+- 待目标机验证：暂停观感——柱体平滑回落约 2 秒静止，复播立起（已记入
+  TARGET-VERIFY）
+
 ### 本轮记录在案但未修的缺口
 - WebDAV 没有 `readAudio`/`coversDir`/`lyricsDir` 接线
   （`webdav-scanner.ts:108-121`）：标签/封面/歌词全靠目录启发式。解法

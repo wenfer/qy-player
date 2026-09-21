@@ -4,6 +4,7 @@ import {
   PEAK_COLOR,
   cellColor,
   createBarsPainter,
+  createSpectrumDecay,
   downsamplePeaks,
   litCells,
 } from '../../../src/renderer/components/Visualizer/bars-painter';
@@ -97,5 +98,41 @@ describe('createBarsPainter (QYP3-047)', () => {
     expect(rects.length).toBe(0);
     painter.paint(100, 80, new Uint8Array(0), 16);
     expect(rects.length).toBe(0);
+  });
+
+  it('settled() turns true only after the caps have fallen back (QYP3-059)', () => {
+    const { ctx } = fakeCtx();
+    const painter = createBarsPainter(ctx, { bars: 1, segments: 8 });
+    painter.paint(100, 80, new Uint8Array([255, 255]), 16); // 满电平 → 峰值帽到顶
+    expect(painter.settled()).toBe(false);
+    // 持续喂零直到峰值帽落底
+    for (let i = 0; i < 100 && !painter.settled(); i += 1) {
+      painter.paint(100, 80, new Uint8Array([0, 0]), 33);
+    }
+    expect(painter.settled()).toBe(true);
+    // 无数据起步（从未有峰值）：立即落定
+    const fresh = createBarsPainter((fakeCtx().ctx), { bars: 1, segments: 8 });
+    fresh.paint(100, 80, null, 16);
+    expect(fresh.settled()).toBe(true);
+  });
+});
+
+describe('createSpectrumDecay (QYP3-059)', () => {
+  it('caches the live frame while playing, decays it toward zero when paused', () => {
+    const decay = createSpectrumDecay(150);
+    expect(decay.hasSnapshot()).toBe(false);
+    const live = new Uint8Array([255, 128]);
+    expect(decay.feed(live, true, 40)).toBe(live); // 播放中原样返回
+    expect(decay.hasSnapshot()).toBe(true);
+
+    const d1 = decay.feed(null, false, 40)!;
+    expect(d1[0]).toBe(Math.floor(255 * Math.exp(-40 / 150)));
+    expect(d1[1]).toBe(Math.floor(128 * Math.exp(-40 / 150)));
+
+    // 播放中传 null 不清缓存；持续衰减到全零后缓存仍保留（"有过数据"的标记）
+    expect(decay.feed(null, true, 40)).toBeNull();
+    for (let i = 0; i < 100; i += 1) decay.feed(null, false, 40);
+    expect(decay.hasSnapshot()).toBe(true);
+    expect(decay.feed(null, false, 40)!.every((v) => v === 0)).toBe(true);
   });
 });
