@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { Minus, Maximize2, Minimize2, X } from 'lucide-react';
 import { useCompactModeStore } from '../../stores/compact-mode-store';
+import { useAppModeStore } from '../../stores/app-mode-store';
 
 /**
  * 自绘标题栏（QYP3-042）：窗口改成无边框后，拖动/最小化/最大化/关闭都得自己来。
@@ -11,6 +12,9 @@ import { useCompactModeStore } from '../../stores/compact-mode-store';
  * - 最大化状态由主进程推送（`WINDOW.ON_MAXIMIZE_CHANGE`）——WM 快捷键也能
  *   触发最大化，渲染层自己记状态会不同步。
  * - 关闭按钮即退出应用（关闭主窗口 = 退出，见 AGENTS.md 硬性约束 5）。
+ * - 音乐模式的竖窄屏不显示最大化（QYP3-068n）：把一个 380×740 的竖屏铺满
+ *   屏幕没有意义，双击标题栏也不再触发。精简浮窗的「还原窗口」不受影响
+ *   （浮窗 profile 优先级更高，那条按钮是唯一的逃生口）。
  */
 
 const DRAG = { WebkitAppRegion: 'drag' } as CSSProperties;
@@ -32,6 +36,8 @@ const CLOSE_BTN_SMALL =
 export default function TitleBar({ compact = false }: { compact?: boolean }) {
   const [maximized, setMaximized] = useState(false);
   const exitCompact = useCompactModeStore((s) => s.exit);
+  // QYP3-068n：音乐模式的竖窄屏没有最大化（浮窗里那条「还原窗口」仍保留）
+  const isMusic = useAppModeStore((s) => s.mode === 'music');
   // QYP3-063：macOS 的系统红绿灯悬在自绘标题栏左端，标题内容要让位
   const isMac = window.electronAPI?.platform === 'darwin';
 
@@ -61,7 +67,7 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
       <div
         className={`flex items-center gap-2 min-w-0 flex-1 ${isMac ? (compact ? 'pl-[64px]' : 'pl-[76px]') : 'px-3'}`}
         onDoubleClick={() => {
-          if (!compact) void window.electronAPI.toggleMaximizeWindow();
+          if (!compact && !isMusic) void window.electronAPI.toggleMaximizeWindow();
         }}
       >
         <div className="w-4 h-4 rounded bg-primary flex items-center justify-center flex-shrink-0">
@@ -76,7 +82,7 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
           <button type="button" className={BTN_SMALL} onClick={exitCompact} aria-label="还原窗口" title="还原窗口">
             <Maximize2 size={13} />
           </button>
-        ) : (
+        ) : isMusic ? null : (
           <button
             type="button"
             className={BTN}

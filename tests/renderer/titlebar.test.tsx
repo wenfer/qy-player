@@ -2,6 +2,7 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TitleBar, { WindowResizeHandles } from '../../src/renderer/components/TitleBar';
+import { useAppModeStore } from '../../src/renderer/stores/app-mode-store';
 
 /**
  * 无边框窗口的自绘标题栏与缩放热区（QYP3-042）：按钮走新的 WINDOW.* 通道，
@@ -31,6 +32,8 @@ vi.stubGlobal('electronAPI', {
 beforeEach(() => {
   vi.clearAllMocks();
   pushMaximize = null;
+  // 模式是全局 store：用例之间归位，免得污染其它用例
+  act(() => useAppModeStore.getState().setMode('video'));
 });
 
 describe('TitleBar (QYP3-042)', () => {
@@ -59,6 +62,18 @@ describe('TitleBar (QYP3-042)', () => {
     expect(screen.queryByRole('button', { name: '最大化' })).toBeNull();
     expect(screen.getByRole('button', { name: '还原窗口' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '最小化' })).toBeTruthy();
+  });
+
+  it('drops maximize in music mode but keeps the compact restore button (QYP3-068n)', () => {
+    act(() => useAppModeStore.getState().setMode('music'));
+    render(<TitleBar />);
+    expect(screen.queryByRole('button', { name: '最大化' })).toBeNull();
+    expect(screen.getByRole('button', { name: '最小化' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '关闭' })).toBeTruthy();
+
+    // 浮窗 profile 优先级更高：「还原窗口」是唯一的逃生口，不能被音乐模式吃掉
+    render(<TitleBar compact />);
+    expect(screen.getByRole('button', { name: '还原窗口' })).toBeTruthy();
   });
 });
 
