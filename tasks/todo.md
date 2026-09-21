@@ -1491,6 +1491,19 @@
   web-audio-engine 让位/吞 abort 2 例；typecheck 双配置 +
   test:main 73 文件 782 例 + test:render 330 例全绿
 
+### QYP3-068 修复：精简浮窗底部 ~50-60px 空白（窗口偏高） `[x]`
+- 用户报告：精简浮窗下方一片空白约 50-60px，整体窗口偏高
+- 根因：浮窗 300px 高，而 CompactPlayer 内容全是固定高度——SpectrumGraph
+  64px + 组件自带 `mb-6`（24px 死边距，主窗口时代的遗留）+ 两行控件，
+  合计 ~250px，剩余全沉底
+- 改动：SpectrumGraph 改为**填满父容器**（唯一使用方就是 CompactPlayer）：
+  根节点 `flex-1 min-h-0 flex flex-col`、去掉 `mb-6` 与 `height` prop，
+  画布 absolute inset-0 随窗口伸缩（resize 用 clientHeight）；
+  CompactPlayer 去掉 `height={64}`
+- 验证：CDP 实测——频谱区 184px（原 64），最后子元素下方空白 = 12px
+  （恰为 p-3 内边距），截图目视确认无空白；typecheck + test:render
+  49 文件 330 例全绿（spectrum-graph 测试不依赖 height prop，无需改）
+
 ---
 
 ## 纪律提醒（动工前重读）

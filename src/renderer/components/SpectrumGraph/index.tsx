@@ -31,7 +31,6 @@ interface SpectrumGraphProps {
   isPlaying: boolean;
   title: string;
   artist?: string | null;
-  height?: number;
   /** 头部右侧额外内容（如精简模式的还原按钮）。 */
   headerExtra?: ReactNode;
 }
@@ -42,7 +41,6 @@ export default function SpectrumGraph({
   isPlaying,
   title,
   artist,
-  height = 168,
   headerExtra,
 }: SpectrumGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -69,8 +67,10 @@ export default function SpectrumGraph({
     const decay = (decayRef.current ??= createSpectrumDecay());
     const dpr = Math.min(2, typeof devicePixelRatio === 'number' ? devicePixelRatio : 1);
     const resize = (): void => {
+      // 画布填满父容器（flex-1 区域），尺寸跟着窗口走——精简浮窗里剩余
+      // 高度全部让给频谱，不再留一条底部空白
       canvas.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-      canvas.height = Math.max(1, Math.floor(height * dpr));
+      canvas.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     };
     resize();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
@@ -104,11 +104,11 @@ export default function SpectrumGraph({
       cancelAnimationFrame(raf);
       ro?.disconnect();
     };
-  }, [hasData, isPlaying, getSpectrum, height, frameMs]);
+  }, [hasData, isPlaying, getSpectrum, frameMs]);
 
   return (
-    <div className="mb-6 rounded-xl border border-border bg-card/60 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
+    <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border bg-card/60 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border flex-shrink-0">
         <Activity size={14} className="text-muted-foreground flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-xs truncate">
@@ -121,9 +121,11 @@ export default function SpectrumGraph({
       </div>
 
       {hasData ? (
-        <canvas ref={canvasRef} aria-hidden className="w-full block" style={{ height }} />
+        <div className="flex-1 min-h-0 relative">
+          <canvas ref={canvasRef} aria-hidden className="absolute inset-0 w-full h-full block" />
+        </div>
       ) : (
-        <div className="flex items-center justify-center px-4 text-center" style={{ height }}>
+        <div className="flex-1 min-h-0 flex items-center justify-center px-4 text-center">
           <p className="text-[11px] text-muted-foreground max-w-md">
             此音源经 mpv 解码，mpv 0.32 没有实时频谱接口，无法显示真实频谱。
             （机器上装了 ffmpeg 的话，系统会在后台为它预算一份，算好前显示这条提示）

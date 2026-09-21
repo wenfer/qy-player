@@ -73,7 +73,6 @@ export default function CompactPlayer() {
         isPlaying={playback.isPlaying}
         title={playback.current?.title ?? '未在播放'}
         artist={playback.current?.artist ?? null}
-        height={64}
         headerExtra={
           <button
             type="button"
