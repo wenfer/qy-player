@@ -357,6 +357,8 @@ npm run dist:mac     # macOS（dmg x64+arm64；需在 mac 上跑，自动收集 
 
 - renderer 构建必须用 `vite build --config vite.renderer.config.ts`（`index.html` 在 `src/renderer/`），`npm run build` 已串好，不要单独裸跑 `vite build`
 - `better-sqlite3` 是原生模块：`postinstall` 里的 `electron-builder install-app-deps` 负责 rebuild，别删
+- main/preload 的 sourcemap 用 `hidden`（`electron.vite.config.ts`）：`.map` 照样落盘，但产物里不写 `//# sourceMappingURL`——dev 下页面来自 vite（root=src/renderer），按注释去取 `<repo>/out/*.map` 只会得到 index.html，控制台每刷一次就报两条 "Could not parse content"
+- `out/` 只在 `build:main`（串行构建第一步，带 `QY_CLEAN_OUT=1`）清空：preload/renderer 往同一个 out/ 写，谁都清空就会互相删产物；不清空的话共享 chunk（内容一变就是新文件名）会越积越多，而 `out/**` 是整体进包的
 - 发版 = 推 tag：`git tag v1.0.x && git push origin v1.0.x`，GitHub Actions 自动打包发布（workflow 依赖 `rpm` 和 `libarchive-tools`，pacman 目标需要 bsdtar）
 - 仓库：`git@github.com:wenfer/qy-player.git`；远端操作可能遇到瞬时 `EOF`，重试即可
 

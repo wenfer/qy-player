@@ -1681,6 +1681,20 @@
   最小化 / 关闭」；新增用例（音乐模式无最大化 + 浮窗仍可还原）；
   typecheck + test:render 333 例全绿
 
+### QYP3-068o 清掉 dev 控制台的 sourcemap 警告（顺带清 out/ 垃圾） `[x]`
+- 用户：devtools console 里两条 "DevTools failed to load source map ...
+  Unexpected token '<'"，不影响但最好解决
+- 根因：preload 与其共享 chunk 的产物带着 `//# sourceMappingURL`，而 dev 下
+  页面来自 vite（root=src/renderer），按注释去请求
+  `http://localhost:5178/<repo>/out/*.map` 拿到的是 index.html（HTML 不是 JSON）
+- 改动（`electron.vite.config.ts`）：`sourcemap: true` → `'hidden'`——`.map`
+  照样落盘（排查时能还原栈），只是不再写注释，devtools 不会去取
+- 附带修掉产物垃圾：`emptyOutDir` 改为只在 `build:main`（`QY_CLEAN_OUT=1`，
+  串行构建第一步）生效；共享 chunk 每次内容变化都留新文件名，此前 out/ 里
+  积了 70 个历史文件，而 `out/**` 整体进包 —— 现在一次构建只有 6 个文件
+- 验证：重建后 out/ 只剩 main/preload/ipc-channels×2 + renderer；CDP 重新
+  加载页面后控制台无 source map 相关条目；typecheck 双配置全绿
+
 ---
 
 ## 纪律提醒（动工前重读）
