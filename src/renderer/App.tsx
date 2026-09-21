@@ -147,6 +147,24 @@ function NowPlayingHost() {
 }
 
 /**
+ * 音乐会话按模式收尾（QYP3-068p）：回到影视模式就**结束**音乐会话——停引擎、
+ * 清恢复态、作废落盘的待播记录，播放条随之消失（此前是跨模式保留，影视界面
+ * 上会一直挂着一条音乐条）。
+ *
+ * 依赖里带上 `hasSession` 而不是只看 mode：冷启动时 mode 已经是 video，恢复
+ * 出来的待播条目是异步到达的（主进程在 GET_NOW_PLAYING 里已按记忆的模式挡过
+ * 一道，这里再兜一次）。
+ */
+function MusicSessionModeHost() {
+  const mode = useAppModeStore((s) => s.mode);
+  const hasSession = useMusicPlaybackStore((s) => s.engine !== null || s.restored);
+  useEffect(() => {
+    if (mode === 'video' && hasSession) useMusicPlaybackStore.getState().endSession();
+  }, [mode, hasSession]);
+  return null;
+}
+
+/**
  * 桌面歌词窗口（ADR-0008）复用同一个 renderer 打包产物，但独立成一个
  * BrowserWindow：不带导航栏/播放器外壳，只渲染歌词。
  */
@@ -240,6 +258,7 @@ function App() {
       <WindowProfileHost />
       <ResourceHost />
       <NowPlayingHost />
+      <MusicSessionModeHost />
       <Shell />
     </HashRouter>
   );

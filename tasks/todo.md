@@ -1695,6 +1695,22 @@
 - 验证：重建后 out/ 只剩 main/preload/ipc-channels×2 + renderer；CDP 重新
   加载页面后控制台无 source map 相关条目；typecheck 双配置全绿
 
+### QYP3-068p 回到影视模式即结束音乐会话 `[x]`
+- 用户：回到影视模式音乐播放条还在——选择"直接结束音乐会话"
+- 改动：
+  ① store 新增 `endSession()`：`stop()` 只清正在播的引擎（engine 为 null
+  时直接返回），这里补上 mpv 显式 `playerControl('stop')`（否则后台还在
+  响）、清 `restored`/`restoreInput`、经新的 `MUSIC.CLEAR_NOW_PLAYING`
+  作废落盘记录（漏了下次启动播放条又回来）
+  ② 主进程 `GET_NOW_PLAYING` 加门禁：`window.memory.music !== true` 时
+  作废记录返回 null——冷启动在影视模式就不该恢复出播放条（也顺带避免
+  "模式回填"与"恢复"两个异步的竞态）
+  ③ `App.tsx` 新增 `MusicSessionModeHost`：mode/会话任一变化且处于影视
+  模式就 endSession
+- 验证：CDP 端到端——启动（记忆=影视）无条；音乐模式起播 engine=mpv 有条；
+  点「返回影视」后 engine=null、条消失、`music.nowPlaying` 落盘值清空；
+  新增用例 3 例（清恢复态 / mpv 显式 stop / 无会话空转）
+
 ---
 
 ## 纪律提醒（动工前重读）

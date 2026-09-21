@@ -109,6 +109,12 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   playServerAt: (index: number) => Promise<void>;
   /** 结束音乐会话（QYP3-026）：视频接管 mpv 时由主进程事件触发。 */
   stop: () => void;
+  /**
+   * 彻底结束音乐会话（QYP3-068p）：回到影视模式时调用——`stop()` 只清正在
+   * 播的引擎（engine 为 null 时直接返回），这里连"待播"的恢复态与落盘的
+   * 「当前播放的音乐」一起清掉，播放条随之消失。
+   */
+  endSession: () => void;
   /** 启动恢复（QYP3-053）：读回上次的"当前播放的音乐"（不出声）。 */
   initNowPlaying: () => Promise<void>;
   /** 恢复态起播（QYP3-053）：从上一次的进度继续。 */
@@ -1316,6 +1322,37 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       mpvQueueIndex: -1,
       errorMessage: null,
     });
+  },
+
+  endSession: () => {
+    const s = get();
+    if (s.engine === null && !s.restored) return;
+    // mpv 引擎要显式停（QYP3-067）：只清渲染层状态，mpv 会在看不见的地方
+    // 继续把这首放完
+    if (s.engine === 'mpv') void window.electronAPI.playerControl('stop');
+    // 收尾上报（本地进度 / 服务器 Stopped）在状态清空之前走 stop()
+    get().stop();
+    // 恢复态也要清：`stop()` 对 engine === null 是幂等的，不会动这些字段
+    set({
+      restored: false,
+      restoreInput: null,
+      restorePosition: 0,
+      current: null,
+      currentSource: null,
+      position: 0,
+      duration: 0,
+      isPlaying: false,
+      queueLength: 0,
+      queueIndex: 0,
+      queueSnapshot: [],
+      serverQueue: [],
+      serverIndex: -1,
+      mpvQueue: [],
+      mpvQueueIndex: -1,
+      errorMessage: null,
+    });
+    // 落盘的待播记录一并作废，否则下次启动又把播放条恢复出来
+    void Promise.resolve(window.electronAPI.clearNowPlaying?.()).catch(() => undefined);
   },
 }));
 

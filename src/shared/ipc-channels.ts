@@ -37,6 +37,8 @@ export const IPC_CHANNELS = {
     SET_NOW_PLAYING: 'music:set-now-playing',
     /** 启动时读回上次的音乐状态（QYP3-053）：渲染层据此恢复播放条。 */
     GET_NOW_PLAYING: 'music:get-now-playing',
+    /** 清除"当前播放的音乐"记录（QYP3-068p）：会话结束时不留下待播条目。 */
+    CLEAR_NOW_PLAYING: 'music:clear-now-playing',
     /**
      * renderer 引擎服务器音乐会话（QYP3-038）：起播报告 Sessions/Playing，
      * 返回 playSessionId（Progress/Stopped 必须携带同一 id，Emby 才认）。

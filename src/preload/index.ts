@@ -210,6 +210,7 @@ const electronAPI = {
     position: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_NOW_PLAYING, record),
   getNowPlaying: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_NOW_PLAYING),
+  clearNowPlaying: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.CLEAR_NOW_PLAYING),
   // 服务器音乐会话与进度（QYP3-038）：webaudio 播放不经 LOAD_FILE，
   // Sessions/Playing 系列由渲染层节流后经这两条通道上报
   startMusicServerSession: (args: { serverId: number; provider: 'jellyfin' | 'emby'; itemId: string; mediaSourceId?: string; title?: string }) =>

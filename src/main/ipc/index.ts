@@ -106,6 +106,7 @@ import {
   writeNowPlaying,
 } from '../modules/playback-state/now-playing';
 import { resolveSeriesResume } from '../modules/playback-state/resume-resolver';
+import { readWindowMemory } from '../modules/ui-shell/window-state';
 import {
   CacheManager,
   MUSIC_SPECTRUM_QUOTA_BYTES,
@@ -424,11 +425,25 @@ export function registerIpcHandlers(
     return ok({ saved: true });
   });
 
+  // 清除"当前播放的音乐"（QYP3-068p）：会话结束时把待播记录一并作废，
+  // 否则下次启动又会把播放条恢复出来（用户以为已经结束了）。
+  ipcMain.handle(IPC_CHANNELS.MUSIC.CLEAR_NOW_PLAYING, () => {
+    clearNowPlaying(storage);
+    return ok({ cleared: true });
+  });
+
   // 启动恢复（QYP3-053）：把记录补成渲染层可直接入队的 MusicTrackInput。
   // 音轨/来源已被删除时清掉记录并回 null——恢复出一条点不动的曲目更糟。
   ipcMain.handle(IPC_CHANNELS.MUSIC.GET_NOW_PLAYING, () => {
     const record = readNowPlaying(storage);
     if (!record) return ok({ record: null });
+    // QYP3-068p：音乐播放条只属于音乐模式（切回影视即结束会话）。记忆里
+    // 上次不是音乐模式时，这条待播记录恢复出来也没有归属——作废它，免得
+    // 影视界面上挂着一条不属于它的播放条。
+    if (readWindowMemory(storage)?.music !== true) {
+      clearNowPlaying(storage);
+      return ok({ record: null });
+    }
     if (record.type === 'server') {
       // 服务器被删掉时同样作废记录（对称于下面的音轨分支）
       const provider = record.provider ?? 'jellyfin';
