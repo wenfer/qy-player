@@ -203,7 +203,7 @@
 - Evidence: `tests/renderer/music/playlist-drag.test.tsx` 3/3（拖拽到
   位/失败回滚/按钮兜底）
 
-### QYP3-016 m3u/m3u8 导入导出 `[x]`
+### QYP3-016 m3u/m3u8 导入导出 `[x]`（导入已于 1.5.0 移除，见 QYP3-068k）
 - 依赖：015
 - 内容：playlist-io.ts 纯函数——parseM3u（BOM 容错/EXTINF 标题）+
   resolveM3uLocation（基准=文件目录）+ matchM3uLocationToTrack
@@ -212,6 +212,7 @@
   （凭据不内嵌）；导入走文件对话框，导出走保存对话框
 - 验收：8 用例（解析/基准/匹配/报告/往返）
 - Evidence: playlist-io.test 8/8
+- 1.5.0：导入侧全链路（IPC/preload/UI/用例）删除，原因见 QYP3-068k
 
 ### QYP3-017 XSPF 导出 `[x]`
 - 依赖：016
@@ -1637,6 +1638,22 @@
 - 追加收紧（用户要求"再缩一些"）：行内边距 `py-1.5` → `py-1`、列表 `gap-0.5`
   → 0——CDP 实测行高 36px、行距（pitch）36px，一屏可见 18+ 首（原先约 14）；
   截图目视不拥挤；test:render 332 例全绿
+
+### QYP3-068k 移除歌单导入（m3u/m3u8） `[x]`
+- 用户：移除导入歌单的功能
+- 动机：导入靠文本路径匹配本地曲库，服务器/WebDAV 混排后长期半失效
+  （大量"未匹配跳过"），而导出已覆盖"搬到别处播"的诉求
+- 改动（全链路删除导入侧，导出侧一行不动）：
+  ① `playback-engine/playlist-io.ts`：删 `parseM3u` / `resolveM3uLocation` /
+  `matchM3uLocationToTrack` / `importM3u` / `listTrackCatalog` 与三个
+  import 专用接口（连带 `better-sqlite3` 类型 import）
+  ② `shared/ipc-channels.ts` 删 `PLAYLIST.IMPORT_M3U`；`main/ipc/index.ts`
+  删对应 handler；`preload/index.ts` 删 `importPlaylistFile`
+  ③ `pages/Playlists`：删 `Upload` 图标与「导入 m3u/m3u8」按钮、
+  `importM3u` 回调，空态文案改为「在上方输入名称新建歌单」
+  ④ 用例：删 playlist-io 的 import describe（4 例）与
+  playlist-drag 的 `importPlaylistFile: vi.fn()`
+- 验证：typecheck 双配置全绿 + test:main / test:render 全绿
 
 ---
 

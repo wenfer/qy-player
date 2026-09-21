@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Cloud, ListMusic, Plus, Upload, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2, GripVertical } from 'lucide-react';
+import { Cloud, ListMusic, Plus, Download, Trash2, Pencil, ArrowUp, ArrowDown, Play, X, Music2, GripVertical } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import ServerPlaylists from './ServerPlaylists';
 
 /**
- * 歌单页（QYP3-015/016/017）：列表 + 详情 + m3u/m3u8 导入 + m3u8/XSPF 导出。
+ * 歌单页（QYP3-015/017）：列表 + 详情 + m3u8/XSPF 导出。
+ * m3u 导入在 1.5.0 移除（QYP3-068k）：路径匹配在服务器/WebDAV 混排的曲库里
+ * 长期半失效，且导出已经覆盖了"搬到别处播"的诉求。
  * 排序（QYP3-015a）= 拖拽为主 + 上/下移按钮（键盘/触屏可达性兜底）；
  * 列表操作一律乐观更新 + 失败回滚。
  * P2：新增「服务器歌单」只读页签（服务器歌单不可在本应用内编辑）。
@@ -131,28 +133,6 @@ export default function PlaylistsPage() {
     [loadPlaylists, setOpenId, addToast]
   );
 
-  const importM3u = useCallback(async (): Promise<void> => {
-    const res = (await window.electronAPI.importPlaylistFile()) as {
-      ok: boolean;
-      data?: { imported: { playlistId: number; name: string; matched: number } | null; unmatched: number; report?: string };
-      error?: { message: string };
-    };
-    if (!res.ok) {
-      addToast(res.error?.message ?? '导入失败', 'error');
-      return;
-    }
-    if (res.data?.imported) {
-      addToast(
-        `已导入「${res.data.imported.name}」：${res.data.imported.matched} 首` +
-          (res.data.unmatched > 0 ? `（${res.data.unmatched} 首未匹配跳过）` : ''),
-        'success'
-      );
-      void loadPlaylists();
-    } else if (res.data?.report) {
-      addToast(res.data.report, 'warning');
-    }
-  }, [loadPlaylists, addToast]);
-
   const exportM3u8 = useCallback(
     async (id: number, name: string): Promise<void> => {
       const res = (await window.electronAPI.exportPlaylistM3u8(id)) as {
@@ -276,13 +256,6 @@ export default function PlaylistsPage() {
       ) : (
         <>
       <div className="flex flex-wrap items-center gap-2 mb-6">
-        <button
-          type="button"
-          onClick={() => void importM3u()}
-          className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-accent focus-ring flex items-center gap-1.5"
-        >
-          <Upload size={13} /> 导入 m3u/m3u8
-        </button>
         <div className="flex items-center gap-1.5">
           <input
             type="text"
@@ -315,7 +288,7 @@ export default function PlaylistsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <ListMusic size={32} className="mb-3 opacity-40" />
             <p className="text-xs">还没有歌单</p>
-            <p className="text-[11px] mt-1">新建歌单或导入 m3u 文件</p>
+            <p className="text-[11px] mt-1">在上方输入名称新建歌单</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">

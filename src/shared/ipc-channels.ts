@@ -94,7 +94,6 @@ export const IPC_CHANNELS = {
     ADD_ITEMS: 'playlist:add-items',
     REMOVE_ITEM: 'playlist:remove-item',
     REORDER: 'playlist:reorder',
-    IMPORT_M3U: 'playlist:import-playlist',
     EXPORT_M3U8: 'playlist:export-list',
     EXPORT_XSPF: 'playlist:export-xspf',
   },

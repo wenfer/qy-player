@@ -133,7 +133,7 @@ import {
   setDeskLyricsPersistence,
   setDeskLyricsStyle,
 } from '../modules/ui-shell/desk-lyrics';
-import { importM3u, listTrackCatalog, exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
+import { exportM3u8, exportXspf, toExportInfo, type PlaylistTrackInfo } from '../modules/playback-engine/playlist-io';
 import { registerCoversPartition, registerLyricsPartition, readLyricsCache, saveLyricsFromTags } from '../modules/library-scanner/cover-service';
 import { buildDiagnosticsSummary } from '../modules/diagnostics';
 import {
@@ -777,41 +777,6 @@ export function registerIpcHandlers(
       return ok({ reordered: catalogRepo.reorderPlaylistItem(id, from, to) });
     }
   );
-
-  // 导入 m3u/m3u8（QYP3-016）：打开文件对话框 → 解析匹配 → 建歌单。
-  // 未定位行计数报告（Toast 展示），绝不静默丢失。
-  ipcMain.handle(IPC_CHANNELS.PLAYLIST.IMPORT_M3U, async () => {
-    const { dialog } = await import('electron');
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      filters: [
-        { name: '播放列表', extensions: ['m3u', 'm3u8'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return ok({ imported: null });
-    }
-    const filePath = result.filePaths[0];
-    const basename = filePath.split(/[\\/]/).pop() ?? '导入歌单';
-    let content: Buffer;
-    try {
-      content = await import('fs/promises').then((fs) => fs.readFile(filePath));
-    } catch {
-      return err('INTERNAL', '读取播放列表文件失败');
-    }
-    const dir = filePath.includes('/') || filePath.includes('\\') ? filePath.slice(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))) : null;
-    const { refs, unmatched } = importM3u(content.toString('utf8'), dir, listTrackCatalog(db));
-    if (refs.length === 0) {
-      return ok({ imported: null, unmatched: unmatched.length, report: '没有可定位的音轨（音乐库中找不到对应文件）' });
-    }
-    const playlistId = catalogRepo.createPlaylist(basename.replace(/\.(m3u8?|m3u)$/i, '') || '导入歌单');
-    for (const ref of refs) catalogRepo.addToPlaylist(playlistId, ref.ref);
-    return ok({
-      imported: { playlistId, name: basename.replace(/\.(m3u8?|m3u)$/i, ''), matched: refs.length },
-      unmatched: unmatched.length,
-    });
-  });
 
   // 导出（QYP3-016/017）：保存对话框 → 生成内容 → 写盘。凭据永不内嵌。
   ipcMain.handle(IPC_CHANNELS.PLAYLIST.EXPORT_M3U8, async (_event, args: { id: number }) => {

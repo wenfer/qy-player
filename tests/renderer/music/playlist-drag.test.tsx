@@ -11,7 +11,6 @@ const api = {
   deletePlaylist: vi.fn(),
   removeFromPlaylist: vi.fn(),
   reorderPlaylistItem: vi.fn(),
-  importPlaylistFile: vi.fn(),
   exportPlaylistM3u8: vi.fn(),
   exportPlaylistXspf: vi.fn(),
 };

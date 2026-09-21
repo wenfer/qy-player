@@ -229,7 +229,6 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.REMOVE_ITEM, { id, position }),
   reorderPlaylistItem: (id: number, from: number, to: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.REORDER, { id, from, to }),
-  importPlaylistFile: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.IMPORT_M3U),
   exportPlaylistM3u8: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.EXPORT_M3U8, { id }),
   exportPlaylistXspf: (id: number) => ipcRenderer.invoke(IPC_CHANNELS.PLAYLIST.EXPORT_XSPF, { id }),
   setMusicEngineActive: (value: boolean) =>

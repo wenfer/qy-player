@@ -1,66 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { localTrackFileUrl } from '../../../src/main/modules/playback-engine/playlist-io';
 import {
-  parseM3u,
-  resolveM3uLocation,
-  matchM3uLocationToTrack,
   exportM3u8,
   exportXspf,
-  importM3u,
   toExportInfo,
   webdavLocation,
   type ExportCatalogRow,
 } from '../../../src/main/modules/playback-engine/playlist-io';
 
-const CATALOG = [
-  { trackId: 1, sourceId: 1, path: '周杰伦/叶惠美/晴天.mp3', title: '晴天' },
-  { trackId: 2, sourceId: 1, path: '晴天flac.flac', title: '晴天' },
-  { trackId: 3, sourceId: 1, path: '退后.mp3', title: '退后' },
-];
-
-describe('playlist m3u import (QYP3-016)', () => {
-  it('parses m3u with EXTINF titles and skips comments', () => {
-    const content = '\uFEFF#EXTM3U\n#EXTINF:269,周杰伦 - 晴天\n周杰伦/叶惠美/晴天.mp3\n#EXTINF:100,退后\n退后.mp3\n# COMMENT\n';
-    const lines = parseM3u(content);
-    expect(lines).toEqual([
-      { location: '周杰伦/叶惠美/晴天.mp3', title: '周杰伦 - 晴天' },
-      { location: '退后.mp3', title: '退后' },
-    ]);
-  });
-
-  it('resolves relative locations against the m3u base dir', () => {
-    expect(resolveM3uLocation('a.mp3', '/music/playlists')).toBe('/music/playlists/a.mp3');
-    expect(resolveM3uLocation('/abs/a.mp3', '/music')).toBe('/abs/a.mp3');
-    expect(resolveM3uLocation('C:\\music\\a.mp3', null)).toBe('C:\\music\\a.mp3');
-    expect(resolveM3uLocation('https://x/a.mp3', '/music')).toBe('https://x/a.mp3');
-  });
-
-  it('matches catalog by basename uniquely and reports ambiguous as unmatched', () => {
-    // basename 唯一：退后.mp3
-    expect(matchM3uLocationToTrack('/srv/退后.mp3', CATALOG)).toEqual({
-      sourceId: 1,
-      trackId: 3,
-      title: '退后',
-    });
-    // basename 歧义（晴天.mp3 vs 晴天flac.flac 不同 basename —— 晴天.mp3 唯一）
-    expect(matchM3uLocationToTrack('周杰伦/叶惠美/晴天.mp3', CATALOG)).toEqual({
-      sourceId: 1,
-      trackId: 1,
-      title: '晴天',
-    });
-    // 完全不在库：null
-    expect(matchM3uLocationToTrack('别的歌.mp3', CATALOG)).toBeNull();
-  });
-
-  it('import returns refs + unmatched report (never silently drops)', () => {
-    const content = '周杰伦/叶惠美/晴天.mp3\n退后.mp3\nmissing.mp3\n';
-    const result = importM3u(content, null, CATALOG);
-    expect(result.refs.map((r) => r.ref)).toEqual(['music:1:1', 'music:1:3']);
-    expect(result.unmatched).toEqual(['missing.mp3']);
-  });
-});
-
-describe('playlist export (QYP3-016/017)', () => {
+describe('playlist export (QYP3-017)', () => {
   const localTrack: ExportCatalogRow = {
     trackId: 1,
     sourceId: 1,
