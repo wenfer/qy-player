@@ -257,7 +257,6 @@ app.whenReady().then(() => {
         }
         const audioMatch = raw.match(/^audio\/(\d+)\/(.+)$/);
         if (audioMatch) {
-          console.log('[qy-file] audio req', audioMatch[1], decodeURIComponent(audioMatch[2]));
           const target = resolveAudioUrlSource(
             Number(audioMatch[1]),
             decodeURIComponent(audioMatch[2])
@@ -265,12 +264,6 @@ app.whenReady().then(() => {
           if (!target) {
             console.log('[qy-file] audio rejected');
             return callback({ error: -3 });
-          }
-          try {
-            const st = require('node:fs').statSync(target);
-            console.log('[qy-file] serving', target, st.size, 'bytes');
-          } catch {
-            console.log('[qy-file] serving (stat failed)', target);
           }
           return callback(target);
         }
