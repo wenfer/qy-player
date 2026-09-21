@@ -41,7 +41,7 @@ function TrackRow({
 }) {
   const favorite = track.favorite === 1;
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors">
+    <div className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-accent transition-colors">
       {showTrackNo && (
         <span className="text-xs text-muted-foreground w-6 text-right">{track.track_no ?? '–'}</span>
       )}
@@ -402,7 +402,7 @@ export default function MusicPage() {
 
   const trackList = (list: MusicTrackRow[], showTrackNo?: boolean, subtitleFor?: (t: MusicTrackRow) => string) => (
     // QYP3-068j：竖窄屏里行距收紧（去掉左侧音符图标、间距与内边距都压小）
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col">
       {list.map((t) => (
         <TrackRow
           key={t.id}
