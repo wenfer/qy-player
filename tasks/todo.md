@@ -1624,6 +1624,17 @@
   播放条贴底全宽、截图目视；typecheck + test:render 332 例 + test:main
   782 例 + build:main/preload 全绿（compact-window 测试引用常量，无需改）
 
+### QYP3-068j 曲目列表收紧：去掉左侧音符、压缩行距 `[x]`
+- 用户：列表间距太大，左侧音符图标不需要
+- 改动（pages/Music 的 TrackRow + 页面容器）：
+  ① 删掉 `Music2` 图标（连带清理 import，TS noUnusedLocals 要求）
+  ② 行：`gap-3 px-3 py-2` → `gap-2 px-2 py-1.5`；列表 `gap-1` → `gap-0.5`；
+  标题/副标题加 `leading-tight`
+  ③ 页面：`p-6` → `p-4`，h1 `text-2xl mb-4` → `text-lg mb-3`，来源/视图
+  页签 `mb-4|mb-6` → `mb-3`
+- 验证：CDP 实测单首行高 50px（46+4）→ 40px + 2px 间距 = 42px，行内仅剩
+  收藏一个图标；typecheck + test:render 332 例全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Disc3, Heart, ListMusic, Music2, User, AlertTriangle } from 'lucide-react';
+import { Disc3, Heart, ListMusic, User, AlertTriangle } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import type { MusicAlbumRow, MusicArtistRow, MusicTrackRow } from '../../../shared/types/music';
@@ -41,19 +41,18 @@ function TrackRow({
 }) {
   const favorite = track.favorite === 1;
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors">
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors">
       {showTrackNo && (
         <span className="text-xs text-muted-foreground w-6 text-right">{track.track_no ?? '–'}</span>
       )}
       <button
         type="button"
         onClick={onPlay}
-        className="flex items-center gap-3 flex-1 min-w-0 text-left focus-ring"
+        className="flex items-center flex-1 min-w-0 text-left focus-ring"
       >
-        <Music2 size={14} className="text-muted-foreground flex-shrink-0" />
         <span className="flex-1 min-w-0">
-          <span className="block text-xs truncate">{track.title}</span>
-          <span className="block text-[10px] text-muted-foreground truncate">
+          <span className="block text-xs leading-tight truncate">{track.title}</span>
+          <span className="block text-[10px] leading-tight text-muted-foreground truncate">
             {subtitle ?? ([track.artist, track.album].filter(Boolean).join(' · ') || '未知歌手')}
           </span>
         </span>
@@ -402,7 +401,8 @@ export default function MusicPage() {
   };
 
   const trackList = (list: MusicTrackRow[], showTrackNo?: boolean, subtitleFor?: (t: MusicTrackRow) => string) => (
-    <div className="flex flex-col gap-1">
+    // QYP3-068j：竖窄屏里行距收紧（去掉左侧音符图标、间距与内边距都压小）
+    <div className="flex flex-col gap-0.5">
       {list.map((t) => (
         <TrackRow
           key={t.id}
@@ -417,12 +417,13 @@ export default function MusicPage() {
   );
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold tracking-tight mb-4">音乐</h1>
+    // QYP3-068j：窄屏下页面级间距也收紧（内边距 24→16，标题与页签更紧凑）
+    <div className="h-full overflow-y-auto p-4">
+      <h1 className="text-lg font-bold tracking-tight mb-3">音乐</h1>
 
       {/* 来源切换（QYP3-025）：本地库 / 各服务器的音乐库 */}
       {serverLibs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="text-[11px] text-muted-foreground">来源</span>
           <button
             type="button"
@@ -449,7 +450,7 @@ export default function MusicPage() {
       ) : (
       <>
       {/* 视图切换 */}
-      <div className="flex flex-wrap items-center gap-2 mb-6">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <button type="button" onClick={() => switchView('all')} className={tabClass(view === 'all')}>
           <ListMusic size={14} /> 全部曲目
         </button>
