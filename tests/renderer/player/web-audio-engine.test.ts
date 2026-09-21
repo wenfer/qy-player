@@ -462,4 +462,43 @@ describe('WebAudioEngine (QYP3-010)', () => {
     await engine.playQueue([makeTrack(1)], 0, 'off', false, undefined, 15);
     expect((audio as unknown as { currentTime: number }).currentTime).toBe(15);
   });
+
+  // ---- 懒解析期间的起播让位（QYP3-067：双播修复）----------------------
+
+  it('discards a stale lazy resolution when the queue moved on during resolve', async () => {
+    const { engine, audio } = makeEngine();
+    let resolveFirst!: (v: { url: string; startPosition: number }) => void;
+    const resolver = vi.fn(
+      () => new Promise<{ url: string; startPosition: number }>((res) => { resolveFirst = res; })
+    );
+    const lazy = makeTrack(1, '');
+    const pending = engine.playQueue([lazy, makeTrack(2)], 0, 'off', false, resolver);
+    // playCurrent 同步推进到 resolver await：此时换曲
+    await engine.jumpTo(1);
+    expect(audio.src).toBe('qy-file://audio/1/2.mp3');
+    // 旧解析这时才回来：必须让位——不覆盖 src、不再 play（否则双响）
+    resolveFirst({ url: 'qy-stream://audio/stale', startPosition: 0 });
+    await pending;
+    expect(audio.src).toBe('qy-file://audio/1/2.mp3');
+    expect(audio.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a play() rejection superseded by a newer start (abort is expected)', async () => {
+    const { engine, audio } = makeEngine();
+    let calls = 0;
+    let rejectFirst!: (e: unknown) => void;
+    (audio as unknown as { play: () => Promise<void> }).play = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<void>((_res, rej) => { rejectFirst = rej; });
+      }
+      return Promise.resolve();
+    }) as unknown as FakeAudio['play'];
+    const pending = engine.playQueue([makeTrack(1), makeTrack(2)], 0, 'off', false);
+    await engine.jumpTo(1); // 换 src → 旧 play() 将以 abort 类错误拒绝
+    rejectFirst(new Error('The play() request was interrupted by a new load request'));
+    // 旧起播的 rejection 不能沿调用链把"换曲"报成"播放失败"
+    await expect(pending).resolves.toBeUndefined();
+    expect(audio.src).toBe('qy-file://audio/1/2.mp3');
+  });
 });

@@ -1677,6 +1677,14 @@ export function registerIpcHandlers(
       case 'pause':
         await player.pause();
         break;
+      case 'stop':
+        // QYP3-067：mpv stop 卸载当前文件（音乐引擎切换 / 队尾停）。
+        // 先收尾保存（final=true，服务端走 Stopped）再清媒体上下文——
+        // mpv 已无播放，10s 定时器不能再对旧媒体反复保存
+        await player.stop();
+        playbackStateManager?.saveProgressNow();
+        playbackStateManager?.clearCurrentMedia();
+        break;
       case 'toggle-pause':
         await player.togglePause();
         break;

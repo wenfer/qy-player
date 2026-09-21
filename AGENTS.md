@@ -142,6 +142,17 @@
   改相关逻辑前确认：档位变化才推送、关掉开关恢复基准帧率、采样失败按 normal 兜底
 
 ### 音乐（两处静默失败陷阱，改前必读）
+- **切引擎必须显式停掉另一侧**（QYP3-067，"多首同时播放"bug 的修复）。
+  音乐→音乐在两引擎间切换**不经过**视频 LOAD_FILE，主进程不会替渲染层收尾：
+  ① webaudio 分支起播前，若 `engine === 'mpv'` 必须先
+  `playerControl('stop')`（主进程 PLAYER.CONTROL 有 stop case：saveProgressNow
+  final=true → clearCurrentMedia）——mpv 音乐是压窗的（vid=no），漏了就是
+  上一首在看不见的 mpv 里继续放；② mpv 直选分支起播前必须
+  `engineSingleton?.pause()`（engine 改成 'mpv' 只让 onTime/onPlaying 静默，
+  音频图照常出声；fallbackToMpv 一直有这句，直选分支曾漏）；③
+  `WebAudioEngine.playCurrent` 有 loadSeq 代数守卫——懒解析（服务器曲目
+  秒级网络请求）期间队列已前进的，旧解析回来必须让位，play() 的 abort 类
+  rejection 被新起播取代时也不许沿调用链报错
 - **音乐 loadfile 必须回传 `streamSessionId`（第 5 参）**。WebDAV 音频的
   直链不带凭据，Basic 认证头由主进程 stash、只把不透明会话 id 交给渲染层；
   漏传就是 mpv 静默 401——失败不上报，连 toast 都没有。类型上是 optional，

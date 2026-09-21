@@ -111,6 +111,16 @@ export class PlaybackStateManager {
     this.onProgressSaved = callback;
   }
 
+  /**
+   * 立即保存一次进度并按收尾语义上报（QYP3-067：mpv stop——音乐引擎切换/
+   * 队尾停时 renderer 显式触发）。final=true → 服务端走 Stopped，位置才能
+   * 落 UserData。时间轴读的是 PlayerCore 保留的最后一次真实 time-pos
+   * （mpv 卸载文件时补发 null 不归零，见硬性约束）。
+   */
+  saveProgressNow(): void {
+    this.saveCurrentProgress(true);
+  }
+
   setCurrentMedia(
     mediaType: string,
     mediaId: string,

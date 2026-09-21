@@ -1467,6 +1467,30 @@
   与 binary-locator 候选路径精确吻合；签名步（winCodeSign 下载）本机网络
   失败，留 CI 验证；test:main/shared/quality 全绿
 
+### QYP3-067 修复：音乐切引擎时两侧同响（多首同时播放） `[x]`
+- 用户报告：切换音乐播放时有一定概率残留一个播放进程，多首同时播放
+- 根因（排查确认，四个缺陷叠加）：
+  ① **mpv→webaudio 切换从不停止 mpv**（首要）：音乐→音乐不经过视频
+  LOAD_FILE，主进程不会结束 mpv 会话；mpv 音乐被压窗（vid=no）看不见，
+  残留 mpv 继续放完上一首——与报告逐字吻合
+  ② webaudio→mpv 直选分支漏 `engineSingleton?.pause()`（fallbackToMpv
+  一直有，唯独直选分支没有）
+  ③ **`playerControl('stop')` 在主进程无对应 case**——渲染层三处队尾停
+  （next/prev）全部静默失败，放大 ①② 的影响面
+  ④ 服务器曲目懒解析（秒级网络请求）期间用户换曲：旧解析回来照常 play()
+- 改动：
+  ① `player-core` 新增 `stop()`（mpv stop 命令，未启动幂等不抛）；
+  PLAYER.CONTROL 补 `case 'stop'`（saveProgressNow final=true → 服务端
+  Stopped 落位 → clearCurrentMedia，10s 定时器不再对旧媒体保存）；
+  `PlaybackStateManager.saveProgressNow()` 公开
+  ② webaudio 分支起播前 `engine === 'mpv'` → await playerControl('stop')；
+  mpv 直选分支起播前 `engineSingleton?.pause()`
+  ③ `WebAudioEngine.playCurrent` loadSeq 代数守卫：懒解析回来队列已前进
+  → 让位不设 src；play() rejection 被新起播取代（abort 类）→ 吞掉不报错
+- 测试：player-stop 2 例、playback-state saveProgressNow 2 例、
+  web-audio-engine 让位/吞 abort 2 例；typecheck 双配置 +
+  test:main 73 文件 782 例 + test:render 330 例全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

@@ -823,6 +823,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         // QYP3-030：状态先落再起播。引擎失败是异步的（error 事件 → 兜底），
         // 兜底要按"正在播的那首"重播；若等 playQueue 返回再写状态，失败时
         // 这里还是 null（首播）或上一首（换曲），兜底就会放弃或喂错曲子。
+        // QYP3-067：上一首还握在 mpv 里时（音乐→音乐切引擎不经过视频
+        // LOAD_FILE，主进程不会结束 mpv 会话），无窗 mpv 会继续出声——
+        // 起播 webaudio 前先显式停掉（stop 在主进程同时收尾保存进度）
+        if (get().engine === 'mpv') {
+          await window.electronAPI.playerControl('stop');
+        }
         void window.electronAPI.setMusicEngineActive(true); // 媒体键双用途路由
         set({
           engine: 'webaudio',
@@ -872,6 +878,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         loadLyricsFor(sourceOfTrack(start));
       } else {
         // mpv 引擎接管：本地冷门格式（QYP3-011）或服务器音频（QYP3-025）。
+        // QYP3-067：engine 改成 'mpv' 只会让 onTime/onPlaying 静默，旧
+        // webaudio 的音频图照常出声——先显式暂停（fallbackToMpv 同款）。
+        // AudioContext 不销毁，回到 webaudio 曲目时恢复即可
+        engineSingleton?.pause();
         // QYP3-026：媒体键仍按音乐语义路由到 renderer（"下一曲"要走音乐
         // 队列，而不是 mpv 的快进 30 秒）；视频加载时主进程会结束会话。
         void window.electronAPI.setMusicEngineActive(true);

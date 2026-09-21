@@ -125,3 +125,29 @@ describe('PlaybackStateManager: mpv music skips the local history tables (QYP3-0
     expect(storage.saveProgress).not.toHaveBeenCalled();
   });
 });
+
+describe('PlaybackStateManager: saveProgressNow for mpv stop (QYP3-067)', () => {
+  it('saves once with final=true (server falls back to Stopped semantics)', () => {
+    const { manager, saved } = makeManager({ isMusic: true, mediaType: 'jellyfin' });
+
+    manager.saveProgressNow();
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      mediaType: 'jellyfin',
+      mediaId: 'item-1',
+      position: 42,
+      final: true,
+    });
+  });
+
+  it('clearCurrentMedia stops further saves (mpv has nothing loaded anymore)', () => {
+    const { manager, saved } = makeManager({ isMusic: true, mediaType: 'jellyfin' });
+
+    manager.saveProgressNow();
+    manager.clearCurrentMedia();
+    manager.saveProgressNow(); // 引擎切换后 mpv 已无播放：不再对着旧媒体保存
+
+    expect(saved).toHaveLength(1);
+  });
+});

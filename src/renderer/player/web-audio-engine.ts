@@ -189,6 +189,12 @@ export class WebAudioEngine {
   private urlResolver: TrackUrlResolver | null = null;
   /** playQueue 传入的首曲续播位置；playCurrent 起播后消费一次。 */
   private startAt = 0;
+  /**
+   * 起播代数（QYP3-067）：每次 playCurrent 递增。懒解析（服务器曲目一次
+   * 网络请求，可达秒级）期间用户又点了新曲目/换了曲时，旧解析回来后
+   * 必须让位——否则旧曲照常 play()，与新曲双响。
+   */
+  private loadSeq = 0;
 
   constructor(deps: WebAudioDeps = {}) {
     this.audio =
@@ -280,6 +286,7 @@ export class WebAudioEngine {
   }
 
   private async playCurrent(): Promise<void> {
+    const seq = ++this.loadSeq;
     const track = this.queue.current;
     if (!track) return;
     // 起播前必须确保 AudioContext 处于 running：构造时创建的上下文在浏览器
@@ -307,6 +314,8 @@ export class WebAudioEngine {
       if (!this.urlResolver) return;
       try {
         const resolved = await this.urlResolver(track);
+        // 解析期间队列已前进/重设（用户点了别的曲）：本次起播作废
+        if (seq !== this.loadSeq) return;
         track.url = resolved.url;
         startAt = resolved.startPosition;
       } catch (err) {
@@ -314,8 +323,16 @@ export class WebAudioEngine {
         return;
       }
     }
+    if (seq !== this.loadSeq) return;
     this.audio.src = track.url;
-    await this.audio.play?.();
+    try {
+      await this.audio.play?.();
+    } catch (err) {
+      // play() 期间被更新的起播换掉 src：abort 类 rejection 属预期，
+      // 不能沿调用链把"换曲"报成"播放失败"
+      if (seq !== this.loadSeq) return;
+      throw err;
+    }
     // 续播位置：play() resolve 时元数据已可用；duration 未知则放弃（用户可手动 seek）
     if (startAt > 0 && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
       this.audio.currentTime = Math.min(startAt, this.audio.duration);

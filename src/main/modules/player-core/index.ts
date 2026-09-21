@@ -212,6 +212,16 @@ export class PlayerCore extends EventEmitter {
     await this.ipc.setProperty('pause', true);
   }
 
+  /**
+   * 停止播放并卸载当前文件（QYP3-067：音乐引擎切换 / 队尾停）。
+   * 幂等：未启动（无 IPC）即无播放，直接返回——renderer 的引擎切换
+   * 会无条件调它，不能因 mpv 尚未启动而抛错。
+   */
+  async stop(): Promise<void> {
+    if (!this.ipc) return;
+    await this.ipc.command('stop');
+  }
+
   async resume(): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
     await this.ipc.setProperty('pause', false);
