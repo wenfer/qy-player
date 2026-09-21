@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Activity, Heart, Mic2, Minimize2, Moon, Music2, Repeat, Repeat1, SkipBack, SkipForward, X } from 'lucide-react';
+import { Activity, Heart, Mic2, Minimize2, Moon, Music2, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, X } from 'lucide-react';
 import { nextRepeat, repeatLabel } from '../../stores/music-playback-store';
 import {
   attachMusicMpvBridge,
@@ -384,6 +384,16 @@ export default function MusicMiniBar() {
               className={`${ICON_BTN} ${playback.repeat !== 'off' ? 'text-primary' : ''}`}
             >
               {playback.repeat === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
+            </button>
+            <button
+              type="button"
+              onClick={playback.toggleShuffle}
+              aria-label="随机播放"
+              aria-pressed={playback.shuffle}
+              title={playback.shuffle ? '随机播放：开' : '随机播放：关'}
+              className={`${ICON_BTN} ${playback.shuffle ? 'text-primary' : ''}`}
+            >
+              <Shuffle size={16} />
             </button>
             <button
               type="button"

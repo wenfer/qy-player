@@ -1053,7 +1053,14 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       } else if (s.mpvQueue.length > 0) {
         const i = s.mpvQueueIndex;
         if (s.repeat === 'one') await get().playQueue(s.mpvQueue, i);
-        else if (i + 1 < s.mpvQueue.length) await get().playQueue(s.mpvQueue, i + 1);
+        else if (s.shuffle && s.mpvQueue.length > 1) {
+          // 随机模式（QYP3-068g）：mpv 队列没有内建随机（只有 webaudio 的
+          // PlaybackQueue 有），这里在整队里随机挑一首（排除当前这首）——
+          // 否则随机按钮在 mpv 音源上是个静默的假开关
+          let pick = Math.floor(Math.random() * s.mpvQueue.length);
+          if (pick === i) pick = (pick + 1) % s.mpvQueue.length;
+          await get().playQueue(s.mpvQueue, pick);
+        } else if (i + 1 < s.mpvQueue.length) await get().playQueue(s.mpvQueue, i + 1);
         else if (s.repeat === 'all') await get().playQueue(s.mpvQueue, 0);
         else void window.electronAPI.playerControl('stop');
       } else if (s.repeat !== 'off') {

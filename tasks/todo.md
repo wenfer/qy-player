@@ -1598,6 +1598,17 @@
 - 测试：compact-mode 测试导入路径更新；typecheck + test:render 332 例全绿；
   CDP 实测按钮点击循环 off→all→one→off，store 状态同步正确
 
+### QYP3-068h 播放条补随机播放按钮 + mpv 队列的随机真生效 `[x]`
+- 用户：还缺少随机模式（同循环按钮，播放条从来没有）
+- 改动：
+  ① MusicMiniBar 循环按钮旁补随机播放按钮（Shuffle 图标、aria-pressed、
+  开/关文案，开启高亮）
+  ② `next()` 的 mpv 分支支持随机：mpv 队列没有内建随机（只有 webaudio 的
+  PlaybackQueue 有），开启时在整队里随机挑一首（排除当前）——否则随机按钮
+  在 mpv 音源上是静默的假开关。prev 仍按队列回退（随机只影响"下一首"）
+- 验证：typecheck + test:render 332 例全绿；CDP 实测——随机开后连续三次
+  下一曲落到索引 21 / 170 / 13（非顺序推进），mpv→webaudio 跨引擎正常
+
 ---
 
 ## 纪律提醒（动工前重读）
