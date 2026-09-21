@@ -10,9 +10,11 @@ files:
 extraResources:
   - from: out
     to: out
-# 使用本地已安装的 Electron，避免网络下载
-electronDist: node_modules/electron/dist
-# 镜像源配置（国内环境加速）
+# Electron 二进制来源：
+# - Linux 本地打包脚本用 -c.electronDist=node_modules/electron/dist 指向本地已装
+#   Electron，避免联网下载（国内环境经常卡死）
+# - win/mac 打包（CI）不指定，按 electronDownload.mirror 下载对应架构的发行包
+#   （mac 要出 x64+arm64 双架构，固定本地目录只有宿主架构）
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
@@ -96,4 +98,51 @@ pacman:
 
 # AppImage 专用配置
 appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# Windows 专用配置（QYP3-064：NSIS 安装版 + 免安装 portable，x64）
+win:
+  icon: build/icon.png
+  # 未签名（无证书）：SmartScreen 会提示，由发布说明告知用户
+  signingHashAlgorithms:
+    - sha256
+  extraResources:
+    # scripts/fetch-mpv-win.js 产出的 mpv.exe（+ d3dcompiler_47.dll）
+    - from: build/mpv-win
+      to: mpv
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+# macOS 专用配置（QYP3-064：dmg，x64 + arm64）
+mac:
+  category: public.app-category.video
+  icon: build/icon.png
+  # 未签名（无开发者证书）：首次打开需右键 → 打开 绕过 Gatekeeper
+  identity: null
+  extraResources:
+    # scripts/collect-mpv-mac.sh 产出的 mpv + lib/（dylib 闭包）
+    - from: build/mpv-mac
+      to: mpv
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
