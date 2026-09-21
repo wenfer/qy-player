@@ -59,6 +59,13 @@ export interface MusicPlayingState {
   serverQueue: MusicTrackInput[];
   serverIndex: number;
   /**
+   * mpv 引擎的本地队列（QYP3-068d）：本地 mpv 音源（APE/兼容性优先/兜底）
+   * 的上下曲也要能走完整个列表——此前 serverQueue 只装服务器曲目，本地
+   * mpv 曲目的 next/prev 是死路（队尾 stop 看起来就是"没反应"）。
+   */
+  mpvQueue: MusicTrackInput[];
+  mpvQueueIndex: number;
+  /**
    * 启动恢复态（QYP3-053）：上次退出时那首曲目 + 进度已经回填，但**引擎是
    * null**（不出声）。故意不伪装成引擎：`CompactModeHost` 与全局媒体键都只看
    * `engine`，伪装会出现"一启动就自动进精简模式/媒体键劫持视频"。
@@ -299,7 +306,9 @@ export function attachMusicMpvBridge(): void {
         typeof s.isPlaying === 'boolean' ? s.isPlaying : store.isPlaying
       );
       // 自然结束：队列内推进（队尾 next() 内部 stop，不回卷）
-      if (s.eof && store.serverQueue.length > 0) void store.next();
+      // 自然结束：队列内推进（队尾 next() 内部 stop，不回卷）。
+      // QYP3-068d：本地 mpv 队列（mpvQueue）同样自动推进
+      if (s.eof && (store.serverQueue.length > 0 || store.mpvQueue.length > 0)) void store.next();
       return;
     }
     // 视频接管 mpv（非音乐加载）：只在本 store 认为 mpv 在放音乐时收尾。
@@ -680,8 +689,16 @@ function fallbackToMpvNow(track: EngineExtTrack): void {
     if (idx >= 0) patch.serverIndex = idx;
   }
   // 同步切到 mpv：状态面与"已交给兼容引擎"一致，紧随其后的
-  // play() rejection 也才能被认作预期（见 playQueue 的 catch）
-  useMusicPlaybackStore.setState(patch);
+  // play() rejection 也才能被认作预期（见 playQueue 的 catch）。
+  // 本地队列一并带过去（QYP3-068d）：兜底后 next/prev 仍按原列表走
+  const snapshot = useMusicPlaybackStore.getState().queueSnapshot;
+  const fallbackIdx = snapshot.findIndex((q) => q.id === track.id);
+  useMusicPlaybackStore.setState({
+    ...patch,
+    // 服务器曲目仍走 serverQueue 推进；mpvQueue 只服务本地/WebDAV 曲目
+    mpvQueue: !track.serverId && fallbackIdx !== -1 ? snapshot.map((q) => q.musicInput) : [],
+    mpvQueueIndex: fallbackIdx,
+  });
   void fallbackToMpv(track);
 }
 
@@ -745,8 +762,7 @@ async function fallbackToMpv(track: EngineExtTrack): Promise<void> {
   }
 }
 
-export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
-  engine: null,
+export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({  engine: null,
   current: null,
   position: 0,
   duration: 0,
@@ -760,6 +776,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   queueSnapshot: [],
   serverQueue: [],
   serverIndex: -1,
+  mpvQueue: [],
+  mpvQueueIndex: -1,
   currentSource: null,
   restored: false,
   restoreInput: null,
@@ -870,6 +888,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           // mpv 的 eof 推进（serverQueue/serverIndex）才有据可依
           serverQueue: start.serverId ? tracks : [],
           serverIndex: start.serverId ? startIndex : -1,
+          // mpv 引擎的本地队列只在 mpv 分支记（webaudio 走 queueSnapshot）
+          mpvQueue: [],
+          mpvQueueIndex: -1,
         });
         // QYP3-038：服务器曲目起播先开 Sessions/Playing 会话（本地清空）
         beginServerSession(queue[idx] ?? null);
@@ -929,6 +950,10 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           // 服务器队列（本地冷门格式时为单曲，上下曲无队列可走）
           serverQueue: start.serverId ? tracks : [],
           serverIndex: start.serverId ? startIndex : -1,
+          // 本地队列（QYP3-068d）：本地 mpv 音源的 next/prev 按「全部曲目」
+          // 走完整个列表，不再是一条"队尾 stop"的死路
+          mpvQueue: start.serverId ? [] : tracks,
+          mpvQueueIndex: start.serverId ? -1 : startIndex,
         });
         // QYP3-012：mpv 引擎同样带 EQ/ReplayGain（设置在主进程消费）
         const chain = await readAudioChainSettings();
@@ -1008,10 +1033,18 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       // QYP3-025：服务器音乐队列内前进；无队列（本地冷门格式）则单曲处理。
       // QYP3-035：循环模式在此落实（one=重播当前 / all=队尾回卷），否则精简
       // 模式的循环按钮对 mpv 音源形同虚设。
+      // QYP3-068d：本地 mpv 音源走 mpvQueue（「全部曲目」/播放时的列表），
+      // 下一曲不再是一条"队尾 stop"的死路。
       if (s.serverQueue.length > 0) {
         if (s.repeat === 'one') await get().playServerAt(s.serverIndex);
         else if (s.serverIndex + 1 < s.serverQueue.length) await get().playServerAt(s.serverIndex + 1);
         else if (s.repeat === 'all') await get().playServerAt(0);
+        else void window.electronAPI.playerControl('stop');
+      } else if (s.mpvQueue.length > 0) {
+        const i = s.mpvQueueIndex;
+        if (s.repeat === 'one') await get().playQueue(s.mpvQueue, i);
+        else if (i + 1 < s.mpvQueue.length) await get().playQueue(s.mpvQueue, i + 1);
+        else if (s.repeat === 'all') await get().playQueue(s.mpvQueue, 0);
         else void window.electronAPI.playerControl('stop');
       } else if (s.repeat !== 'off') {
         void window.electronAPI.playerControl('seek', 0, 'absolute'); // 单曲重播
@@ -1037,6 +1070,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         await get().playServerAt(s.serverIndex - 1);
       } else if (s.serverQueue.length > 0 && s.repeat === 'all') {
         await get().playServerAt(s.serverQueue.length - 1);
+      } else if (s.mpvQueue.length > 0) {
+        // 本地 mpv 队列回退（QYP3-068d）
+        const i = s.mpvQueueIndex;
+        if (i - 1 >= 0) await get().playQueue(s.mpvQueue, i - 1);
+        else if (s.repeat === 'all') await get().playQueue(s.mpvQueue, s.mpvQueue.length - 1);
+        else void window.electronAPI.playerControl('stop');
       } else {
         void window.electronAPI.playerControl('stop');
       }
@@ -1256,6 +1295,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
       queueSnapshot: [],
       serverQueue: [],
       serverIndex: -1,
+      mpvQueue: [],
+      mpvQueueIndex: -1,
       errorMessage: null,
     });
   },
@@ -1283,4 +1324,11 @@ function syncFromEngine(engineInstance: WebAudioEngine): void {
     // 换曲重开服务器会话（QYP3-038）；本地曲目顺带清空
     beginServerSession(track);
   }
+}
+
+// 开发期调试出口（QYP3-068e 排查换曲问题引入）：CDP 里可直接读播放状态，
+// 生产构建（import.meta.env.PROD）不挂
+const devFlag = (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV;
+if (devFlag) {
+  (window as unknown as { __qyMusicStore?: unknown }).__qyMusicStore = useMusicPlaybackStore;
 }

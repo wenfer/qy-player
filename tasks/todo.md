@@ -1557,6 +1557,26 @@
   onError 带 track）；typecheck + test:render 332 例 + test:main 782 例
   全绿
 
+### QYP3-068f 修复：mpv 音源没有本地队列——下一曲=队尾 stop（真根因） `[x]`
+- CDP 实测复现（`__qyMusicStore` dev 调试出口读全量状态）：第一首走 mpv
+  引擎后 `next()` 落进"无队列 + repeat off → playerControl('stop')"分支，
+  且 mpv 空闲后渲染层状态冻结（pos 不动、isPlaying true）→ 表象"没反应"
+- 根因：`serverQueue` 只装服务器曲目（QYP3-025 设计），本地 mpv 音源
+  （APE/兼容性优先/兜底 FLAC）从来没有队列；AGENTS"队尾 stop"只覆盖
+  服务器场景
+- 改动：store 新增 `mpvQueue`/`mpvQueueIndex`——
+  ① playQueue 的 mpv 分支记整个列表（恢复态=全部曲目 200+，playFromList=
+  所点列表）；webaudio 分支/stop() 清空
+  ② next()/prev() 的 mpv 分支：serverQueue 优先，其次 mpvQueue 逐曲
+  playQueue(全部列表, ±1)（repeat one 重播当前 / all 回卷 / off 队尾 stop）
+  ③ fallbackToMpvNow 把 queueSnapshot 的 musicInput 列表带进 mpvQueue
+  （webaudio 本地曲兜底后仍可上下曲）；服务器曲目仍走 serverQueue
+  ④ attachMusicMpvBridge 的 eof 自动推进条件扩到 mpvQueue
+  ⑤ store 挂 `window.__qyMusicStore`（仅 vite DEV），CDP 排查播放状态用
+- 验证：CDP 实测全链路——mpv 音源 A → 下一曲 → webaudio B/C/D 逐曲推进
+  （qlen 200、qidx 1→2→3、pos 持续前进、零 unhandled 异常）；
+  typecheck + test:render 332 例 + test:main 782 例 + build:renderer 全绿
+
 ---
 
 ## 纪律提醒（动工前重读）
