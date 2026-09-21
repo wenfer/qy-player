@@ -16,10 +16,11 @@ export const COMPACT_WIDTH = 400;
 export const COMPACT_HEIGHT = 300;
 export const COMPACT_MARGIN = 16;
 /**
- * 竖窄屏音乐窗口（QYP3-044，QYP3-068i 收窄）：音乐模式不再有左侧图标轨，
- * 宽度按曲目行与封面的最小舒适宽度定即可，比 460 更窄。
+ * 竖窄屏音乐窗口（QYP3-044，QYP3-068i 收窄、QYP3-068l 再收窄）：音乐模式
+ * 不再有左侧图标轨，宽度按曲目行与封面的最小舒适宽度定即可，比 460 更窄。
+ * 曲目行高压到 36px 后 400 就显得偏宽（行矮而窗宽），再收 20px。
  */
-export const MUSIC_WIDTH = 400;
+export const MUSIC_WIDTH = 380;
 export const MUSIC_HEIGHT = 740;
 export const MUSIC_MARGIN = 24;
 /** 正常模式的最小尺寸（与 createWindow 的 minWidth/minHeight 保持一致）。 */
@@ -28,7 +29,7 @@ const NORMAL_MIN_HEIGHT = 800;
 /** 允许缩小到浮窗尺寸所需的最小下限。 */
 const COMPACT_MIN_WIDTH = 320;
 const COMPACT_MIN_HEIGHT = 200;
-const MUSIC_MIN_WIDTH = 320;
+const MUSIC_MIN_WIDTH = 300;
 const MUSIC_MIN_HEIGHT = 520;
 
 interface CompactState {

@@ -1655,6 +1655,13 @@
   playlist-drag 的 `importPlaylistFile: vi.fn()`
 - 验证：typecheck 双配置全绿 + test:main / test:render 全绿
 
+### QYP3-068l 音乐窗口再收窄：400→380 `[x]`
+- 用户：行高缩小后，宽度也要稍微缩一些
+- 改动（`ui-shell/compact-window.ts`）：`MUSIC_WIDTH` 400→380、
+  `MUSIC_MIN_WIDTH` 320→300（行高 36px 后 400 显得行矮窗宽）
+- 验证：CDP 实测音乐模式窗口 380×740、无横向溢出（scrollWidth=380）、
+  行高 35.5px 不变、工具条/页签/迷你条按钮一行放得下（截图目视不拥挤）
+
 ---
 
 ## 纪律提醒（动工前重读）
