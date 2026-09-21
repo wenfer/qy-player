@@ -140,6 +140,29 @@ export function exportM3u8(
   return lines.join('\n') + '\n';
 }
 
+/**
+ * 本地曲目的 file:// URL（QYP3-062）。
+ *
+ * 不用 node:url 的 pathToFileURL——它按**宿主平台**语义解析路径（Linux 上
+ * 拿到 `C:\…` 会当相对路径解析进 cwd），导出的 URL 就不确定了。这里手工
+ * 构造，三端行为一致：
+ * - Windows 盘符路径（`C:\…` / `C:/…`）→ `file:///C:/…`（逐段编码）
+ * - POSIX 绝对路径 → `file://` + encodeURI，**与历史输出逐字节一致**
+ * - 其余（历史遗留的相对/非路径形态）保持旧的 `/${location}` 兜底
+ */
+export function localTrackFileUrl(location: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(location)) {
+    const rest = location.slice(2).replace(/\\/g, '/');
+    const segments = rest.split('/').filter((s) => s.length > 0);
+    // slice(0,2) 已含冒号（'C:'），盘符大小写照原样保留
+    return `file:///${location.slice(0, 2)}/${segments.map(encodeURIComponent).join('/')}`;
+  }
+  if (location.startsWith('/')) {
+    return `file://${encodeURI(location)}`;
+  }
+  return `file://${encodeURI(`/${location}`)}`;
+}
+
 /** XSPF 导出（纯函数，1.0 规范最小集）。 */
 export function exportXspf(tracks: PlaylistTrackInfo[], playlistName: string): string {
   const esc = (s: string): string =>
@@ -148,7 +171,7 @@ export function exportXspf(tracks: PlaylistTrackInfo[], playlistName: string): s
     .map((t) => {
       const loc =
         t.sourceKind === 'local' && t.location
-          ? `file://${encodeURI(t.location.startsWith('/') ? t.location : `/${t.location}`)}`
+          ? localTrackFileUrl(t.location)
           : t.location ?? '';
       const artist = t.artist ? `        <creator>${esc(t.artist)}</creator>\n` : '';
       return `    <track>\n      <title>${esc(t.title)}</title>\n${artist}      <location>${loc}</location>\n      <meta rel="qy:trackId">${t.trackId}</meta>\n    </track>`;

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { join } from 'node:path';
 import { win32 } from 'node:path';
 import {
   resolveMpvBinary,
@@ -40,7 +39,7 @@ describe('resolveMpvBinary (QYP3-061)', () => {
 
   it('win32: 常规安装位置 → PATH 裸名 mpv.exe', () => {
     const env = { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' } as NodeJS.ProcessEnv;
-    const local = win32.join(env.LOCALAPPDATA, 'mpv', 'mpv.exe');
+    const local = win32.join(env.LOCALAPPDATA!, 'mpv', 'mpv.exe');
     const r = resolveMpvBinary({
       platform: 'win32',
       env,

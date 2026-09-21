@@ -1,5 +1,6 @@
 import { MpvIpcClient } from './mpv-ipc-client';
 import { MpvProcessManager, MpvOptions } from './mpv-process';
+import { isWin } from '../platform';
 import { EventEmitter } from 'events';
 import type { ReplayGainChain } from '../playback-engine/replaygain';
 
@@ -143,6 +144,22 @@ export class PlayerCore extends EventEmitter {
   }
 
   async quit(): Promise<void> {
+    // Windows（QYP3-062）：SIGTERM 会退化为 TerminateProcess，mpv 得不到
+    // 优雅退出——先经 IPC 下发 `quit` 命令（限时 1s，掉线/失败走强杀兜底）。
+    // unix 沿用信号路径，语义不变。
+    if (isWin && this.ipc) {
+      try {
+        await Promise.race([
+          this.ipc.command('quit'),
+          new Promise((resolve) => {
+            const t = setTimeout(resolve, 1000);
+            (t as NodeJS.Timeout).unref?.();
+          }),
+        ]);
+      } catch {
+        // IPC 已断开也无妨：processManager.quit() 里的强杀兜底
+      }
+    }
     if (this.ipc) {
       this.ipc.disconnect();
       this.ipc = null;

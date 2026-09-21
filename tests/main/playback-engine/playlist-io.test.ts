@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { localTrackFileUrl } from '../../../src/main/modules/playback-engine/playlist-io';
 import {
   parseM3u,
   resolveM3uLocation,
@@ -118,3 +119,25 @@ describe('playlist export (QYP3-016/017)', () => {
 function eviltTrack(row: ExportCatalogRow): ExportCatalogRow {
   return { ...row, title: 'A<&>"' };
 }
+
+describe('localTrackFileUrl (QYP3-062)', () => {
+  it('POSIX absolute path matches the historical file:// output', () => {
+    expect(localTrackFileUrl('/music/晴天.mp3')).toBe('file:///music/%E6%99%B4%E5%A4%A9.mp3');
+  });
+
+  it('Windows drive-letter path yields file:///C:/… instead of an illegal file://C:/…', () => {
+    expect(localTrackFileUrl('C:\\music\\晴天.mp3')).toBe('file:///C:/music/%E6%99%B4%E5%A4%A9.mp3');
+    expect(localTrackFileUrl('C:/music/晴天.mp3')).toBe('file:///C:/music/%E6%99%B4%E5%A4%A9.mp3');
+  });
+
+  it('escapes URL-hostile characters (# and ?) that encodeURI would leave raw', () => {
+    // Windows 分支逐段 encodeURIComponent；POSIX 分支保持历史 encodeURI
+    // 行为（# 不转义）以守住 Linux 导出逐字节不变的硬约束
+    expect(localTrackFileUrl('C:/music/a#1.mp3')).toBe('file:///C:/music/a%231.mp3');
+    expect(localTrackFileUrl('C:\\music\\a?b.mp3')).toBe('file:///C:/music/a%3Fb.mp3');
+  });
+
+  it('keeps the legacy fallback for non-path locations', () => {
+    expect(localTrackFileUrl('rel/a.mp3')).toBe('file:///rel/a.mp3');
+  });
+});

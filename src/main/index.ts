@@ -28,6 +28,7 @@ import { resolveAudioUrlSource } from './modules/playback-engine/audio-url';
 import { registerStreamProtocol } from './modules/playback-engine/stream-protocol';
 import { createStreamRouteCache } from './modules/security/stream-route-cache';
 import { resolveCoverFileName } from './modules/library-scanner/cover-service';
+import { parseQyFileUrl } from './modules/platform/qy-file-url';
 
 let mainWindow: BrowserWindow | null = null;
 const player = new PlayerCore();
@@ -235,32 +236,26 @@ app.whenReady().then(() => {
   //   covers/<name> → coversDir 内的封面文件（白名单正则 + 包含校验）
   //   audio/<sourceId>/<relpath> → 本地媒体来源内的音频（resolveInside
   //   同级包含校验；WebDAV/服务器音频不走 renderer 引擎，见 ADR-0007）
+  //   URL 解析抽在 platform/qy-file-url（QYP3-062，win 形态防御性归一）
   {
     const coversRoot = resolve(app.getPath('userData'), 'covers');
     const sep = require('node:path').sep;
     protocol.registerFileProtocol('qy-file', (request, callback) => {
       try {
-        // 手工解析：standard scheme 会把第二段当 host；路径段可能是
-        // 中文/URL 编码，直接对原始 URL 切片最稳。
-        const raw = request.url.replace(/^qy-file:\/\//, '');
-        const coversMatch = raw.match(/^covers\/([\w.-]+)$/);
-        if (coversMatch) {
+        const parsed = parseQyFileUrl(request.url);
+        if (parsed?.kind === 'covers') {
           // 包含校验即"可服务"判定：扩展名探测出的候选名同样过这道关
           // （前缀带分隔符 → 目录自身、`.`、`..` 一律不予服务）
           const isServed = (fileName: string): boolean => {
             const candidate = resolve(coversRoot, fileName);
             return candidate.startsWith(coversRoot + sep) && existsSync(candidate);
           };
-          const name = resolveCoverFileName(coversMatch[1], isServed);
+          const name = resolveCoverFileName(parsed.name, isServed);
           if (!name) return callback({ error: -3 });
           return callback(resolve(coversRoot, name));
         }
-        const audioMatch = raw.match(/^audio\/(\d+)\/(.+)$/);
-        if (audioMatch) {
-          const target = resolveAudioUrlSource(
-            Number(audioMatch[1]),
-            decodeURIComponent(audioMatch[2])
-          );
+        if (parsed?.kind === 'audio') {
+          const target = resolveAudioUrlSource(parsed.sourceId, parsed.relPath);
           if (!target) {
             console.log('[qy-file] audio rejected');
             return callback({ error: -3 });
