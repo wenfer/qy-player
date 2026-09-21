@@ -1504,6 +1504,19 @@
   （恰为 p-3 内边距），截图目视确认无空白；typecheck + test:render
   49 文件 330 例全绿（spectrum-graph 测试不依赖 height prop，无需改）
 
+### QYP3-068b 精简频谱发糊：LED 格子分数坐标抗锯齿重影 `[x]`
+- 用户追问：精简模式频谱"画质糊很多"
+- 排查（CDP 实测排除法）：canvas 背板 = CSS 尺寸 = DPR 整数倍（374×134
+  全 1:1，无缩放模糊）；painter 无几何缓存。放大截图定位真凶——每个 LED
+  格右下有错位的暗副本：**fillRect 坐标全是分数**（barW=w/56=6.68、
+  cellH=h/16=8.375 非整），canvas 抗锯齿把每条边摊成半透明过渡像素；
+  格子仅 ~4.5×6px，边缘像素占比近半 → 糊/重影。迷你条 32px 小到看不出，
+  精简模式格子大了就显形
+- 改动：bars-painter 所有矩形像素对齐（x/bw/y/cellH/capH/peakY 取整）；
+  Visualizer 波形柱同步处理。截图对比：重影完全消失，格子干脆
+- 测试：bars-painter 断言只依赖数量与相对位置，取整不影响；typecheck +
+  test:render 330 例全绿
+
 ---
 
 ## 纪律提醒（动工前重读）

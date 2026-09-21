@@ -189,7 +189,10 @@ export default function Visualizer({
           for (let i = 0; i < BARS; i += 1) {
             if (heads[i] <= 0.01) continue;
             const barH = Math.max(1, heads[i] * h * 0.9);
-            ctx.fillRect(i * barW + barW * 0.2, (h - barH) / 2, barW * 0.6, barH);
+            // 像素对齐（QYP3-068）：同 bars-painter，分数坐标的抗锯齿边让小柱发糊
+            const x = Math.round(i * barW + barW * 0.2);
+            const bw = Math.max(1, Math.round(barW * 0.6));
+            ctx.fillRect(x, Math.round((h - barH) / 2), bw, Math.max(1, Math.round(barH)));
           }
         }
         if (!isPlaying && !anyLit) {

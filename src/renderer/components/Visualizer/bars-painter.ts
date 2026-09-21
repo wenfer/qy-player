@@ -79,23 +79,26 @@ export function createBarsPainter(
       const barW = w / bars;
       const cellH = h / segments;
       const gap = Math.max(1, cellH * 0.28);
-      const capH = Math.max(1, cellH * 0.22);
+      const capH = Math.max(1, Math.round(cellH * 0.22));
 
       for (let i = 0; i < bars; i += 1) {
         const level = levels[i];
         peaks[i] = Math.max(level, peaks[i] - fall);
-        const x = i * barW + barW * 0.16;
-        const bw = barW * 0.68;
+        // 像素对齐（QYP3-068）：LED 格子只有几个像素大，分数坐标会触发
+        // canvas 抗锯齿——每条边都摊上半透明过渡像素，小格子上糊成重影。
+        // 全部取整后每格落在整数像素上，边缘干脆
+        const x = Math.round(i * barW + barW * 0.16);
+        const bw = Math.max(1, Math.round(barW * 0.68));
 
         const lit = litCells(level, segments);
         for (let s = 0; s < lit; s += 1) {
           ctx.fillStyle = cellColor(segments > 1 ? s / (segments - 1) : 0);
-          const y = h - (s + 1) * cellH + gap / 2;
-          ctx.fillRect(x, y, bw, Math.max(1, cellH - gap));
+          const y = Math.round(h - (s + 1) * cellH + gap / 2);
+          ctx.fillRect(x, y, bw, Math.max(1, Math.round(cellH - gap)));
         }
 
         if (peaks[i] > 0.02) {
-          const py = Math.min(h - capH, Math.max(0, h - peaks[i] * h - capH));
+          const py = Math.round(Math.min(h - capH, Math.max(0, h - peaks[i] * h - capH)));
           ctx.fillStyle = PEAK_COLOR;
           ctx.fillRect(x, py, bw, capH);
         }
