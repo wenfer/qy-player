@@ -233,7 +233,7 @@ export default function MusicMiniBar() {
 
   if (collapsed) {
     return (
-      <div className={`fixed z-40 ${docked ? 'bottom-3 left-14 right-3 flex justify-end' : 'bottom-4 right-4'}`}>
+      <div className={`fixed z-40 ${docked ? 'bottom-3 left-3 right-3 flex justify-end' : 'bottom-4 right-4'}`}>
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -260,7 +260,7 @@ export default function MusicMiniBar() {
       <div
         className={`fixed z-40 bg-card/95 backdrop-blur border-border px-4 py-3 flex flex-col gap-2 ${
           docked
-            ? 'bottom-0 left-14 right-0 border-t'
+            ? 'bottom-0 left-0 right-0 border-t'
             : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-xl shadow-lg'
         }`}
       >

@@ -1609,6 +1609,21 @@
 - 验证：typecheck + test:render 332 例全绿；CDP 实测——随机开后连续三次
   下一曲落到索引 21 / 170 / 13（非顺序推进），mpv→webaudio 跨引擎正常
 
+### QYP3-068i 音乐模式去侧栏 + 窗口再收窄 `[x]`
+- 用户：音乐模式左侧菜单栏去掉，进一步缩小尺寸，必要按钮设计到其他地方
+- 改动：
+  ① 新增 `components/MusicToolbar`（32px 横条）：左=音乐/歌单页签，
+  右=音乐媒体库/设置/返回影视；窗口标题维护从 Navigation 接管（复用导出的
+  `pageTitleFor`——侧栏在音乐模式不再挂载）；Shell 音乐模式不渲染 Navigation、
+  main 去 `ml-14`
+  ② 播放条/迷你条停靠偏移去掉 `left-14`（MusicMiniBar docked 贴满底边、
+  PlayerControls railOffset → left-0）
+  ③ 窗口：MUSIC_WIDTH 460→400、MUSIC_HEIGHT 820→740、MIN 380×600→320×520
+- 验证：CDP 实测——音乐模式 400×740 无侧栏、工具条四入口导航正常
+  （#/music-sources、#/settings、返回影视→视频模式侧栏 240px 恢复正常）、
+  播放条贴底全宽、截图目视；typecheck + test:render 332 例 + test:main
+  782 例 + build:main/preload 全绿（compact-window 测试引用常量，无需改）
+
 ---
 
 ## 纪律提醒（动工前重读）

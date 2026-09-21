@@ -19,6 +19,7 @@ import TitleBar, { WindowResizeHandles } from './components/TitleBar';
 import PlayerControls from './components/PlayerControls';
 import MusicMiniBar from './components/MusicMiniBar';
 import CompactPlayer from './components/CompactPlayer';
+import MusicToolbar from './components/MusicToolbar';
 import ToastContainer from './components/Toast';
 import WindowProfileHost from './components/WindowProfileHost';
 import { useAppModeStore } from './stores/app-mode-store';
@@ -177,11 +178,14 @@ function Shell() {
   return (
     <div className="h-screen bg-background text-foreground flex flex-col">
       <TitleBar />
+      {/* 音乐模式没有侧栏（QYP3-068i）：竖窄屏的宽度全部让给内容，必要的
+          导航/入口收进这条 32px 的顶部工具条 */}
+      {mode === 'music' && <MusicToolbar />}
       <div className="flex-1 min-h-0 flex">
-        <Navigation />
+        {mode === 'video' && <Navigation />}
         <main
           className={`flex-1 min-h-0 overflow-y-auto ${
-            mode === 'music' ? 'ml-14' : 'ml-60'
+            mode === 'video' ? 'ml-60' : ''
           } ${mode === 'music' && musicSession ? 'pb-40' : ''}`}
         >
           <Routes>

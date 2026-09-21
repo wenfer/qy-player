@@ -33,8 +33,9 @@ const MUSIC_NAV: NavItem[] = [
 
 const NAV_BY_MODE: Record<AppMode, NavItem[]> = { video: VIDEO_NAV, music: MUSIC_NAV };
 
-/** 窗口标题随页面内容变化（GNOME 任务栏可辨识当前所在页面）。 */
-function pageTitleFor(pathname: string): string {
+/** 窗口标题随页面内容变化（GNOME 任务栏可辨识当前所在页面）。
+ *  音乐模式没有侧栏（QYP3-068i），标题维护由 MusicToolbar 复用这个函数。 */
+export function pageTitleFor(pathname: string): string {
   if (pathname.startsWith('/detail/')) return '详情';
   if (pathname.startsWith('/library/') || pathname.startsWith('/browse/')) return '媒体库';
   // 精确匹配优先，其次最长前缀（/music-sources 不能被 /music 前缀抢走）
