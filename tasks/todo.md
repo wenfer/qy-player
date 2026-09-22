@@ -1789,6 +1789,58 @@
 
 ---
 
+### QYP3-068v 音效调节：参量 EQ / 削波保护 / 声场（两引擎统一） `[x]`
+- 用户：想"更进一步做一套更精细的音效调节"；选定范围 = 参量 EQ + 限幅保护，
+  加上声道平衡 / 立体声宽度 / 耳机交叉馈送；要实时；要独立面板
+- 契约（阶段 1）：`main/modules/playback-engine/audio-fx.ts`（纯计算，两引擎
+  共用）——`AudioFxSettings{enabled, eq{preamp,bands[{freq,gain,q,type}]},
+  limiter{ceiling}, width, balance, crossfeed}`；`sanitizeAudioFx` 限幅归一；
+  `mpvAudioChainFromFx` 生成 af、`widthBalanceMatrix` 生成内置引擎的 4 增益矩阵；
+  旧 `playback.eqGains` 迁到 `playback.audioFx`（旧键不删）
+- 内置引擎（阶段 1）：音频图扩成
+  `MediaElementSource → Analyser → preamp → Biquad×10 → splitter→4×Gain→merger
+  （宽度/平衡）→ 交叉馈送低通混音 → WaveShaper（软削波）→ 输出增益 → destination`。
+  **analyser 留在链首**（与离线频谱同语义：都算原始 PCM）。
+  图构建失败原来只有一个空 catch → 现在会 console.error
+- mpv 侧（阶段 2）：`MUSIC.APPLY_AUDIO_CHAIN` 热更新 af，120ms trailing 防抖 +
+  链字符串相等就跳过（改 af 会重建滤镜链并 flush 缓冲，拖动时每帧重发 = 连续
+  爆音）；起播随 `LOAD_FILE` 第 6 参下发整条链
+- 面板（阶段 3）：`components/AudioFxPanel`（音乐工具栏 `AudioLines` 入口），
+  总开关 / 参量 EQ（频率+增益+Q+增删段，≤10）/ 削波保护 / 声场三项 / 预设
+  （内置 7 套由旧 EQ 预设升级 + 自定义，兼容旧 `{gains}` 形状）/ 全部复位；
+  改参数立即喂引擎、松手才落盘；如实标注 mpv 是"松手生效"。
+  设置页的均衡器编辑收敛为「打开音效面板」一个入口
+- **顺带修掉四处静默失效**（都是"单测全绿但功能是死的"）：
+  ① **mpv EQ 从未生效**：`equalizer=f=60:t=lowshelf:g=7` —— `t=` 是宽度类型
+     （合法值只有 h/q/o/s/k），任何非零增益都让整条 af 链初始化失败且被吞掉。
+     改成 peaking 用 `t=q:w=Q`、低/高架用独立的 `bass`/`treble` 滤镜；
+     真跑 mpv 的验收用例（含反例）钉住
+  ② **内置引擎整条音频图静音且零报错**：`merger.channelCount = 2` 是规范禁止的
+     （ChannelMerger 固定为 1，赋值抛 InvalidStateError），异常被图构建那层空
+     catch 吞掉；而 MediaElementSource 早已把音频元素重定向进图 →
+     无声、无频谱、无音效、无报错
+  ③ **`SETTINGS.GET` 不包 `{ok,data}`**：读 `?.data` 恒为 undefined →
+     mpv 起播的 af 恒为空（只有拖滑块才生效）、预设永远读不出来。这个坑一次
+     性清了 13 处（音乐设置页整页 / 频谱显隐 / 拾音器模式 / 自动精简 /
+     省电开关 / 快捷键覆盖值），统一到 `utils/read-setting.ts`
+  ④ **ReplayGain 三个高级项从未生效**：渲染层 payload 用 `replaygainPreamp`
+     等带前缀的键，`normalizeReplayGain` 却读 `preamp`/`fallback`/`clip`，
+     只有 mode 生效。归一化处两种拼法都收
+- 验证（本机，CDP + mpv IPC）：
+  - 内置引擎 13/13：engine=webaudio、进度推进、频谱 60+/64 带非零（峰值 217）、
+    改音效不断播、复位不断播、控制台无"音频图构建失败"
+  - mpv：起播即带完整 af（`volume / equalizer / pan / crossfeed / alimiter`），
+    `t=` 取值只有 `q`，改音效热更新生效，关闭后 af 归空（真旁路）
+  - ReplayGain：`replaygain=track / -preamp=4 / -fallback=-3 / -clip=true`
+    四项全部落到 mpv（修前只有 mode）
+  - 设置读回 7/7：写配置 → 设置页/播放条/快捷键页确实显示存值
+  - 门禁：typecheck 双配置 + test:main(808) + test:render(376) + shared/quality
+    全绿；quality floor 无新增违规（存量 13 条全在未改动的文件里）
+- 真机待验（本机无音频设备）：`docs/TARGET-VERIFY.md` 的「音效调节」与
+  「设置读回」两节——听感、交叉馈送在两种引擎下的差异、重启后各项保持
+
+---
+
 ## 纪律提醒（动工前重读）
 
 - 每个任务：`git status --short` 起手；先测试后实现；Evidence 落真实命令。

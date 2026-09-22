@@ -44,7 +44,7 @@
 │     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
-│     playback-engine/          音乐：引擎选择/audio-url 协议桥/qy-stream 认证流代理/歌单 IO/LRC 解析/均衡器/ReplayGain（ADR-0007）
+│     playback-engine/          音乐：引擎选择/audio-url 协议桥/qy-stream 认证流代理/歌单 IO/LRC 解析/音效链 audio-fx（参量 EQ/声场/削波保护）/ReplayGain（ADR-0007）
 │     subtitle-engine/ ui-shell/  字幕扫描；托盘/全局快捷键/mpv 按键生成/桌面歌词（ADR-0008）/睡眠定时/窗口形态与几何记忆（QYP3-051）
 ├─ Preload (out/preload.cjs)     contextBridge 暴露 window.electronAPI，类型来自 shared/types
 ├─ Renderer (React 18)           pages/* + zustand stores
@@ -313,6 +313,58 @@
   「原名 → 同名其他扩展名」解析；目录包含校验留在协议层。测试夹具全是
   PNG，只加 PNG 用例会漏掉这条分支
 
+### 音效链（QYP3-068v，改前必读）
+- **唯一契约**是 `main/modules/playback-engine/audio-fx.ts`（纯计算，无 IO，
+  两个引擎共用）。字段：`enabled` / `eq{enabled, preamp, bands[]}` /
+  `limiter{enabled, ceiling}` / `width` / `balance` / `crossfeed`。段是
+  **参量**的（`freq` + `gain` + `q` + `type`），不是固定 10 段图形 EQ
+  ——`EQ_DEFAULT_FREQS` 只是默认落点。旧键 `playback.eqGains` 保留不删，
+  读不到 `playback.audioFx` 时迁移一次（配置是 KV，没有 migration 机制）
+- **入口只有一个**：`components/AudioFxPanel`（音乐模式工具栏的 `AudioLines`）。
+  设置页的均衡器编辑已收敛成「打开音效面板」按钮——两处 UI 各写各的键必然
+  互相覆盖。改动参数**立即喂引擎、松手才落盘**（滑块的 `onMouseUp`/`onKeyUp`）
+- **两个引擎的实时性不一样，UI 必须如实说**：内置引擎直改 AudioParam（真实时）；
+  mpv 改 `af` 会**重建整条滤镜链并 flush 缓冲**，所以主进程做了 120ms trailing
+  防抖 + 链字符串相等就跳过（`MUSIC.APPLY_AUDIO_CHAIN`），实际是"松手生效"。
+  别为了"实时"把防抖去掉——拖动滑块每秒几十次重建就是连续爆音
+- **`SETTINGS.GET` 不返回 `{ok,data}`**（见「UI 约定」末条）：读音效链一律走
+  `renderer/utils/read-setting.ts`。QYP3-068v 在这上面栽过：`readAudioFxSettings`
+  读 `?.data` 恒为 undefined → 拿到默认（直通）链 → **mpv 起播的 af 恒为空**，
+  只有拖滑块才生效；预设也永远读不出来。`tests/renderer/music/audio-chain-startup.test.ts`
+  钉住"两个引擎起播都必须带已保存的链"
+- **mpv 的 `t=` 是宽度类型不是滤波器类型**：合法值只有 `h/q/o/s/k`。
+  peaking 写 `equalizer=f=F:t=q:w=Q:g=G`（`t=q` 时 `w` 就是 Q，与 Web Audio
+  的 Biquad `Q` 同一含义），低架/高架必须换成独立的 `bass` / `treble` 滤镜。
+  写成 `t=lowshelf` 会让**整条 af 链初始化失败**（静默），EQ 从未生效过。
+  `tests/main/playback-engine/audio-fx.test.ts` 里有真跑 mpv 的验收用例
+  （含反例），改滤镜串先看它
+- **Web Audio 的交叉馈送只是近似**：完整 Bauer 需要 ~300μs 延迟网络，而
+  `DelayNode` 最小一个渲染量子（128 样本 ≈ 2.9ms @44.1k），做出来是梳状染色。
+  内置引擎因此只做低通混音（`CROSSFEED_LP_HZ` + `CROSSFEED_MAX_MIX`），
+  只有 mpv 侧的 `crossfeed` 滤镜是完整实现——这一点在面板里如实标注
+- **削波保护是软削波不是限幅器**：`WaveShaperNode` 的无记忆 tanh 曲线，
+  没有前瞻。关闭必须把 `curve = null`（真旁路），**不是**喂一条恒等曲线
+- **音频图的采样点永远在 EQ 之前**：`MediaElementSource → Analyser → preamp
+  → Biquad×10 → 声场矩阵 → 交叉馈送 → WaveShaper → 输出增益 → destination`。
+  Analyser 在链首是刻意的——离线频谱（`music-spectrum/`）算的是原始 PCM，
+  在线拾音器跟它对齐才有可比性。**别把 analyser 挪到 EQ 后面**
+- **节点全部常驻，只改参数**：`engineSingleton` 永不置空、`AudioContext` 从不
+  `close`，所以"关掉音效"= 把 preamp 归一 / Biquad gain 归 0 / 声场矩阵归单位
+  / crossGain 归 0 / curve 归 null。不要 reconnect，会引入爆音与图重建风险
+- **图构建绝不能只留一个空 catch**。`merger.channelCount = 2` 是规范禁止的
+  （`ChannelMergerNode` 固定为 1，赋值抛 `InvalidStateError`，`channelCountMode`
+  本来就是 `'explicit'`）；异常被那层 catch 吞掉后，`MediaElementSource` 早已
+  把 audio 元素重定向进图，表现是**整条链静音、无频谱、无音效且零报错**。
+  现在那层 catch 会 `console.error`——**再加 AudioNode 时先看这行日志**，
+  测试里的假节点工厂也必须跟着补（`web-audio-engine.test.ts` 的
+  `fakeNodeFactories` 是单一来源，且假 merger 会像真的那样对 `channelCount`
+  赋值抛错）
+- **改断言前先问"实现对了没"**：mpv EQ（`t=lowshelf`）、`merger.channelCount`、
+  `SETTINGS.GET` 的 `?.data`、ReplayGain 的 `preamp` vs `replaygainPreamp`
+  四处静默失效，单测当时全是绿的——断言和假响应都是照着错实现写的。
+  写测试时假 IPC 的返回形状要照**真实 handler**抄（`SETTINGS.*` 返回裸值，
+  其余多数通道返回 `{ok,data}`），别照自己的读法编
+
 ### 跨平台（QYP3-061~064，改相关代码前必读）
 - **Linux 行为逐字节不变是硬纪律**：`binary-locator` 的 linux 分支、
   `playlist-io` 的 POSIX file URL、托盘/桌面歌词的默认行为都必须与 1.4.0
@@ -365,8 +417,9 @@
   允许换行，不要加横向滚动
 - **应用顶层双模式**（QYP3-040/041）：视频模式（默认，`stores/app-mode-store`）与音乐模式完全隔离——切换即导航到该模式默认页（`/` 或 `/music`）；导航项、设置页签、媒体库入口随模式整组更换（音乐媒体库在 `/music-sources`）。**影视是主场景，音乐是可选功能**：模式入口是侧栏底部一个低调小按钮（「音乐模式」/「返回影视」），不要做成与影视并列的大分段控件。**音乐播放条只属于音乐模式**（QYP3-068p）：回到影视模式即 `endSession()` 结束会话——停引擎（mpv 要显式 `playerControl('stop')`，只清状态歌声还在后台响）、清 `restored`、经 `MUSIC.CLEAR_NOW_PLAYING` 作废落盘的待播记录；精简浮窗同理（浮窗由会话门禁，会话一结束就还原）。直达 hash 路由不做模式推断（只控制可见入口）。**模式跨重启记忆**（QYP3-051/054）：上次退出时在音乐模式就还是音乐模式，且冷启动直接落在 `/music`（`WindowProfileHost` 回填 `mode` 后若处于初始路由 `/` 就 navigate 过去；热重载保留的深链不抢）；首次启动/记忆损坏时才是视频模式。**陷阱（QYP3-056）**：该恢复 effect 绝不能依赖 `useNavigate`——v6 每次 location 变化返回新函数，恢复导航自己就会触发 effect 重跑、把任何路由无限弹回 `/music`（菜单点不动）；navigate 经 ref 挂载时捕获一次，effect 用空依赖且**不加**"只跑一次"哨兵（StrictMode 双跑会废掉哨兵，见 `WindowProfileHost` 注释）
 - **设置页仅软件配置**（服务器、快捷键等）；媒体来源按模式拆分管理（QYP3-039/040/041）：视频模式「媒体库」（`/media-sources`）管媒体服务器与影视来源、音乐模式「音乐媒体库」（`/music-sources`）只管音乐来源（服务器配置入口只保留在影视模式，音乐模式给一句提示）。**来源只属于一域**：`purpose` 只有 `music|video`（不支持音乐与视频混放同一目录——视频源要读 NFO 归类，混在一起两边都差）；存量 `all` 由 migration 010 归一为 `video`。扫描严格按域：视频源索引视频+NFO 并跳过音频/CUE（且跳过 `cleanupMissingMusic`，否则会误删存量音轨），音乐源只索引音频+CUE；勿合并回单一页面或恢复"两者"选项。**音乐域 = 音乐来源**（QYP3-055）：音乐列表/专辑/歌手/收藏/搜索统一走 `repo.listMusicSourceIds()`（`purpose='music'`），影视来源扫出的音轨不进音乐界面、resolver 也拒绝播放（`UNAVAILABLE`）——改查询范围时勿再回到"只按 kind 过滤"；拆域遗留需要一个恢复入口，媒体库页把不属于本域的目录/WebDAV 来源列在「其它来源」区一键转域（`CATALOG.SOURCE_SET_PURPOSE`，只改用途标签、已索引内容不动，扫描中拒绝转换）。**WebDAV 音频标签与本地同待遇**（QYP3-060）：`createWebDavScanDriver` 的 `readAudio` 走 `adapter.open(locator, signal, 'bytes=0-524287')` bounded GET（窗口与本地一致），封面/歌词落同一套缓存分区；`upsertMusicTrack` 的 `hasCover`/`hasLyrics` 是 **tri-state**（null = 本轮没读到 → COALESCE 保留旧值，true/false = 确定性结论 → 覆盖）——UPDATE 分支绝不能写 `COALESCE(excluded.has_cover, has_cover)`，`excluded` 里是 VALUES 侧兜底后的 0，tri-state 会被吞（UPDATE 分支用同值再绑一次的裸参数，见 repository.ts 注释）
-- **设置页按模式分页签**（`Settings/index.tsx`：视频=播放/插件/快捷键，音乐=音乐/快捷键），一次只显示一个板块——影视与音乐是两套独立配置域，音乐项（引擎/音量链路/均衡器/拾音器/歌词/睡眠定时）只出现在音乐模式，勿塞回播放板块（用户明确要求两者不要混在一起）；快捷键是应用级配置，两种模式共用同一份 `ShortcutsContent`
-- **`SETTINGS.GET`/`SET` 是 JSON 对称契约**：SET 走 `JSON.stringify`，GET 走 `decodeConfigValue` 解析回来（解析失败退回裸串，兼容主进程裸值）。renderer 侧读设置**不要**再手动 `JSON.parse`，也**不要**假设返回字符串——历史上这条不对称让均衡器/ReplayGain/自定义预设/拾音器开关四项静默失效
+- **设置页按模式分页签**（`Settings/index.tsx`：视频=播放/插件/快捷键，音乐=音乐/快捷键），一次只显示一个板块——影视与音乐是两套独立配置域，音乐项（引擎/音效/音量链路/均衡器/拾音器/歌词/睡眠定时）只出现在音乐模式，勿塞回播放板块（用户明确要求两者不要混在一起）；快捷键是应用级配置，两种模式共用同一份 `ShortcutsContent`
+- **`SETTINGS.GET`/`SET` 是 JSON 对称契约**：SET 走 `JSON.stringify`，GET 走 `decodeConfigValue` 解析回来（解析失败退回裸串，兼容主进程裸值）。renderer 侧读设置**不要**再手动 `JSON.parse`，也**不要**假设返回字符串——历史上这条不对称让均衡器/ReplayGain/自定义预设/拾音器开关四项静默失效。
+  **另外：`SETTINGS.GET` 直接把值返回，不包 `{ ok, data }`**（与 `CATALOG.*`/`WINDOW.*` 等 `ok(...)` 通道不同，`SET` 也只是写、没有返回值）。所以 `getSettings(k)?.data` **恒为 `undefined`**，而 undefined 恰好让每个 `typeof v === 'string'` / `v !== false` 判断静默走默认分支——症状是"设置存了但每次打开都显示默认"，一声不吭。QYP3-068v 一次性清掉了 13 处（音乐设置页整页、频谱显隐、拾音器模式、自动精简、省电开关、快捷键覆盖值；其中快捷键那处**会丢数据**：加载成默认值后再保存会把用户其余绑定一起覆盖）。**新代码一律 `import { readSetting } from utils/read-setting`**，写测试时假响应也要照这个形状，别再写 `{ok,data}`
 - **拒绝横向滚动条**：超宽内容一律换行（`flex-wrap` / grid），用户明确反对横向拖动
 - Tailwind + 深色主题语义 token（`bg-card`/`border-border`/`text-muted-foreground`/`focus-ring`）
 - 异步操作必须有 Toast 反馈（`stores/toast-store`）；列表操作用乐观更新 + 失败回滚
