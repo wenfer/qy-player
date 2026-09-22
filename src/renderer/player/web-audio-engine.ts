@@ -13,6 +13,56 @@
 import { isFlacUrl, stripFlacPicture } from './flac-strip';
 // 与 mpv 离线频谱同一套对数分带数学（pcm-fft 是纯计算模块，无 IO 无依赖）
 import { bandBinRanges } from '../../main/modules/music-spectrum/pcm-fft';
+// 音效契约为两个引擎共用（纯计算，无 IO）；`t=q` 的 w 就是这里的 Q
+import {
+  AUDIO_FX_MAX_BANDS,
+  EQ_DEFAULT_FREQS,
+  EQ_DEFAULT_Q,
+  widthBalanceMatrix,
+  type AudioFxSettings,
+} from '../../main/modules/playback-engine/audio-fx';
+
+/**
+ * 交叉馈送的低通截止（Hz）。真正的 Bauer 还需要 ~300μs 的延迟网络，而
+ * Web Audio 的 DelayNode 最小是一个渲染量子（128 样本 ≈ 2.9ms @44.1k），
+ * 做出来会是梳状染色而不是交叉馈送 —— 所以这里**只做低通混音**：它是
+ * crossfeed 的近似，只有 mpv 侧的 `crossfeed` 滤镜才是完整实现。
+ */
+const CROSSFEED_LP_HZ = 2500;
+/** 交叉馈送强度 1.0 时的混入量（≈ -9dB，接近 Bauer 的量级）。 */
+const CROSSFEED_MAX_MIX = 0.35;
+
+const curveCache = new Map<string, Float32Array>();
+
+/**
+ * 削波保护曲线（QYP3-068v）。
+ *
+ * 阈值以下严格线性（不动一丝 tipsy），阈值以上用 tanh 把余量压掉：
+ *   |x| ≤ t      → y = x
+ *   |x| >  t     → y = t + (1-t)·tanh((|x|-t)/(1-t))·sign(x)
+ * 因此输出恒 < 1 —— 抬了 EQ 也不会硬削波。
+ *
+ * 这是**无记忆软削波**，不是 lookahead 限幅器（那个要到 DelayNode 做前瞻，
+ * 成本与复杂度都不划算），所以 UI 文案叫「削波保护」而不是「限幅器」。
+ * 按 ceiling 缓存：拖滑块时不必每帧重算 2048 点。
+ */
+function softClipCurve(ceilingDb: number): Float32Array {
+  const key = ceilingDb.toFixed(1);
+  const cached = curveCache.get(key);
+  if (cached) return cached;
+  const limit = Math.pow(10, Math.max(-6, Math.min(0, ceilingDb)) / 20);
+  const n = 2048;
+  const curve = new Float32Array(n);
+  const remainder = 1 - limit;
+  for (let i = 0; i < n; i += 1) {
+    const x = (i / (n - 1)) * 2 - 1; // [-1, 1]
+    const ax = Math.abs(x);
+    const y = ax <= limit ? ax : limit + remainder * Math.tanh((ax - limit) / remainder);
+    curve[i] = Math.sign(x) * y;
+  }
+  curveCache.set(key, curve);
+  return curve;
+}
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
@@ -171,9 +221,24 @@ export interface WebAudioDeps {
 }
 
 /**
- * 播放图：Element → MediaElementSource → Analyser → Biquad×10 → Gain → out。
+ * 播放图（QYP3-068v 扩展）：
+ *
+ *   Element → MediaElementSource → Analyser → preampGain → EQ×10
+ *           → 声场矩阵（宽度+平衡）→ 交叉馈送 → shaper（削波保护）
+ *           → Gain（音量）→ out
+ *
  * 同一元素重挂 source 会爆（每个元素只能 createMediaElementSource 一次），
  * 因此 audio 元素与图在构造时创建一次，换曲目只换 src。
+ *
+ * **所有音效节点都在构造时一次性建好并常驻**：引擎实例进程内永不销毁
+ * （没有 dispose / ctx.close），所以"开关某个效果"只能表现为**参数归直通
+ * 值**——绝不能靠 disconnect 重连：重连必爆 click，而且矩阵分支一变，
+ * 尾部连线也就跟着变了。直通也要留意：Biquad peak gain=0 / 单位矩阵 /
+ * crossGain=0 / curve=null 各自才是恒等。
+ *
+ * Analyser 的取样点在 EQ **之前**：离线频谱（pcm-fft）本来就是对解码后
+ * 原始 PCM 做的，语义是"源信号监视器"。移到 EQ 之后会让 mpv 侧（永远只
+ * 反映源信号）和这里不一致。
  */
 export class WebAudioEngine {
   private readonly audio: HTMLAudioElement;
@@ -182,6 +247,19 @@ export class WebAudioEngine {
   private readonly analyser: AnalyserNode | null = null;
   private readonly filters: BiquadFilterNode[] = [];
   private readonly gain: GainNode | null = null;
+  /** 输入增益（preamp）：在 EQ 之前衰减，才保得住 EQ 的精度。 */
+  private readonly preamp: GainNode | null = null;
+  /**
+   * 声场矩阵（QYP3-068v）：宽度与平衡合并成 4 个增益，与 mpv 侧那条 `pan`
+   * 数学完全一致（见 `widthBalanceMatrix`）。顺序 [L→L', R→L', L→R', R→R']。
+   */
+  private readonly fieldMatrix: GainNode[] = [];
+  /** 交叉馈送的两条声道低通（约 2.5kHz）。 */
+  private readonly crossFilters: BiquadFilterNode[] = [];
+  /** 交叉馈送的混入量增益：0 = 关闭。 */
+  private readonly crossGains: GainNode[] = [];
+  /** 削波保护（QYP3-068v）：无记忆软削波，不是 lookahead 限幅器。 */
+  private readonly shaper: WaveShaperNode | null = null;
   private readonly queue = new PlaybackQueue();
   private freqData: Uint8Array | null = null;
   /**
@@ -252,15 +330,69 @@ export class WebAudioEngine {
         // 的那条静态进度线（用户看到的就是一条直线）。
         node.connect(analyser);
         node = analyser;
-        for (const freq of EQ_BANDS) {
+
+        // ---- 输入增益（preamp）----
+        this.preamp = this.ctx.createGain();
+        this.preamp.gain.value = 1;
+        node.connect(this.preamp);
+        node = this.preamp;
+
+        // ---- 参量 EQ（最多 AUDIO_FX_MAX_BANDS 段，常驻）----
+        for (let i = 0; i < AUDIO_FX_MAX_BANDS; i += 1) {
           const f = this.ctx.createBiquadFilter();
-          f.type = freq <= 350 ? 'lowshelf' : freq >= 9000 ? 'highshelf' : 'peaking';
-          f.frequency.value = freq;
-          f.gain.value = 0;
+          f.type = 'peaking';
+          f.frequency.value = EQ_DEFAULT_FREQS[i] ?? 1000;
+          f.Q.value = EQ_DEFAULT_Q;
+          f.gain.value = 0; // 直通
           node.connect(f);
           node = f;
           this.filters.push(f);
         }
+
+        // ---- 声场矩阵 + 交叉馈送（共用一个 splitter/merger 组）----
+        // L' = a0·L + b0·R + crossR    R' = b1·L + a1·R + crossL
+        const splitter = this.ctx.createChannelSplitter(2);
+        const merger = this.ctx.createChannelMerger(2);
+        // 不显式指定的话，mono 源会按 speaker 解释方式落到左声道
+        merger.channelCount = 2;
+        merger.channelCountMode = 'explicit';
+        node.connect(splitter);
+        // Web Audio 的 connect 是求和的：多条线汇到同一个输入就相加
+        for (let i = 0; i < 4; i += 1) {
+          const g = this.ctx.createGain();
+          g.gain.value = i === 0 || i === 3 ? 1 : 0; // 单位矩阵
+          this.fieldMatrix.push(g);
+        }
+        splitter.connect(this.fieldMatrix[0], 0); // L → L'
+        splitter.connect(this.fieldMatrix[1], 1); // R → L'
+        splitter.connect(this.fieldMatrix[2], 0); // L → R'
+        splitter.connect(this.fieldMatrix[3], 1); // R → R'
+        this.fieldMatrix[0].connect(merger, 0, 0);
+        this.fieldMatrix[1].connect(merger, 0, 0);
+        this.fieldMatrix[2].connect(merger, 0, 1);
+        this.fieldMatrix[3].connect(merger, 0, 1);
+        for (let ch = 0; ch < 2; ch += 1) {
+          const lp = this.ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = CROSSFEED_LP_HZ;
+          lp.Q.value = 0.7;
+          const g = this.ctx.createGain();
+          g.gain.value = 0; // 关闭 = 不混入对侧
+          splitter.connect(lp, ch);
+          lp.connect(g);
+          // 交叉：ch 0(L) 混进 R'，ch 1(R) 混进 L'
+          g.connect(merger, 0, ch === 0 ? 1 : 0);
+          this.crossFilters.push(lp);
+          this.crossGains.push(g);
+        }
+        node = merger;
+
+        // ---- 削波保护 ----
+        this.shaper = this.ctx.createWaveShaper();
+        this.shaper.oversample = 'none'; // 老机 CPU； working memory 是"软削波"
+        node.connect(this.shaper);
+        node = this.shaper;
+
         this.gain = this.ctx.createGain();
         node.connect(this.gain);
         this.gain.connect(this.ctx.destination);
@@ -402,12 +534,57 @@ export class WebAudioEngine {
     else if ('volume' in this.audio) this.audio.volume = volume;
   }
 
-  /** EQ 增益 dB（10 段）。 */
-  setEq(gains: number[] | null): void {
-    this.filters.forEach((f, i) => {
-      f.gain.value = gains?.[i] ?? 0;
-    });
+  /**
+   * 应用整条音效链（QYP3-068v）。会话中可随时调用（拖滑块即生效）。
+   *
+   * 节点全部常驻，所以"关"= 参数归直通值：
+   *   preamp 1.0 / Biquad gain 0 / 单位矩阵 / crossGain 0 / curve null
+   * 图构建失败（`this.gain === null`）时整体静默返回，沿用既有降级惯例。
+   */
+  setAudioFx(fx: AudioFxSettings | null): void {
+    if (!this.gain || !this.preamp || !this.shaper) return;
+    const active = fx !== null && fx.enabled;
+
+    // ---- 输入增益 ----
+    const preampDb = active && fx!.eq.enabled ? fx!.eq.preamp : 0;
+    this.preamp.gain.value = Math.pow(10, preampDb / 20);
+
+    // ---- 参量 EQ ----
+    const bands = active && fx!.eq.enabled ? fx!.eq.bands : [];
+    for (let i = 0; i < this.filters.length; i += 1) {
+      const f = this.filters[i];
+      const band = bands[i];
+      if (!band) {
+        f.gain.value = 0; // 段未启用 → 直通
+        continue;
+      }
+      // 切换 type 会重置内部状态（可能引起轻微 artifact），只在真的变了才写
+      if (f.type !== band.type) f.type = band.type;
+      f.frequency.value = band.freq;
+      f.Q.value = band.q;
+      f.gain.value = band.gain;
+    }
+
+    // ---- 声场矩阵（宽度 + 平衡，与 mpv 的 pan 同一套数学）----
+    const m = active ? widthBalanceMatrix(fx!.width, fx!.balance) : null;
+    const [a0, b0, b1, a1] = m
+      ? [m.a0, m.b0, m.b1, m.a1]
+      : [1, 0, 0, 1]; // 单位矩阵 = 恒等
+    if (this.fieldMatrix.length === 4) {
+      this.fieldMatrix[0].gain.value = a0;
+      this.fieldMatrix[1].gain.value = b0;
+      this.fieldMatrix[2].gain.value = b1;
+      this.fieldMatrix[3].gain.value = a1;
+    }
+
+    // ---- 交叉馈送（低通混音近似，非完整 Bauer）----
+    const crossMix = active ? fx!.crossfeed * CROSSFEED_MAX_MIX : 0;
+    for (const g of this.crossGains) g.gain.value = crossMix;
+
+    // ---- 削波保护 ----
+    this.shaper.curve = active && fx!.limiter.enabled ? softClipCurve(fx!.limiter.ceiling) : null;
   }
+
 
   /**
    * 频谱快照（UI 拾音器 ≤30fps 拉取；无图返回 null）。

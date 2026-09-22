@@ -24,7 +24,7 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
     onTime?: unknown;
     onEnded?: unknown;
     onPlaying?: unknown;
-    setEq = vi.fn();
+    setAudioFx = vi.fn();
     setVolume = vi.fn();
     playQueue = vi.fn(async () => undefined);
     next = vi.fn(async () => undefined);

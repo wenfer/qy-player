@@ -5,6 +5,15 @@ import { estimatePosition, makeAnchor, type PositionAnchor } from '../player/spe
 import type { MediaRef } from '../../shared/types/catalog';
 import type { MusicTrackRow } from '../../shared/types/music';
 import type { GetSpectrumResult, SpectrumReadyEvent } from '../../shared/types/music-spectrum';
+import {
+  AUDIO_FX_DEFAULT,
+  audioFxFromLegacyEq,
+  sanitizeAudioFx,
+  type AudioFxSettings,
+} from '../../main/modules/playback-engine/audio-fx';
+
+/** 音效链配置的 app_config 键（QYP3-068v）。 */
+export const AUDIO_FX_KEY = 'playback.audioFx';
 
 /**
  * 音乐播放状态（QYP3-010/011/014）。
@@ -659,6 +668,33 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
   }
 }
 
+/**
+ * 音效链设置（QYP3-068v）。
+ *
+ * 取代旧的 `playback.eqGains`（10 段纯 dB）：参量 EQ 是它的超集，所以升级
+ * 时读不到新键就从旧键迁移一次并写回。**旧键不删**——配置是 KV 没有
+ * migration 机制，删了版本回滚就丢用户设置。
+ */
+async function readAudioFxSettings(): Promise<AudioFxSettings> {
+  try {
+    const read = async (key: string): Promise<unknown> => {
+      const res = (await window.electronAPI.getSettings(key)) as { data?: unknown };
+      return res?.data;
+    };
+    const [fxValue, legacyValue] = await Promise.all([read(AUDIO_FX_KEY), read('playback.eqGains')]);
+    if (fxValue && typeof fxValue === 'object') return sanitizeAudioFx(fxValue);
+    if (Array.isArray(legacyValue)) {
+      const migrated = audioFxFromLegacyEq(legacyValue.map((v) => Number(v) || 0));
+      // 迁移结果即时落盘，避免每次启动重算
+      void window.electronAPI.setSettings(AUDIO_FX_KEY, migrated).catch(() => {});
+      return migrated;
+    }
+    return AUDIO_FX_DEFAULT;
+  } catch {
+    return AUDIO_FX_DEFAULT;
+  }
+}
+
 /** 音频链 → playerLoadFile 第 6 参数（未设置的模式不发键，主进程用默认值）。 */
 function audioChainPayload(chain: AudioChainSettings): Record<string, unknown> {
   return {
@@ -906,9 +942,8 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         }
         if (token !== playToken) return;
         const engineInstance = getEngine();
-        // QYP3-012：webaudio 引擎读 EQ 设置直连 BiquadFilter
-        const { eqGains } = await readAudioChainSettings();
-        if (eqGains) engineInstance.setEq(eqGains);
+        // QYP3-068v：音效链与起播时一致（机上还有 believed 的说法，见 setAudioFx）
+        engineInstance.setAudioFx(await readAudioFxSettings());
         // 应用当前音量（换曲不重置用户设定的音量）
         engineInstance.setVolume(get().volume / 100);
         lastReportAt = Date.now();

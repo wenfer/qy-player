@@ -28,7 +28,7 @@ vi.mock('../../../src/renderer/player/web-audio-engine', () => {
     onTime?: unknown;
     onEnded?: unknown;
     onPlaying?: unknown;
-    setEq = vi.fn();
+    setAudioFx = vi.fn();
     setVolume = vi.fn();
     playQueue = vi.fn(async (tracks: Array<{ id: number }>, startIndex: number) => {
       // 真实引擎在起播前就把队列推进到当前曲（QYP3-068d：onError 要带上它）

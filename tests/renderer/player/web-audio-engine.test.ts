@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { PlaybackQueue, WebAudioEngine, type QueueTrack } from '../../../src/renderer/player/web-audio-engine';
+import {
+  AUDIO_FX_DEFAULT,
+  AUDIO_FX_MAX_BANDS,
+} from '../../../src/main/modules/playback-engine/audio-fx';
 
 function makeTrack(id: number, url?: string): QueueTrack {
   return {
@@ -45,27 +49,49 @@ function fakeAudio(): FakeAudio {
   return el;
 }
 
-function fakeCtx(): AudioContext {
-  return {
-    state: 'running',
-    createMediaElementSource: vi.fn(() => ({ connect: vi.fn() })),
-    createAnalyser: vi.fn(() => ({
+/**
+ * 假 AudioContext 的节点工厂（QYP3-068v 收敛成单一来源）。
+ *
+ * 引擎构造里的图构建被外层 `catch {}` **静默吞掉** —— 缺任何一个节点工厂
+ * 都会让整张图直接降级（无频谱、无 EQ、无音效）却不报错。这份 stub 以前
+ * 抄了三份，加节点漏改一处就静默失效，所以现在统一从这里取。
+ */
+function fakeNodeFactories(): Record<string, () => unknown> {
+  const raw: Record<string, () => unknown> = {
+    createMediaElementSource: () => ({ connect: vi.fn() }),
+    createAnalyser: () => ({
       fftSize: 2048,
       smoothingTimeConstant: 0,
       frequencyBinCount: 1024,
       getByteFrequencyData: (arr: Uint8Array) => arr.fill(7),
       getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
       connect: vi.fn(),
-    })),
-    createBiquadFilter: vi.fn(() => ({
+    }),
+    createBiquadFilter: () => ({
       type: '',
       frequency: { value: 0 },
+      Q: { value: 1 },
       gain: { value: 0 },
       connect: vi.fn(),
-    })),
-    createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn() })),
+    }),
+    createGain: () => ({ gain: { value: 1 }, connect: vi.fn() }),
+    createChannelSplitter: () => ({ connect: vi.fn() }),
+    createChannelMerger: () => ({ channelCount: 2, channelCountMode: 'explicit', connect: vi.fn() }),
+    createWaveShaper: () => ({ curve: null, oversample: 'none', connect: vi.fn() }),
+  };
+  // 用 vi.fn 包装：部分用例要靠 mock.results 取回建好的节点
+  const wrapped: Record<string, () => unknown> = {};
+  for (const [key, fn] of Object.entries(raw)) wrapped[key] = vi.fn(fn);
+  return wrapped;
+}
+
+function fakeCtx(overrides: Record<string, unknown> = {}): AudioContext {
+  return {
+    state: 'running',
+    ...fakeNodeFactories(),
     destination: {},
     resume: vi.fn(async () => undefined),
+    ...overrides,
   } as unknown as AudioContext;
 }
 
@@ -178,6 +204,7 @@ function fakeCtxWithEdges(): { ctx: AudioContext; edges: string[] } {
   const edges: string[] = [];
   const node = (label: string, extra: Record<string, unknown> = {}): Record<string, unknown> => {
     const n: Record<string, unknown> = { label, ...extra };
+    // 引擎会传 (dest, output, input)，后两个参数这里不关心
     n.connect = (target: unknown): void => {
       edges.push(`${label}->${(target as { label?: string } | undefined)?.label ?? 'destination'}`);
     };
@@ -194,8 +221,11 @@ function fakeCtxWithEdges(): { ctx: AudioContext; edges: string[] } {
         getByteFrequencyData: (arr: Uint8Array) => arr.fill(7),
         getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
       }),
-    createBiquadFilter: () => node('filter', { type: '', frequency: { value: 0 }, gain: { value: 0 } }),
+    createBiquadFilter: () => node('filter', { type: '', frequency: { value: 0 }, Q: { value: 1 }, gain: { value: 0 } }),
     createGain: () => node('gain', { gain: { value: 1 } }),
+    createChannelSplitter: () => node('splitter'),
+    createChannelMerger: () => node('merger', { channelCount: 2, channelCountMode: 'explicit' }),
+    createWaveShaper: () => node('shaper', { curve: null, oversample: 'none' }),
     destination: { label: 'destination' },
     resume: vi.fn(async () => undefined),
   };
@@ -229,11 +259,18 @@ describe('WebAudioEngine (QYP3-010)', () => {
     void engine.playQueue([makeTrack(1)], 0, 'off', false);
     // 取样点是链路第一跳；绕过它（source 直连 filter）频谱就恒为全 0
     expect(edges[0]).toBe('source->analyser');
-    expect(edges).toContain('analyser->filter');
     expect(edges.at(-1)).toBe('gain->destination');
     expect(edges).not.toContain('source->filter');
-    // 10 段 EQ 串在 analyser 之后
+    // QYP3-068v：analyser 之后是 preamp（gain）再进 EQ —— 取样点在 EQ 之前
+    // （离线频谱本来就是对原始 PCM 做的，语义是"源信号监视器"）
+    expect(edges[1]).toBe('analyser->gain');
+    expect(edges[2]).toBe('gain->filter');
+    // 10 段 EQ 串在 preamp 之后
     expect(edges.filter((e) => e === 'filter->filter')).toHaveLength(9);
+    // 声场矩阵与交叉馈送分流后再合流，末端是削波保护
+    expect(edges).toContain('filter->splitter');
+    expect(edges).toContain('merger->shaper');
+    expect(edges).toContain('shaper->gain');
   });
 
   it('next(auto) with repeat one restarts the same track', async () => {
@@ -262,16 +299,94 @@ describe('WebAudioEngine (QYP3-010)', () => {
     expect(onTime).toHaveBeenCalledWith(5, 100);
   });
 
-  it('setEq writes dB gains across the 10 filters', () => {
+  it('setAudioFx writes parametric bands (freq/Q/gain) across the filters', () => {
     const { engine } = makeEngine();
-    // 通过 playQueue 建 10 个 filter（fake ctx 每次返回新对象，但 gain.value 可读）
     void engine.playQueue([makeTrack(1)], 0, 'off', false);
-    const gains = [3, 0, -2, 0, 0, 0, 0, 0, 1, 4];
-    engine.setEq(gains);
+    const filters = (engine as unknown as { filters: Array<{ type: string; frequency: { value: number }; Q: { value: number }; gain: { value: number } }> }).filters;
+    expect(filters).toHaveLength(AUDIO_FX_MAX_BANDS);
+    engine.setAudioFx({
+      ...AUDIO_FX_DEFAULT,
+      eq: {
+        enabled: true,
+        preamp: 0,
+        bands: [
+          { freq: 120, gain: 5, q: 1.1, type: 'lowshelf' },
+          { freq: 3000, gain: -4, q: 2.5, type: 'peaking' },
+        ],
+      },
+    });
+    expect(filters[0]).toMatchObject({ type: 'lowshelf', gain: { value: 5 } });
+    expect(filters[0].frequency.value).toBe(120);
+    expect(filters[0].Q.value).toBe(1.1);
+    expect(filters[1]).toMatchObject({ type: 'peaking', gain: { value: -4 } });
+    // 未配置的段必须直通（否则会留着上一次的增益）
+    expect(filters[2].gain.value).toBe(0);
+    expect(filters[9].gain.value).toBe(0);
     // 通过 spectrum 探针确认 analyser 存在（fake 全 bin 填 7 → 分带后每带峰值 7）
     const spectrum = engine.getSpectrum();
     expect(spectrum).not.toBeNull();
     expect(spectrum![0]).toBe(7);
+  });
+
+  it('setAudioFx returns every stage to unity when disabled (QYP3-068v)', () => {
+    const { engine } = makeEngine();
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    const inner = engine as unknown as {
+      preamp: { gain: { value: number } } | null;
+      filters: Array<{ gain: { value: number } }>;
+      fieldMatrix: Array<{ gain: { value: number } }>;
+      crossGains: Array<{ gain: { value: number } }>;
+      shaper: { curve: Float32Array | null } | null;
+    };
+    engine.setAudioFx({
+      enabled: true,
+      eq: { enabled: true, preamp: 6, bands: [{ freq: 100, gain: 9, q: 1, type: 'peaking' }] },
+      limiter: { enabled: true, ceiling: -1 },
+      width: 2,
+      balance: 0.5,
+      crossfeed: 1,
+    });
+    expect(inner.preamp!.gain.value).toBeGreaterThan(1);
+    expect(inner.fieldMatrix[0].gain.value).not.toBe(1);
+    expect(inner.shaper!.curve).not.toBeNull();
+
+    // 关掉总开关 → 每一级都必须回到恒等（节点常驻，只能靠参数归位）
+    engine.setAudioFx({ ...AUDIO_FX_DEFAULT, enabled: false });
+    expect(inner.preamp!.gain.value).toBe(1);
+    expect(inner.filters.every((f) => f.gain.value === 0)).toBe(true);
+    expect(inner.fieldMatrix.map((g) => g.gain.value)).toEqual([1, 0, 0, 1]);
+    expect(inner.crossGains.every((g) => g.gain.value === 0)).toBe(true);
+    expect(inner.shaper!.curve).toBeNull();
+  });
+
+  it('soft-clip curve never exceeds full scale (QYP3-068v)', () => {
+    const { engine } = makeEngine();
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    const shaper = (engine as unknown as { shaper: { curve: Float32Array | null } }).shaper;
+    engine.setAudioFx({ ...AUDIO_FX_DEFAULT, limiter: { enabled: true, ceiling: -1 } });
+    const curve = shaper.curve!;
+    expect(curve).not.toBeNull();
+    // 抬满也不能越过 0dBFS，否则就是硬削波
+    for (const y of curve) expect(Math.abs(y)).toBeLessThan(1);
+    // 阈值以下必须严格线性（不能把小信号也压了）
+    const limit = Math.pow(10, -1 / 20);
+    const mid = curve[Math.floor(((limit * 0.5 + 1) / 2) * (curve.length - 1))];
+    expect(Math.abs(mid - limit * 0.5)).toBeLessThan(0.02);
+  });
+
+  it('stub factories cover every node the graph builds (missing one silently degrades)', () => {
+    // 图构建失败被 catch 吞掉，缺 factory 不会报错只会整张图消失
+    expect(Object.keys(fakeNodeFactories()).sort()).toEqual(
+      [
+        'createAnalyser',
+        'createBiquadFilter',
+        'createChannelMerger',
+        'createChannelSplitter',
+        'createGain',
+        'createMediaElementSource',
+        'createWaveShaper',
+      ].sort()
+    );
   });
 
   it('spectrum is log-banded (QYP3-057): bass gets few bins, mids get many', () => {
@@ -283,29 +398,19 @@ describe('WebAudioEngine (QYP3-010)', () => {
     };
     const engine = new WebAudioEngine({
       createElement: () => fakeAudio(),
+      // 复用同一份节点工厂，只覆盖 sampleRate 与 analyser 的数据填充
       createContext: () =>
-        ({
+        fakeCtx({
           sampleRate: 44100,
-          state: 'running',
-          createMediaElementSource: vi.fn(() => ({ connect: vi.fn() })),
-          createAnalyser: vi.fn(() => ({
+          createAnalyser: () => ({
             fftSize: 2048,
             smoothingTimeConstant: 0,
             frequencyBinCount: 1024,
             getByteFrequencyData: byBin,
             getByteTimeDomainData: (arr: Uint8Array) => arr.fill(128),
             connect: vi.fn(),
-          })),
-          createBiquadFilter: vi.fn(() => ({
-            type: '',
-            frequency: { value: 0 },
-            gain: { value: 0 },
-            connect: vi.fn(),
-          })),
-          createGain: vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn() })),
-          destination: {},
-          resume: vi.fn(async () => undefined),
-        }) as unknown as AudioContext,
+          }),
+        }),
     });
     void engine.playQueue([makeTrack(1)], 0, 'off', false);
     const spectrum = engine.getSpectrum();
@@ -386,14 +491,17 @@ describe('WebAudioEngine (QYP3-010)', () => {
     expect(await engine.recoverFlac(makeTrack(1, 'https://example.com/a.flac'))).toBe(false);
   });
 
-  it('volume goes to gain node when the graph exists', () => {
+  it('volume goes to the output gain node when the graph exists', () => {
     const { engine, ctx } = makeEngine();
     void engine.playQueue([makeTrack(1)], 0, 'off', false);
     engine.setVolume(0.5);
-    const gain = (ctx as unknown as { createGain: ReturnType<typeof vi.fn> }).createGain.mock.results[0]?.value as
-      | { gain: { value: number } }
-      | undefined;
-    expect(gain?.gain.value).toBe(0.5);
+    // QYP3-068v：图里现在有多个 gain（preamp / 声场矩阵 / 交叉馈送），
+    // 音量是**最后一个**（削波保护之后、destination 之前）
+    const gains = (ctx as unknown as { createGain: ReturnType<typeof vi.fn> }).createGain.mock.results.map(
+      (r) => r.value as { gain: { value: number } }
+    );
+    expect(gains.length).toBeGreaterThan(1);
+    expect(gains.at(-1)?.gain.value).toBe(0.5);
   });
 
   it('resumes a suspended AudioContext on initial play (QYP3-031)', async () => {
