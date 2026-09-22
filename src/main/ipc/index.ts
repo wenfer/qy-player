@@ -114,7 +114,12 @@ import {
 import { MusicSpectrumService } from '../modules/music-spectrum';
 import { registerAudioSourceProvider } from '../modules/playback-engine/audio-url';
 import { mpvAudioFilterFromEq, sanitizeEqGains } from '../modules/playback-engine/equalizer';
-import { mpvAudioChainFromFx, sanitizeAudioFx } from '../modules/playback-engine/audio-fx';
+import {
+  mpvAudioChainFromFx,
+  sanitizeAudioFx,
+  type AudioChainPayload,
+} from '../modules/playback-engine/audio-fx';
+import { createAfHotUpdate } from '../modules/playback-engine/af-hot-update';
 import { normalizeReplayGain, type ReplayGainChain } from '../modules/playback-engine/replaygain';
 import {
   clearMusicSession,
@@ -1038,7 +1043,6 @@ export function registerIpcHandlers(
     }
   );
 
-
   ipcMain.handle(IPC_CHANNELS.SKIP_SEGMENTS.GET_SETTINGS, () => {
     return ok({
       skipIntro: storage.getConfig('playback.skipIntro') !== 'false',
@@ -1297,8 +1301,13 @@ export function registerIpcHandlers(
   }
 
   // Player handlers
-  // mpv af 复位跟踪（音乐 af 跨 loadfile 持久，视频加载需复位）
-  let mpvAfWasSet = false;
+  /**
+   * af / replaygain 都是跨 loadfile 持久的 mpv 属性：音乐加载时设过，视频加载
+   * 就必须复位。这个标记的语义是**"音乐链路动过"**，不是"af 现在非空"——
+   * 用户把音效拖回全直通（af 变成空链）之后 `replaygain` 可能还挂着，按 af
+   * 是否为空来判定会把 ReplayGain 漏到视频上（音量莫名被改）。
+   */
+  let musicChainApplied = false;
   /**
    * loadfile 时设下的 ReplayGain（QYP3-068v）。音效热更新要原样带回去——
    * `applyMusicAudioChain` 收到 null 会顺手设 `replaygain=no`，等于调一次
@@ -1307,31 +1316,28 @@ export function registerIpcHandlers(
   let lastMusicReplayGain: ReplayGainChain | null = null;
 
   // ---- 音效链热更新（QYP3-068v）----
-  // mpv 每次改 af 都会**重建整条滤镜链并 flush 缓冲**，拖动滑块时每秒几十次
-  // 就是连续爆音。所以：链字符串没变就不发（省掉无谓重建），变了才 trailing
-  // 防抖。代价是 mpv 引擎下效果实际是"松手生效"，面板上会标注。
-  // renderer 内置引擎不走这里——它直接改 AudioParam，是真实的实时。
+  // 防抖与"没变就不发"的判定住在 af-hot-update（那段状态机有两条隐蔽的
+  // 错误分支，独立成单元才有用例）。这里只负责门禁与 mpv 调用。
   const MPV_AF_DEBOUNCE_MS = 120;
-  let lastMpvAf: string | null = null;
-  let mpvAfTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const applyMpvAfNow = (chain: string): void => {
-    lastMpvAf = chain;
-    mpvAfWasSet = chain !== '';
+  const afHot = createAfHotUpdate(MPV_AF_DEBOUNCE_MS, (chain) => {
+    musicChainApplied = true;
     void player.applyMusicAudioChain(chain, lastMusicReplayGain);
+  });
+
+  /** 视频加载：把音乐留下的 af / replaygain 一起复位（afHot 也一起归零）。 */
+  const clearMusicChain = (): void => {
+    afHot.reset();
+    musicChainApplied = false;
+    void player.applyMusicAudioChain('', null);
   };
 
   ipcMain.handle(IPC_CHANNELS.MUSIC.APPLY_AUDIO_CHAIN, (_event, raw: unknown) => {
     // 门禁：af 跨 loadfile 持久，没有这道门就会把音效挂到视频上
     if (!isMpvMusicActive()) return ok({ applied: false, reason: 'not-music-session' });
     const chain = mpvAudioChainFromFx(sanitizeAudioFx(raw)) ?? '';
-    if (chain === lastMpvAf) return ok({ applied: false, reason: 'unchanged' });
-    if (mpvAfTimer) clearTimeout(mpvAfTimer);
-    mpvAfTimer = setTimeout(() => {
-      mpvAfTimer = null;
-      applyMpvAfNow(chain);
-    }, MPV_AF_DEBOUNCE_MS);
-    return ok({ applied: true, debounced: true });
+    return afHot.request(chain) === 'unchanged'
+      ? ok({ applied: false, reason: 'unchanged' })
+      : ok({ applied: true, debounced: true });
   });
 
   ipcMain.handle(IPC_CHANNELS.PLAYER.LOAD_FILE, async (
@@ -1341,16 +1347,7 @@ export function registerIpcHandlers(
     httpHeaders?: string,
     mediaContext?: { mediaType: string; mediaId: string; title?: string; seriesName?: string; seasonNumber?: number; episodeNumber?: number; mediaSourceId?: string; serverId?: number },
     streamSessionId?: string,
-    audioChain?: {
-      /** 完整音效链（QYP3-068v）；缺省时回退到 eqGains 的 10 段映射。 */
-      fx?: unknown;
-      eqGains?: number[];
-      /** ReplayGain 模式（off/track/album）＋高级项（P2）。 */
-      replaygain?: string;
-      replaygainPreamp?: number;
-      replaygainFallback?: number;
-      replaygainClip?: boolean;
-    }
+    audioChain?: AudioChainPayload
   ) => {
     if (!player.isReady()) {
       await player.start();
@@ -1359,23 +1356,18 @@ export function registerIpcHandlers(
     // 音乐音频链（QYP3-012 + P2 ReplayGain 高级）：仅音乐加载时设置，
     // 视频加载复位（af 跨 loadfile 持久）。必须在 mpv 启动后设置。
     if (audioChain) {
-      // QYP3-068v：优先用完整音效链（fx）。旧客户端/旧数据只带 eqGains，
-      // 回退到 10 段图形 EQ 的映射。
+      // QYP3-068v：优先用完整音效链（fx）。老配置/回滚场景只带 eqGains（旧的
+      // 10 段图形 EQ），回退到它的映射——两条路都不带 fx 键时才有意义。
       const chain = audioChain.fx
         ? (mpvAudioChainFromFx(sanitizeAudioFx(audioChain.fx)) ?? '')
         : (mpvAudioFilterFromEq(sanitizeEqGains(audioChain.eqGains)) ?? '');
       lastMusicReplayGain = normalizeReplayGain(audioChain);
-      lastMpvAf = chain;
-      void player.applyMusicAudioChain(lastMpvAf, lastMusicReplayGain);
-      mpvAfWasSet = true;
+      afHot.applyNow(chain);
       setMpvMusicActive(true); // QYP3-026：音乐会话（媒体键/状态转发按音乐走）
       // QYP3-032：音乐经 mpv 解码时压掉 mpv 窗口（含内嵌封面 video 轨）
       void player.setVideoWindowForMusic(true);
     } else {
-      if (mpvAfWasSet) {
-        void player.applyMusicAudioChain('', null);
-        mpvAfWasSet = false;
-      }
+      if (musicChainApplied) clearMusicChain();
       // QYP3-026：非音乐加载即结束音乐会话。否则音乐控制条会一直挂在
       // 视频上，且 renderer 引擎的音乐还在继续出声（两者同时播放）。
       if (isMusicSessionActive()) {

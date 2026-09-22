@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/ipc-channels';
 import type { MediaContext } from '../shared/types';
+import type { AudioChainPayload } from '../main/modules/playback-engine/audio-fx';
 
 /** 桌面歌词窗口事件（main → 歌词窗口）。 */
 export interface DeskLyricsEvent {
@@ -37,13 +38,7 @@ const electronAPI = {
     httpHeaders?: string,
     mediaContext?: MediaContext,
     streamSessionId?: string,
-    audioChain?: {
-      eqGains?: number[];
-      replaygain?: string;
-      replaygainPreamp?: number;
-      replaygainFallback?: number;
-      replaygainClip?: boolean;
-    }
+    audioChain?: AudioChainPayload
   ) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.PLAYER.LOAD_FILE,

@@ -10,6 +10,7 @@ import {
   AUDIO_FX_DEFAULT,
   audioFxFromLegacyEq,
   sanitizeAudioFx,
+  type AudioChainPayload,
   type AudioFxSettings,
 } from '../../main/modules/playback-engine/audio-fx';
 
@@ -648,6 +649,14 @@ interface AudioChainSettings {
 /**
  * 音频链设置读取（QYP3-012 + P2 + QYP3-068v）：音效链 + ReplayGain（模式与
  * 预增益/兜底增益/削波保护）。读不到的项留给主进程默认值。
+ *
+ * **所有音乐侧配置一次读完**（含旧键 `playback.eqGains`）：音效链的迁移要
+ * 用到旧键，两个函数各读一遍就会出现"两次读之间被改掉"的不一致，且白白多
+ * 一个 IPC 往返。音效链单独要用的地方走下面的 `readAudioFxSettings()`。
+ *
+ * 注意 `SETTINGS.GET` 直接返回值、不包 {ok,data}，所以不能读 `.data`
+ * —— 见 utils/read-setting.ts 的说明（QYP3-068v 踩过，mpv 起播的 af 因此
+ * 恒为空、设置页整页显示默认值）。
  */
 async function readAudioChainSettings(): Promise<AudioChainSettings> {
   const empty: AudioChainSettings = {
@@ -659,9 +668,8 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
     replaygainClip: false,
   };
   try {
-    // 注意 `SETTINGS.GET` 直接返回值、不包 {ok,data}，所以不能读 `.data`
-    // —— 见 utils/read-setting.ts 的说明（QYP3-068v 踩过）
-    const [eqValue, rgValue, preampValue, fallbackValue, clipValue] = await Promise.all([
+    const [fxValue, eqValue, rgValue, preampValue, fallbackValue, clipValue] = await Promise.all([
+      readSetting(AUDIO_FX_KEY),
       readSetting('playback.eqGains'),
       readSetting('playback.replaygain'),
       readSetting('playback.replaygainPreamp'),
@@ -673,9 +681,10 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
+    const legacyGains = Array.isArray(eqValue) ? eqValue.map((v) => Number(v) || 0) : null;
     return {
-      audioFx: await readAudioFxSettings(),
-      eqGains: Array.isArray(eqValue) ? eqValue.map((v) => Number(v) || 0) : null,
+      audioFx: resolveAudioFx(fxValue, legacyGains),
+      eqGains: legacyGains,
       replaygain: rg,
       replaygainPreamp: num(preampValue),
       replaygainFallback: num(fallbackValue),
@@ -688,34 +697,26 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
 }
 
 /**
- * 音效链设置（QYP3-068v）。
- *
- * 取代旧的 `playback.eqGains`（10 段纯 dB）：参量 EQ 是它的超集，所以升级
- * 时读不到新键就从旧键迁移一次并写回。**旧键不删**——配置是 KV 没有
- * migration 机制，删了版本回滚就丢用户设置。
+ * 音效链（QYP3-068v）——配置里读不到新键时，**从旧 `playback.eqGains`
+ * 迁移一次并写回**（参量 EQ 是它的超集，旧键不删：配置是 KV 没有 migration
+ * 机制，删了版本回滚就丢用户设置）。
  */
-async function readAudioFxSettings(): Promise<AudioFxSettings> {
-  try {
-    // 同上：不能读 `.data`（QYP3-068v：这里读错过，导致 mpv 起播的 af 恒为空）
-    const [fxValue, legacyValue] = await Promise.all([
-      readSetting(AUDIO_FX_KEY),
-      readSetting('playback.eqGains'),
-    ]);
-    if (fxValue && typeof fxValue === 'object') return sanitizeAudioFx(fxValue);
-    if (Array.isArray(legacyValue)) {
-      const migrated = audioFxFromLegacyEq(legacyValue.map((v) => Number(v) || 0));
-      // 迁移结果即时落盘，避免每次启动重算
-      void window.electronAPI.setSettings(AUDIO_FX_KEY, migrated).catch(() => {});
-      return migrated;
-    }
-    return AUDIO_FX_DEFAULT;
-  } catch {
-    return AUDIO_FX_DEFAULT;
+function resolveAudioFx(fxValue: unknown, legacyGains: number[] | null): AudioFxSettings {
+  if (fxValue && typeof fxValue === 'object') return sanitizeAudioFx(fxValue);
+  if (legacyGains) {
+    const migrated = audioFxFromLegacyEq(legacyGains);
+    void window.electronAPI.setSettings(AUDIO_FX_KEY, migrated).catch(() => {});
+    return migrated;
   }
+  return AUDIO_FX_DEFAULT;
+}
+
+async function readAudioFxSettings(): Promise<AudioFxSettings> {
+  return (await readAudioChainSettings()).audioFx;
 }
 
 /** 音频链 → playerLoadFile 第 6 参数（未设置的模式不发键，主进程用默认值）。 */
-function audioChainPayload(chain: AudioChainSettings): Record<string, unknown> {
+function audioChainPayload(chain: AudioChainSettings): AudioChainPayload {
   return {
     // QYP3-068v：完整音效链（mpv 侧据此生成 af）；eqGains 保留作兼容回退
     fx: chain.audioFx,
@@ -915,9 +916,6 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     resolveFailedIds.clear();
     const token = ++playToken;
     const startQueueId = queueIdFor(start, startIndex);
-    // 起播时读一次音效链：内置引擎在此灌进音频图，mpv 侧随 loadfile 的
-    // audioChain 下发（两者各走各的路，都由主进程/引擎自己判要不要处理）
-    let startFx = AUDIO_FX_DEFAULT;
     try {
       const resolution = (await window.electronAPI.resolvePlayback(
         refOfTrack(start)
@@ -979,8 +977,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         }
         if (token !== playToken) return;
         const engineInstance = getEngine();
-        // QYP3-068v：起播时把当前音效链灌进引擎（节点常驻，会话中改也走同一条路）
-        startFx = await readAudioFxSettings();
+        // QYP3-068v：起播时把当前音效链灌进引擎（节点常驻，会话中改也走同一条路）。
+        // mpv 分支不用这里——它把整条链塞进 loadfile 的 audioChain，由主进程生成 af
+        const startFx = await readAudioFxSettings();
         engineInstance.setAudioFx(startFx);
         // 应用当前音量（换曲不重置用户设定的音量）
         engineInstance.setVolume(get().volume / 100);

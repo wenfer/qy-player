@@ -61,6 +61,27 @@ export interface AudioFxSettings {
   crossfeed: number;
 }
 
+/**
+ * `playerLoadFile` 第 6 参：音乐音频链（QYP3-012 + P2 + QYP3-068v）。
+ *
+ * preload 与 main/ipc 两侧共用这一份声明——各自抄一遍必然漂移：QYP3-068v 加
+ * `fx` 时只改了 main 那侧，preload 的类型里没有它，而调用方传的是
+ * `Record<string, unknown>`，编译器一声不吭，读代码的人根本看不出这条通道
+ * 现在会带完整音效链。
+ */
+export interface AudioChainPayload {
+  /** 完整音效链（QYP3-068v）：mpv 侧据此生成 af。 */
+  fx?: AudioFxSettings;
+  /** 旧的 10 段图形 EQ 增益；只在没有 `fx` 时生效（老配置 / 回滚场景）。 */
+  eqGains?: number[];
+  /** ReplayGain 模式（off/track/album）。 */
+  replaygain?: string;
+  /** 以下三项缺省即主进程的默认值（见 `normalizeReplayGain`）。 */
+  replaygainPreamp?: number;
+  replaygainFallback?: number;
+  replaygainClip?: boolean;
+}
+
 /** 段数上限（节点是常驻的，直通也走 buffer 拷贝，老机有 CPU 预算）。 */
 export const AUDIO_FX_MAX_BANDS = 10;
 export const EQ_FREQ_MIN = 20;
@@ -80,7 +101,7 @@ export const CROSSFEED_MAX = 1;
 export const EQ_DEFAULT_Q = 0.7;
 
 /**
- * 默认频段：与 renderer 的 EQ_BANDS / mpv 10 段图形 EQ 一致。
+ * 默认频段：与旧 10 段图形 EQ 的频段表一致（`equalizer.ts` 的映射按它排布）。
  * ≤350Hz 作低架、≥9000Hz 作高架构，中间 peaking —— 与
  * `mpvAudioFilterFromEq`（旧契约）保持同一套意图，迁移时对齐。
  */

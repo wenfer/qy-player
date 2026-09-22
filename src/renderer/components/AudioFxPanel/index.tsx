@@ -12,21 +12,27 @@ import {
 import {
   AUDIO_FX_DEFAULT,
   AUDIO_FX_MAX_BANDS,
+  BALANCE_LIMIT,
+  CROSSFEED_MAX,
   EQ_DEFAULT_Q,
-  EQ_Q_MAX,
-  EQ_Q_MIN,
+  LIMITER_CEILING_MAX,
+  LIMITER_CEILING_MIN,
+  PREAMP_LIMIT,
+  WIDTH_MAX,
+  WIDTH_MIN,
   sanitizeAudioFx,
   type AudioFxSettings,
   type EqBand,
   type EqFilterType,
 } from '../../../main/modules/playback-engine/audio-fx';
+import { EqBandRow, FxRange, ICON_BTN, ROW } from './controls';
 
 /**
  * 音效面板（QYP3-068v）：参量 EQ + 前置增益 + 削波保护 + 声场三项。
  *
  * 外壳抄 `components/LyricsPanel`（fixed + 卡片 + 头部 + 可滚动内容区，
  * `bottom-40` 让开停靠的播放条），Esc 与焦点陷阱抄
- * `pages/Detail/DeleteMediaDialog`。
+ * `pages/Detail/DeleteMediaDialog`。行内控件（滑块/频段行）在 `./controls`。
  *
  * **改参数 = 立即喂引擎，松手才落盘**（沿用 MusicSettings 的既有模式）：
  * 内置引擎改 AudioParam 是真实时；mpv 改 af 会重建滤镜链，主进程做了防抖，
@@ -37,19 +43,13 @@ import {
 // 两者同时打开时不该互相压住
 const PANEL =
   'fixed left-3 right-3 top-10 bottom-40 z-[55] bg-card/95 backdrop-blur border border-border rounded-xl shadow-lg flex flex-col';
-const ICON_BTN = 'p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-ring';
-const ROW = 'flex items-center gap-1.5';
-const LABEL = 'text-[11px] text-muted-foreground shrink-0';
-const SLIDER = 'accent-primary flex-1 min-w-[80px]';
-
-function freqLabel(freq: number): string {
-  return freq >= 1000 ? `${(freq / 1000).toFixed(freq >= 10000 ? 0 : 1)}k` : `${freq}`;
-}
 
 function balanceLabel(v: number): string {
   if (Math.abs(v) < 0.02) return '居中';
   return v < 0 ? `左 ${Math.round(-v * 100)}%` : `右 ${Math.round(v * 100)}%`;
 }
+
+const signed = (v: number, digits = 1): string => `${v > 0 ? '+' : ''}${v.toFixed(digits)}`;
 
 interface Props {
   onClose: () => void;
@@ -163,7 +163,6 @@ export default function AudioFxPanel({ onClose }: Props) {
     });
     return () => returnFocusRef.current?.focus();
   }, []);
-
 
   const update = useCallback(
     (patch: Partial<AudioFxSettings>, commitNow = false): void => {
@@ -302,94 +301,33 @@ export default function AudioFxPanel({ onClose }: Props) {
             </button>
           </div>
 
-          <div className={ROW}>
-            <span className={LABEL}>前置增益</span>
-            <input
-              type="range"
-              min={-12}
-              max={12}
-              step={0.5}
-              value={fx.eq.preamp}
-              disabled={!fx.enabled || !fx.eq.enabled}
-              onChange={(e) => update({ eq: { ...fx.eq, preamp: Number(e.target.value) } })}
-              onMouseUp={() => void commit(fxRef.current)}
-              onTouchEnd={() => void commit(fxRef.current)}
-              onKeyUp={() => void commit(fxRef.current)}
-              className={SLIDER}
-              aria-label="前置增益"
-            />
-            <span className="w-14 text-right text-[11px] tabular-nums">
-              {fx.eq.preamp > 0 ? '+' : ''}
-              {fx.eq.preamp.toFixed(1)} dB
-            </span>
-          </div>
+          <FxRange
+            label="前置增益"
+            value={fx.eq.preamp}
+            min={-PREAMP_LIMIT}
+            max={PREAMP_LIMIT}
+            step={0.5}
+            disabled={!fx.enabled || !fx.eq.enabled}
+            display={`${signed(fx.eq.preamp)} dB`}
+            ariaLabel="前置增益"
+            onChange={(v) => update({ eq: { ...fx.eq, preamp: v } })}
+            onCommit={() => void commit(fxRef.current)}
+          />
 
           <div className="mt-1.5 space-y-1.5">
             {fx.eq.bands.map((band, i) => (
-              // 窄屏（音乐模式只有 380px）必须一行放得下：频率用数字输入
-              // （对数滑杆要占掉大半行），增益留滑杆（最常调的就是它）。
-              <div key={i} className={ROW}>
-                <input
-                  type="number"
-                  min={20}
-                  max={20000}
-                  step={10}
-                  value={band.freq}
-                  disabled={!fx.enabled || !fx.eq.enabled}
-                  onChange={(e) => {
-                    // 输入中途（如想打 1000 时的 "1"）不提交，否则会被夹到下限
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v) && v >= 20 && v <= 20000) updateBand(i, { freq: v });
-                  }}
-                  onBlur={() => void commit(fxRef.current)}
-                  className="w-16 bg-input border border-border rounded px-1 py-0.5 text-[11px] tabular-nums focus-ring"
-                  aria-label={`第 ${i + 1} 段频率 Hz`}
-                  title={`${band.freq} Hz（${freqLabel(band.freq)}）`}
-                />
-                <input
-                  type="range"
-                  min={-12}
-                  max={12}
-                  step={0.5}
-                  value={band.gain}
-                  disabled={!fx.enabled || !fx.eq.enabled}
-                  onChange={(e) => updateBand(i, { gain: Number(e.target.value) })}
-                  onMouseUp={() => void commit(fxRef.current)}
-                  onTouchEnd={() => void commit(fxRef.current)}
-                  onKeyUp={() => void commit(fxRef.current)}
-                  className={SLIDER}
-                  aria-label={`第 ${i + 1} 段增益`}
-                />
-                <span className="w-9 text-right text-[11px] tabular-nums">
-                  {band.gain > 0 ? '+' : ''}
-                  {band.gain.toFixed(1)}
-                </span>
-                <input
-                  type="range"
-                  min={EQ_Q_MIN}
-                  max={EQ_Q_MAX}
-                  step={0.1}
-                  value={band.q}
-                  disabled={!fx.enabled || !fx.eq.enabled}
-                  onChange={(e) => updateBand(i, { q: Number(e.target.value) })}
-                  onMouseUp={() => void commit(fxRef.current)}
-                  onTouchEnd={() => void commit(fxRef.current)}
-                  onKeyUp={() => void commit(fxRef.current)}
-                  className="w-10 accent-primary shrink-0"
-                  aria-label={`第 ${i + 1} 段 Q 值`}
-                  title={`Q ${band.q.toFixed(1)}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeBand(i)}
-                  disabled={!fx.enabled}
-                  className={ICON_BTN}
-                  aria-label={`删除第 ${i + 1} 段`}
-                  title="删除该段"
-                >
-                  <X size={12} />
-                </button>
-              </div>
+              <EqBandRow
+                key={i}
+                index={i}
+                band={band}
+                disabled={!fx.enabled || !fx.eq.enabled}
+                removeDisabled={!fx.enabled}
+                onFreqChange={(freq) => updateBand(i, { freq })}
+                onGainChange={(gain) => updateBand(i, { gain })}
+                onQChange={(q) => updateBand(i, { q })}
+                onRemove={() => removeBand(i)}
+                onCommit={() => void commit(fxRef.current)}
+              />
             ))}
             {fx.eq.bands.length === 0 ? (
               <p className="text-[11px] text-muted-foreground">没有频段，点「添加频段」开始。</p>
@@ -410,83 +348,59 @@ export default function AudioFxPanel({ onClose }: Props) {
             <span className="text-xs font-medium">削波保护</span>
             <span className="text-[10px] text-muted-foreground">抬起增益后压住爆音</span>
           </label>
-          <div className={ROW}>
-            <span className={LABEL}>天花板</span>
-            <input
-              type="range"
-              min={-6}
-              max={0}
-              step={0.5}
-              value={fx.limiter.ceiling}
-              disabled={!fx.enabled || !fx.limiter.enabled}
-              onChange={(e) => update({ limiter: { ...fx.limiter, ceiling: Number(e.target.value) } })}
-              onMouseUp={() => void commit(fxRef.current)}
-              onTouchEnd={() => void commit(fxRef.current)}
-              onKeyUp={() => void commit(fxRef.current)}
-              className={SLIDER}
-              aria-label="削波保护天花板"
-            />
-            <span className="w-14 text-right text-[11px] tabular-nums">{fx.limiter.ceiling.toFixed(1)} dB</span>
-          </div>
+          <FxRange
+            label="天花板"
+            value={fx.limiter.ceiling}
+            min={LIMITER_CEILING_MIN}
+            max={LIMITER_CEILING_MAX}
+            step={0.5}
+            disabled={!fx.enabled || !fx.limiter.enabled}
+            display={`${fx.limiter.ceiling.toFixed(1)} dB`}
+            ariaLabel="削波保护天花板"
+            onChange={(v) => update({ limiter: { ...fx.limiter, ceiling: v } })}
+            onCommit={() => void commit(fxRef.current)}
+          />
         </section>
 
         {/* ---- 声场 ---- */}
         <section className={fx.enabled ? '' : 'opacity-50'}>
           <p className="text-xs font-medium mb-1">声场</p>
-          <div className={ROW}>
-            <span className={LABEL}>宽度</span>
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.05}
-              value={fx.width}
-              disabled={!fx.enabled}
-              onChange={(e) => update({ width: Number(e.target.value) })}
-              onMouseUp={() => void commit(fxRef.current)}
-              onTouchEnd={() => void commit(fxRef.current)}
-              onKeyUp={() => void commit(fxRef.current)}
-              className={SLIDER}
-              aria-label="立体声宽度"
-            />
-            <span className="w-14 text-right text-[11px] tabular-nums">{fx.width.toFixed(2)}</span>
-          </div>
-          <div className={ROW}>
-            <span className={LABEL}>平衡</span>
-            <input
-              type="range"
-              min={-1}
-              max={1}
-              step={0.05}
-              value={fx.balance}
-              disabled={!fx.enabled}
-              onChange={(e) => update({ balance: Number(e.target.value) })}
-              onMouseUp={() => void commit(fxRef.current)}
-              onTouchEnd={() => void commit(fxRef.current)}
-              onKeyUp={() => void commit(fxRef.current)}
-              className={SLIDER}
-              aria-label="声道平衡"
-            />
-            <span className="w-14 text-right text-[11px] tabular-nums">{balanceLabel(fx.balance)}</span>
-          </div>
-          <div className={ROW}>
-            <span className={LABEL}>交叉馈送</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={fx.crossfeed}
-              disabled={!fx.enabled}
-              onChange={(e) => update({ crossfeed: Number(e.target.value) })}
-              onMouseUp={() => void commit(fxRef.current)}
-              onTouchEnd={() => void commit(fxRef.current)}
-              onKeyUp={() => void commit(fxRef.current)}
-              className={SLIDER}
-              aria-label="耳机交叉馈送"
-            />
-            <span className="w-14 text-right text-[11px] tabular-nums">{Math.round(fx.crossfeed * 100)}%</span>
-          </div>
+          <FxRange
+            label="宽度"
+            value={fx.width}
+            min={WIDTH_MIN}
+            max={WIDTH_MAX}
+            step={0.05}
+            disabled={!fx.enabled}
+            display={fx.width.toFixed(2)}
+            ariaLabel="立体声宽度"
+            onChange={(v) => update({ width: v })}
+            onCommit={() => void commit(fxRef.current)}
+          />
+          <FxRange
+            label="平衡"
+            value={fx.balance}
+            min={-BALANCE_LIMIT}
+            max={BALANCE_LIMIT}
+            step={0.05}
+            disabled={!fx.enabled}
+            display={balanceLabel(fx.balance)}
+            ariaLabel="声道平衡"
+            onChange={(v) => update({ balance: v })}
+            onCommit={() => void commit(fxRef.current)}
+          />
+          <FxRange
+            label="交叉馈送"
+            value={fx.crossfeed}
+            min={0}
+            max={CROSSFEED_MAX}
+            step={0.05}
+            disabled={!fx.enabled}
+            display={`${Math.round(fx.crossfeed * 100)}%`}
+            ariaLabel="耳机交叉馈送"
+            onChange={(v) => update({ crossfeed: v })}
+            onCommit={() => void commit(fxRef.current)}
+          />
         </section>
 
         {/* ---- 预设 ---- */}
