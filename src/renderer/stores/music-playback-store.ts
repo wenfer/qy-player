@@ -98,9 +98,11 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   prev: () => Promise<void>;
   seek: (position: number) => void;
   setVolume: (volume: number) => void;
-  setRepeat: (mode: RepeatMode) => void;
-  toggleShuffle: () => void;
-  /** 播放模式一键循环（QYP3-068t）：顺序 → 列表循环 → 单曲循环 → 随机。 */
+  /**
+   * 播放模式一键循环（QYP3-068t）：顺序 → 列表循环 → 单曲循环 → 随机。
+   * **改播放模式只有这一个入口**——模式改动必须同时落到引擎队列上
+   * （`setQueueMode`），拆成 setRepeat/toggleShuffle 就总有漏掉同步的口子。
+   */
   cyclePlayMode: () => void;
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
@@ -231,16 +233,6 @@ function pushDeskLyrics(position: number, isPlaying: boolean): void {
     position,
     isPlaying,
   });
-}
-
-/** 循环模式顺序（QYP3-068g）：off → all → one → off。 */
-export function nextRepeat(mode: 'off' | 'all' | 'one'): 'off' | 'all' | 'one' {
-  return mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off';
-}
-
-/** 循环模式的用户可读文案（播放条/浮窗共用）。 */
-export function repeatLabel(mode: 'off' | 'all' | 'one'): string {
-  return mode === 'all' ? '列表循环' : mode === 'one' ? '单曲循环' : '顺序播放';
 }
 
 /**
@@ -1170,23 +1162,12 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     else if (s.engine === 'mpv') void window.electronAPI.playerControl('volume', clamped);
   },
 
-  setRepeat: (mode) => {
-    set({ repeat: mode });
-    // QYP3-068t：必须走 setQueueMode——`queueState` 是只读快照，往它上面写字段
-    // 是静默空操作（曾让会话中的循环/随机切换对内置引擎完全无效）
-    engineSingleton?.setQueueMode(mode, get().shuffle);
-  },
-
-  toggleShuffle: () => {
-    const next = !get().shuffle;
-    set({ shuffle: next });
-    engineSingleton?.setQueueMode(get().repeat, next);
-  },
-
   cyclePlayMode: () => {
     const s = get();
     const next = playModeState(nextPlayMode(playModeOf(s.repeat, s.shuffle)));
     set({ repeat: next.repeat, shuffle: next.shuffle });
+    // 必须走 setQueueMode——`queueState` 是只读快照，往它上面写字段是静默
+    // 空操作（QYP3-068t 修的就是这个：会话中切模式曾对内置引擎完全无效）
     engineSingleton?.setQueueMode(next.repeat, next.shuffle);
   },
 

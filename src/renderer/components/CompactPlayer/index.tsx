@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { ArrowRight, Gauge, Mic2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
-import { useMusicPlaybackStore, playModeLabel, playModeOf, type PlayMode } from '../../stores/music-playback-store';
+import { Gauge, Mic2, Pause, Play, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { useMusicPlaybackStore } from '../../stores/music-playback-store';
 import { useResourceStore } from '../../stores/resource-store';
 import { pressureLabel } from '../../../shared/resource-pressure';
 import SpectrumGraph from '../SpectrumGraph';
+import PlayModeButton from '../PlayModeButton';
 import LyricsPanel from '../LyricsPanel';
 
 /**
@@ -28,14 +29,6 @@ function fmt(sec: number): string {
 const BTN =
   'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent focus-ring flex-shrink-0';
 
-/** 一维播放模式的图标：顺序 → 列表循环 → 单曲循环 → 随机。 */
-function playModeIcon(mode: PlayMode) {
-  if (mode === 'repeat-one') return <Repeat1 size={15} />;
-  if (mode === 'repeat-all') return <Repeat size={15} />;
-  if (mode === 'shuffle') return <Shuffle size={15} />;
-  return <ArrowRight size={15} />;
-}
-
 export default function CompactPlayer() {
   const playback = useMusicPlaybackStore();
   const pressure = useResourceStore((s) => s.pressure);
@@ -47,8 +40,6 @@ export default function CompactPlayer() {
 
   const duration = playback.duration;
   const displayPos = dragPos ?? playback.position;
-  // 循环 + 随机在 UI 上是一维四态（QYP3-068t），存储层仍是两个字段
-  const playMode = playModeOf(playback.repeat, playback.shuffle);
 
   const commitSeek = (): void => {
     if (dragPos !== null) {
@@ -119,16 +110,7 @@ export default function CompactPlayer() {
         <button type="button" onClick={() => void playback.next()} aria-label="下一曲" className={BTN}>
           <SkipForward size={16} />
         </button>
-        <button
-          type="button"
-          onClick={playback.cyclePlayMode}
-          aria-label="播放模式"
-          aria-pressed={playMode !== 'sequence'}
-          title={playModeLabel(playMode)}
-          className={`${BTN} ${playMode !== 'sequence' ? 'text-primary' : ''}`}
-        >
-          {playModeIcon(playMode)}
-        </button>
+        <PlayModeButton className={BTN} size={15} />
         <button
           type="button"
           onClick={() => setShowLyrics((v) => !v)}

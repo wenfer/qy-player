@@ -77,6 +77,27 @@ describe('visualizer mode resolution (QYP3-050)', () => {
   });
 });
 
+describe('mini bar play-mode button (QYP3-068u)', () => {
+  function mountPlaying(): void {
+    useMusicPlaybackStore.setState({ engine: 'mpv', current: serverTrack, isPlaying: true });
+    render(<MusicMiniBar />);
+  }
+
+  it('has one merged play-mode button instead of separate repeat + shuffle', async () => {
+    mountPlaying();
+    await screen.findByText('以父之名');
+    // 循环与随机合并（QYP3-068t/068u）：播放条与浮窗同一套控件
+    expect(screen.queryByLabelText('循环模式')).toBeNull();
+    expect(screen.queryByLabelText('随机播放')).toBeNull();
+
+    const btn = screen.getByLabelText('播放模式');
+    expect(btn.getAttribute('title')).toBe('顺序播放');
+    fireEvent.click(btn);
+    expect(useMusicPlaybackStore.getState().repeat).toBe('all');
+    expect(screen.getByLabelText('播放模式').getAttribute('title')).toBe('列表循环');
+  });
+});
+
 describe('mini bar spectrum toggle (QYP3-048)', () => {
   function mountPlaying(): void {
     useMusicPlaybackStore.setState({ engine: 'mpv', current: serverTrack, isPlaying: true });

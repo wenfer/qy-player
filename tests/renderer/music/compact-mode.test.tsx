@@ -3,12 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompactPlayer from '../../../src/renderer/components/CompactPlayer';
 import {
-  nextRepeat,
   nextPlayMode,
   playModeLabel,
   playModeOf,
   playModeState,
-  repeatLabel,
   useMusicPlaybackStore,
 } from '../../../src/renderer/stores/music-playback-store';
 import { useCompactModeStore } from '../../../src/renderer/stores/compact-mode-store';
@@ -93,18 +91,6 @@ describe('compact mode store (QYP3-035)', () => {
 });
 
 describe('compact player helpers (QYP3-035)', () => {
-  it('cycles the repeat mode off → all → one → off', () => {
-    expect(nextRepeat('off')).toBe('all');
-    expect(nextRepeat('all')).toBe('one');
-    expect(nextRepeat('one')).toBe('off');
-  });
-
-  it('labels the repeat mode in Chinese', () => {
-    expect(repeatLabel('off')).toBe('顺序播放');
-    expect(repeatLabel('all')).toBe('列表循环');
-    expect(repeatLabel('one')).toBe('单曲循环');
-  });
-
   it('folds repeat + shuffle into one four-state play mode (QYP3-068t)', () => {
     expect(playModeOf('off', false)).toBe('sequence');
     expect(playModeOf('all', false)).toBe('repeat-all');

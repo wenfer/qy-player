@@ -6,8 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Activity, Heart, Mic2, Minimize2, Moon, Music2, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, X } from 'lucide-react';
-import { nextRepeat, repeatLabel } from '../../stores/music-playback-store';
+import { Activity, Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
   useMusicPlaybackStore,
@@ -16,6 +15,7 @@ import { useCompactModeStore } from '../../stores/compact-mode-store';
 import { useAppModeStore } from '../../stores/app-mode-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useToastStore } from '../../stores/toast-store';
+import PlayModeButton from '../PlayModeButton';
 import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
 
@@ -375,26 +375,7 @@ export default function MusicMiniBar() {
             >
               <Heart size={16} />
             </button>
-            <button
-              type="button"
-              onClick={() => playback.setRepeat(nextRepeat(playback.repeat))}
-              aria-label="循环模式"
-              aria-pressed={playback.repeat !== 'off'}
-              title={repeatLabel(playback.repeat)}
-              className={`${ICON_BTN} ${playback.repeat !== 'off' ? 'text-primary' : ''}`}
-            >
-              {playback.repeat === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
-            </button>
-            <button
-              type="button"
-              onClick={playback.toggleShuffle}
-              aria-label="随机播放"
-              aria-pressed={playback.shuffle}
-              title={playback.shuffle ? '随机播放：开' : '随机播放：关'}
-              className={`${ICON_BTN} ${playback.shuffle ? 'text-primary' : ''}`}
-            >
-              <Shuffle size={16} />
-            </button>
+            <PlayModeButton className={ICON_BTN} />
             <button
               type="button"
               onClick={toggleSpectrum}

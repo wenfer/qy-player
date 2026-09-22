@@ -1778,6 +1778,14 @@
   变化（修前必然固定第 2 首）
 - 验证：typecheck 双配置 + test:render 全绿（新增播放模式纯函数、引擎 setShuffle、
   标题栏还原入口用例）
+- 追加（QYP3-068u，用户要"播放条也一样"）：把按钮抽成共用组件
+  `components/PlayModeButton`（图标/文案/行为一份，`className`+`size` 由调用方给），
+  `MusicMiniBar` 也换掉那两个键；store 侧借机收敛成**只有 `cyclePlayMode`
+  一个写入口**，删掉已无人用的 `setRepeat`/`toggleShuffle`/`nextRepeat`/
+  `repeatLabel`（拆两个 setter 就总有漏掉 `setQueueMode` 同步的口子）
+- 验证（068u）：CDP 实测音乐模式 380×740 下迷你条只剩 1 个「播放模式」，
+  连点 3 次 顺序播放 → 列表循环 → 单曲循环 → 随机播放；用例 25 例（迷你条
+  新增"没有独立循环/随机按钮 + 点一下走一态"）全绿
 
 ---
 

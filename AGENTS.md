@@ -125,9 +125,12 @@
   （`COMPACT_WIDTH/HEIGHT`，现为 **400×240**，`setResizable(false)`——尺寸
   是常量算出来的，不是用户可拖的），渲染层切到 `components/CompactPlayer`
   （复用 `SpectrumGraph`；浮窗里**只有标题栏那一个**「还原窗口」，界面内不再
-  放第二个入口——QYP3-068t。播放模式与随机在浮窗里合并成**一个**按钮：
-  `playModeOf`/`nextPlayMode`/`playModeState` 是一维四态（顺序 → 列表循环 →
-  单曲循环 → 随机）与存储层两字段的唯一换算处，UI 别自己拼图标与文案）。**必须同窗
+  放第二个入口——QYP3-068t）。**播放模式在浮窗与播放条上都是同一个按钮**
+  （`components/PlayModeButton`，两处共用，只是尺寸/间距不同）：循环与随机
+  合并成一维四态（顺序 → 列表循环 → 单曲循环 → 随机），
+  `playModeOf`/`nextPlayMode`/`playModeState` 是它与存储层两字段的唯一换算处，
+  store 侧**只有 `cyclePlayMode` 一个写入口**（拆成 setRepeat/toggleShuffle
+  就总有漏掉引擎同步的口子）——UI 别自己拼图标与文案。**必须同窗
   改尺寸**：播放状态与 30fps 频谱都在主窗口 renderer 里（`getSpectrum` 读同一个
   WebAudioEngine），另开 BrowserWindow 就得把频谱跨进程转发，老机 CPU 不划算。
   几何全在 `ui-shell/compact-window.ts`：进入前记住 bounds/resizable/置顶，
