@@ -145,6 +145,32 @@ describe('PlaybackQueue (QYP3-010)', () => {
     expect(q.current?.id).toBe(3);
     expect(q.next()).toBeNull();
   });
+
+  it('setShuffle re-orders a live queue instead of walking it in order (QYP3-068t)', () => {
+    const q = new PlaybackQueue();
+    // 固定随机源：让洗牌结果可预测（Fisher-Yates 每次取 0 号位交换）
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      q.setQueue([makeTrack(1), makeTrack(2), makeTrack(3), makeTrack(4)], 0);
+      q.setShuffle(true);
+      // 当前曲仍是第 1 首，但后续顺序不再是 2,3,4
+      expect(q.current?.id).toBe(1);
+      const seen = [q.next()?.id, q.next()?.id, q.next()?.id];
+      expect(new Set(seen).size).toBe(3); // 一轮之内不重复
+      expect(seen).not.toEqual([2, 3, 4]);
+    } finally {
+      rand.mockRestore();
+    }
+  });
+
+  it('setShuffle(false) puts next() back on the sequential order', () => {
+    const q = new PlaybackQueue();
+    q.shuffle = true;
+    q.setQueue([makeTrack(1), makeTrack(2), makeTrack(3)], 0);
+    q.setShuffle(false);
+    expect(q.next()?.id).toBe(2);
+    expect(q.next()?.id).toBe(3);
+  });
 });
 
 /** 会记录连线的假上下文：用来钉住"analyser 必须在链路上"。 */

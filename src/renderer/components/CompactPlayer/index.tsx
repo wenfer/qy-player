@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Gauge, Maximize2, Mic2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
-import { useMusicPlaybackStore, nextRepeat, repeatLabel } from '../../stores/music-playback-store';
-import { useCompactModeStore } from '../../stores/compact-mode-store';
+import { ArrowRight, Gauge, Mic2, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { useMusicPlaybackStore, playModeLabel, playModeOf, type PlayMode } from '../../stores/music-playback-store';
 import { useResourceStore } from '../../stores/resource-store';
 import { pressureLabel } from '../../../shared/resource-pressure';
 import SpectrumGraph from '../SpectrumGraph';
@@ -12,7 +11,11 @@ import LyricsPanel from '../LyricsPanel';
  *
  * 与主界面**同一个 renderer**，所以播放状态与频谱直接读 `useMusicPlaybackStore`
  * （`getSpectrum` 就是同一个 WebAudioEngine），零跨进程同步。
- * 控件：频谱图 / 进度 / 上一曲 / 暂停 / 下一曲 / 循环模式 / 随机 / 音量 / 还原。
+ * 控件：频谱图 / 进度 / 上一曲 / 暂停 / 下一曲 / 播放模式 / 歌词 / 音量。
+ *
+ * QYP3-068t：①浮窗里**只留标题栏那一个**「还原窗口」——频谱卡片头部原来还有个
+ * 同功能按钮（就在歌名右边），两个入口纯属重复；②循环与随机合并成**一个**
+ * 播放模式按钮（顺序 → 列表循环 → 单曲循环 → 随机），控制行少一个键。
  */
 
 function fmt(sec: number): string {
@@ -25,9 +28,16 @@ function fmt(sec: number): string {
 const BTN =
   'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent focus-ring flex-shrink-0';
 
+/** 一维播放模式的图标：顺序 → 列表循环 → 单曲循环 → 随机。 */
+function playModeIcon(mode: PlayMode) {
+  if (mode === 'repeat-one') return <Repeat1 size={15} />;
+  if (mode === 'repeat-all') return <Repeat size={15} />;
+  if (mode === 'shuffle') return <Shuffle size={15} />;
+  return <ArrowRight size={15} />;
+}
+
 export default function CompactPlayer() {
   const playback = useMusicPlaybackStore();
-  const exit = useCompactModeStore((s) => s.exit);
   const pressure = useResourceStore((s) => s.pressure);
   const powerSave = useResourceStore((s) => s.powerSave);
   // 拖动进度时先本地跟手，松手才真正 seek（避免 mpv 引擎被连续 seek 刷屏）
@@ -37,7 +47,8 @@ export default function CompactPlayer() {
 
   const duration = playback.duration;
   const displayPos = dragPos ?? playback.position;
-  const repeat = playback.repeat;
+  // 循环 + 随机在 UI 上是一维四态（QYP3-068t），存储层仍是两个字段
+  const playMode = playModeOf(playback.repeat, playback.shuffle);
 
   const commitSeek = (): void => {
     if (dragPos !== null) {
@@ -64,17 +75,6 @@ export default function CompactPlayer() {
         isPlaying={playback.isPlaying}
         title={playback.current?.title ?? '未在播放'}
         artist={playback.current?.artist ?? null}
-        headerExtra={
-          <button
-            type="button"
-            onClick={exit}
-            aria-label="还原窗口"
-            title="还原窗口"
-            className={BTN}
-          >
-            <Maximize2 size={13} />
-          </button>
-        }
       />
 
       {/* 进度 */}
@@ -121,23 +121,13 @@ export default function CompactPlayer() {
         </button>
         <button
           type="button"
-          onClick={() => playback.setRepeat(nextRepeat(repeat))}
-          aria-label="循环模式"
-          aria-pressed={repeat !== 'off'}
-          title={repeatLabel(repeat)}
-          className={`${BTN} ${repeat !== 'off' ? 'text-primary' : ''}`}
+          onClick={playback.cyclePlayMode}
+          aria-label="播放模式"
+          aria-pressed={playMode !== 'sequence'}
+          title={playModeLabel(playMode)}
+          className={`${BTN} ${playMode !== 'sequence' ? 'text-primary' : ''}`}
         >
-          {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
-        </button>
-        <button
-          type="button"
-          onClick={playback.toggleShuffle}
-          aria-label="随机播放"
-          aria-pressed={playback.shuffle}
-          title={playback.shuffle ? '随机播放：开' : '随机播放：关'}
-          className={`${BTN} ${playback.shuffle ? 'text-primary' : ''}`}
-        >
-          <Shuffle size={15} />
+          {playModeIcon(playMode)}
         </button>
         <button
           type="button"

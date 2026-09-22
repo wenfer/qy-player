@@ -3,16 +3,20 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TitleBar, { WindowResizeHandles } from '../../src/renderer/components/TitleBar';
 import { useAppModeStore } from '../../src/renderer/stores/app-mode-store';
+import { useCompactModeStore } from '../../src/renderer/stores/compact-mode-store';
 
 /**
  * 无边框窗口的自绘标题栏与缩放热区（QYP3-042）：按钮走新的 WINDOW.* 通道，
  * 最大化图标跟随主进程推送，热区只报鼠标位移增量（bounds 归主进程算）。
+ * QYP3-068t：浮窗里「还原窗口」只剩标题栏这一个入口（浮窗界面里那个已移除），
+ * 所以"点它退出精简模式"的用例落在这里。
  */
 
 const minimizeWindow = vi.fn();
 const toggleMaximizeWindow = vi.fn();
 const closeWindow = vi.fn();
 const resizeWindowBy = vi.fn();
+const setCompactMode = vi.fn();
 let pushMaximize: ((maximized: boolean) => void) | null = null;
 
 vi.stubGlobal('electronAPI', {
@@ -27,6 +31,7 @@ vi.stubGlobal('electronAPI', {
   toggleMaximizeWindow,
   closeWindow,
   resizeWindowBy,
+  setCompactMode,
 });
 
 beforeEach(() => {
@@ -62,6 +67,14 @@ describe('TitleBar (QYP3-042)', () => {
     expect(screen.queryByRole('button', { name: '最大化' })).toBeNull();
     expect(screen.getByRole('button', { name: '还原窗口' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '最小化' })).toBeTruthy();
+  });
+
+  it('restore button is the one way out of compact mode (QYP3-068t)', () => {
+    act(() => useCompactModeStore.setState({ compact: true }));
+    render(<TitleBar compact />);
+    fireEvent.click(screen.getByRole('button', { name: '还原窗口' }));
+    expect(useCompactModeStore.getState().compact).toBe(false);
+    expect(setCompactMode).toHaveBeenCalledWith(false);
   });
 
   it('drops maximize in music mode but keeps the compact restore button (QYP3-068n)', () => {

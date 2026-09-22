@@ -85,6 +85,24 @@ export class PlaybackQueue {
     }
   }
 
+  /**
+   * 会话中开/关随机（QYP3-068t）：`shuffle` 是**队列字段**，光改字段不够——
+   * 播放顺序 `order` 是建队时排好的，不开关都得重排一次，否则"随机"只是把
+   * 顺序播放的 order 原样走一遍。当前曲作为分界点：开随机时把它换到 order
+   * 队首（下一首从随机序里挑），关随机时把 orderPos 拨回原位索引。
+   */
+  setShuffle(on: boolean): void {
+    if (this.shuffle === on) return;
+    this.shuffle = on;
+    const current = this.index;
+    this.repeatQueueOrder();
+    if (on) {
+      const at = this.order.indexOf(current);
+      if (at > 0) [this.order[0], this.order[at]] = [this.order[at], this.order[0]];
+    }
+    this.orderPos = this.order.indexOf(current);
+  }
+
   get current(): QueueTrack | null {
     return this.items[this.index] ?? null;
   }
@@ -462,6 +480,16 @@ export class WebAudioEngine {
       shuffle: this.queue.shuffle,
       currentTrackId: this.queue.current?.id ?? null,
     };
+  }
+
+  /**
+   * 会话中改播放模式（QYP3-068t）。`queueState` 是**只读快照**（每次 get 都是
+   * 新对象），往它上面赋值是静默的空操作——这正是"循环/随机按钮点了没反应"
+   * 的根因（只有建队那次 playQueue 的参数生效过）。模式改动必须走这里。
+   */
+  setQueueMode(repeat: RepeatMode, shuffle: boolean): void {
+    this.queue.repeat = repeat;
+    this.queue.setShuffle(shuffle);
   }
 
   get position(): number {

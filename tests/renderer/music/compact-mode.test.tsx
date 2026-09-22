@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompactPlayer from '../../../src/renderer/components/CompactPlayer';
 import {
   nextRepeat,
+  nextPlayMode,
+  playModeLabel,
+  playModeOf,
+  playModeState,
   repeatLabel,
   useMusicPlaybackStore,
 } from '../../../src/renderer/stores/music-playback-store';
@@ -12,7 +16,8 @@ import { useResourceStore } from '../../../src/renderer/stores/resource-store';
 
 /**
  * 精简模式（QYP3-035）：主窗口原地缩成右上角浮窗，界面只留频谱图 + 进度 +
- * 传输键 + 循环 + 音量 + 还原。这里钉住 UI 开关的 IPC 同步与各控件的 store 行为。
+ * 传输键 + 播放模式 + 音量。这里钉住 UI 开关的 IPC 同步与各控件的 store 行为。
+ * QYP3-068t：循环与随机合并成一个播放模式按钮，「还原窗口」只剩标题栏那一个。
  */
 
 const api = {
@@ -99,15 +104,45 @@ describe('compact player helpers (QYP3-035)', () => {
     expect(repeatLabel('all')).toBe('列表循环');
     expect(repeatLabel('one')).toBe('单曲循环');
   });
+
+  it('folds repeat + shuffle into one four-state play mode (QYP3-068t)', () => {
+    expect(playModeOf('off', false)).toBe('sequence');
+    expect(playModeOf('all', false)).toBe('repeat-all');
+    expect(playModeOf('one', false)).toBe('repeat-one');
+    // 随机优先：遗留的 shuffle + 循环叠加态一律显示成"随机"
+    expect(playModeOf('all', true)).toBe('shuffle');
+    expect(playModeOf('one', true)).toBe('shuffle');
+
+    expect(nextPlayMode('sequence')).toBe('repeat-all');
+    expect(nextPlayMode('repeat-all')).toBe('repeat-one');
+    expect(nextPlayMode('repeat-one')).toBe('shuffle');
+    expect(nextPlayMode('shuffle')).toBe('sequence');
+
+    // 一维模式落到存储层两个字段：随机不与循环叠加
+    expect(playModeState('sequence')).toEqual({ repeat: 'off', shuffle: false });
+    expect(playModeState('repeat-all')).toEqual({ repeat: 'all', shuffle: false });
+    expect(playModeState('repeat-one')).toEqual({ repeat: 'one', shuffle: false });
+    expect(playModeState('shuffle')).toEqual({ repeat: 'off', shuffle: true });
+
+    for (const mode of ['sequence', 'repeat-all', 'repeat-one', 'shuffle'] as const) {
+      expect(playModeLabel(mode)).toBeTruthy();
+    }
+  });
 });
 
 describe('CompactPlayer (QYP3-035)', () => {
   it('renders the basic controls', () => {
     render(<CompactPlayer />);
-    for (const label of ['上一曲', '暂停', '下一曲', '循环模式', '随机播放', '音量', '还原窗口']) {
+    for (const label of ['上一曲', '暂停', '下一曲', '播放模式', '音量']) {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
     expect(screen.getByText(/晴天/)).toBeTruthy();
+  });
+
+  it('has only one restore entry — the graph header button is gone (QYP3-068t)', () => {
+    render(<CompactPlayer />);
+    // 浮窗里的「还原窗口」只保留标题栏那一个（TitleBar 的用例覆盖它的行为）
+    expect(screen.queryByLabelText('还原窗口')).toBeNull();
   });
 
   it('pause button pauses playback', () => {
@@ -116,12 +151,19 @@ describe('CompactPlayer (QYP3-035)', () => {
     expect(useMusicPlaybackStore.getState().isPlaying).toBe(false);
   });
 
-  it('cycles the repeat mode through the store', () => {
+  it('cycles repeat → shuffle through the single play-mode button (QYP3-068t)', () => {
     render(<CompactPlayer />);
-    fireEvent.click(screen.getByLabelText('循环模式'));
+    const btn = () => screen.getByLabelText('播放模式');
+    fireEvent.click(btn());
     expect(useMusicPlaybackStore.getState().repeat).toBe('all');
-    fireEvent.click(screen.getByLabelText('循环模式'));
+    expect(useMusicPlaybackStore.getState().shuffle).toBe(false);
+    fireEvent.click(btn());
     expect(useMusicPlaybackStore.getState().repeat).toBe('one');
+    fireEvent.click(btn());
+    expect(useMusicPlaybackStore.getState().repeat).toBe('off');
+    expect(useMusicPlaybackStore.getState().shuffle).toBe(true);
+    fireEvent.click(btn());
+    expect(useMusicPlaybackStore.getState().shuffle).toBe(false);
   });
 
   it('volume slider writes the store volume', () => {
@@ -148,14 +190,6 @@ describe('CompactPlayer (QYP3-035)', () => {
       expect(api.setSettings).toHaveBeenCalledWith('playback.powerSave', false)
     );
     expect(useResourceStore.getState().powerSave).toBe(false);
-  });
-
-  it('restore button exits compact mode', () => {
-    useCompactModeStore.setState({ compact: true });
-    render(<CompactPlayer />);
-    fireEvent.click(screen.getByLabelText('还原窗口'));
-    expect(useCompactModeStore.getState().compact).toBe(false);
-    expect(api.setCompactMode).toHaveBeenCalledWith(false);
   });
 
   it('lyrics button toggles the overlay panel (QYP3-058)', async () => {

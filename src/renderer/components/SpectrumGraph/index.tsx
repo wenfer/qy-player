@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef } from 'react';
 import { Activity } from 'lucide-react';
 import { useVisualizerFps } from '../../stores/resource-store';
 import {
@@ -35,8 +35,6 @@ interface SpectrumGraphProps {
   isPlaying: boolean;
   title: string;
   artist?: string | null;
-  /** 头部右侧额外内容（如精简模式的还原按钮）。 */
-  headerExtra?: ReactNode;
 }
 
 export default function SpectrumGraph({
@@ -45,7 +43,6 @@ export default function SpectrumGraph({
   isPlaying,
   title,
   artist,
-  headerExtra,
 }: SpectrumGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // 暂停回落缓存（QYP3-059）：跨 effect 重跑存活（isPlaying 在依赖里）
@@ -121,7 +118,6 @@ export default function SpectrumGraph({
           </p>
           <p className="text-[10px] text-muted-foreground">频谱图</p>
         </div>
-        {headerExtra ? <div className="flex items-center gap-1 flex-shrink-0">{headerExtra}</div> : null}
       </div>
 
       {hasData ? (

@@ -1758,6 +1758,27 @@
 - 验证（068s）：CDP 实测浮窗 400×240、画布 374×74、bar 间距 9.35 / 格间距
   4.63、无纵向溢出；真机播放截图目视绿/琥珀/红三段与峰值帽清晰
 
+### QYP3-068t 浮窗控件精简：去重复的「还原窗口」+ 循环/随机合并 `[x]`
+- 用户：浮窗有两个「还原窗口」，删掉歌名右边那个；循环与随机合并成一个按钮
+- 改动：
+  ①`CompactPlayer` 不再给 `SpectrumGraph` 传 `headerExtra`（该 prop 一并删掉，
+    只有浮窗用它），残留的 `exit`/`useCompactModeStore`/`Maximize2` 一并清出；
+    "点还原退出精简模式"的用例搬到 `titlebar.test.tsx`（入口只剩那儿）
+  ②播放模式一维四态：`playModeOf`/`nextPlayMode`/`playModeLabel`/`playModeState`
+    四个纯函数 + store 的 `cyclePlayMode`；存储层仍是 `repeat` + `shuffle`
+    两个字段（mpv 路径照旧读它们），随机不与循环叠加
+- **顺带修掉一个真 bug**：`engine.queueState` 是 getter 返回的**只读快照**，
+  `engineSingleton.queueState.shuffle = next` 是静默空操作——会话中切循环/随机
+  从来只改了 store，内置引擎的队列一无所知（mpv 路径读 store 所以是好的）。
+  新增 `WebAudioEngine.setQueueMode()`；`PlaybackQueue.setShuffle()` 还会重排
+  播放序（否则"随机"只是把顺序序原样走一遍）
+- 验证：CDP 实测浮窗只剩 1 个「还原窗口」、控制行无「循环模式/随机播放」；
+  连点播放模式 4 次走完 顺序→列表循环→单曲循环→随机 且 `title` 同步；
+  随机生效实证——5 轮"起播第 1 首 → 切随机 → 下一曲"，落点在第 2/第 3 首之间
+  变化（修前必然固定第 2 首）
+- 验证：typecheck 双配置 + test:render 全绿（新增播放模式纯函数、引擎 setShuffle、
+  标题栏还原入口用例）
+
 ---
 
 ## 纪律提醒（动工前重读）

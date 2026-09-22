@@ -124,7 +124,10 @@
   的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗
   （`COMPACT_WIDTH/HEIGHT`，现为 **400×240**，`setResizable(false)`——尺寸
   是常量算出来的，不是用户可拖的），渲染层切到 `components/CompactPlayer`
-  （复用 `SpectrumGraph`）。**必须同窗
+  （复用 `SpectrumGraph`；浮窗里**只有标题栏那一个**「还原窗口」，界面内不再
+  放第二个入口——QYP3-068t。播放模式与随机在浮窗里合并成**一个**按钮：
+  `playModeOf`/`nextPlayMode`/`playModeState` 是一维四态（顺序 → 列表循环 →
+  单曲循环 → 随机）与存储层两字段的唯一换算处，UI 别自己拼图标与文案）。**必须同窗
   改尺寸**：播放状态与 30fps 频谱都在主窗口 renderer 里（`getSpectrum` 读同一个
   WebAudioEngine），另开 BrowserWindow 就得把频谱跨进程转发，老机 CPU 不划算。
   几何全在 `ui-shell/compact-window.ts`：进入前记住 bounds/resizable/置顶，
@@ -147,6 +150,14 @@
   改相关逻辑前确认：档位变化才推送、关掉开关恢复基准帧率、采样失败按 normal 兜底
 
 ### 音乐（两处静默失败陷阱，改前必读）
+- **会话中改循环/随机必须走 `WebAudioEngine.setQueueMode(repeat, shuffle)`**
+  （QYP3-068t 修的静默失败）。`engine.queueState` 是**只读快照**（getter 每次
+  返回新对象），往 `engine.queueState.repeat = ...` 上赋值是空操作——播放模式
+  只有建队那次 `playQueue(..., { repeat, shuffle })` 的参数生效过，之后用户点
+  循环/随机按钮只改了 store，内置引擎的队列一无所知（mpv 路径读 store，所以
+  一直是好的，问题只在 webaudio）。另外开随机光改字段不够：
+  `PlaybackQueue.setShuffle` 会重排播放序 `order`（当前曲作为分界锚点），
+  不重排的话"随机"只是把顺序序原样走一遍
 - **切引擎必须显式停掉另一侧**（QYP3-067，"多首同时播放"bug 的修复）。
   音乐→音乐在两引擎间切换**不经过**视频 LOAD_FILE，主进程不会替渲染层收尾：
   ① webaudio 分支起播前，若 `engine === 'mpv'` 必须先

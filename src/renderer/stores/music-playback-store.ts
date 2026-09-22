@@ -100,6 +100,8 @@ export interface MusicPlaybackStore extends MusicPlayingState {
   setVolume: (volume: number) => void;
   setRepeat: (mode: RepeatMode) => void;
   toggleShuffle: () => void;
+  /** 播放模式一键循环（QYP3-068t）：顺序 → 列表循环 → 单曲循环 → 随机。 */
+  cyclePlayMode: () => void;
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
   getSpectrum: () => Uint8Array | null;
@@ -239,6 +241,48 @@ export function nextRepeat(mode: 'off' | 'all' | 'one'): 'off' | 'all' | 'one' {
 /** 循环模式的用户可读文案（播放条/浮窗共用）。 */
 export function repeatLabel(mode: 'off' | 'all' | 'one'): string {
   return mode === 'all' ? '列表循环' : mode === 'one' ? '单曲循环' : '顺序播放';
+}
+
+/**
+ * 播放模式（QYP3-068t）：循环与随机合并成**一个**按钮循环切换。
+ *
+ * 存储层仍是两个字段（`repeat` + `shuffle`，主进程/mpv 路径照旧读它们），
+ * 只是 UI 上做成一维四态：顺序 → 列表循环 → 单曲循环 → 随机 → 顺序。
+ * 随机不与循环叠加（二选一），这样用户不用理解笛卡尔积。
+ */
+export type PlayMode = 'sequence' | 'repeat-all' | 'repeat-one' | 'shuffle';
+
+export function playModeOf(repeat: 'off' | 'all' | 'one', shuffle: boolean): PlayMode {
+  if (shuffle) return 'shuffle';
+  return repeat === 'all' ? 'repeat-all' : repeat === 'one' ? 'repeat-one' : 'sequence';
+}
+
+export function nextPlayMode(mode: PlayMode): PlayMode {
+  return mode === 'sequence'
+    ? 'repeat-all'
+    : mode === 'repeat-all'
+      ? 'repeat-one'
+      : mode === 'repeat-one'
+        ? 'shuffle'
+        : 'sequence';
+}
+
+export function playModeLabel(mode: PlayMode): string {
+  return mode === 'repeat-all'
+    ? '列表循环'
+    : mode === 'repeat-one'
+      ? '单曲循环'
+      : mode === 'shuffle'
+        ? '随机播放'
+        : '顺序播放';
+}
+
+/** 一维模式 → 存储层两个字段（`cyclePlayMode` 的唯一写入口）。 */
+export function playModeState(mode: PlayMode): { repeat: 'off' | 'all' | 'one'; shuffle: boolean } {
+  return {
+    repeat: mode === 'repeat-all' ? 'all' : mode === 'repeat-one' ? 'one' : 'off',
+    shuffle: mode === 'shuffle',
+  };
 }
 
 /** MediaRef 构造（QYP3-025）：服务器曲目按 serverId 严格路由。 */
@@ -1128,13 +1172,22 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
 
   setRepeat: (mode) => {
     set({ repeat: mode });
-    if (engineSingleton) engineSingleton.queueState.repeat = mode;
+    // QYP3-068t：必须走 setQueueMode——`queueState` 是只读快照，往它上面写字段
+    // 是静默空操作（曾让会话中的循环/随机切换对内置引擎完全无效）
+    engineSingleton?.setQueueMode(mode, get().shuffle);
   },
 
   toggleShuffle: () => {
     const next = !get().shuffle;
     set({ shuffle: next });
-    if (engineSingleton) engineSingleton.queueState.shuffle = next;
+    engineSingleton?.setQueueMode(get().repeat, next);
+  },
+
+  cyclePlayMode: () => {
+    const s = get();
+    const next = playModeState(nextPlayMode(playModeOf(s.repeat, s.shuffle)));
+    set({ repeat: next.repeat, shuffle: next.shuffle });
+    engineSingleton?.setQueueMode(next.repeat, next.shuffle);
   },
 
   clearError: () => set({ errorMessage: null }),
