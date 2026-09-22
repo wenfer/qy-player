@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Clapperboard, Library, ListMusic, Music2, Settings } from 'lucide-react';
+import { AudioLines, Clapperboard, Library, ListMusic, Music2, Settings } from 'lucide-react';
 import { useAppModeStore } from '../../stores/app-mode-store';
 import { pageTitleFor } from '../Navigation';
+import AudioFxPanel from '../AudioFxPanel';
 
 /**
  * 音乐模式顶部工具条（QYP3-068i）。
@@ -25,6 +26,8 @@ export default function MusicToolbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const setMode = useAppModeStore((s) => s.setMode);
+  // 音效面板（QYP3-068v）：音乐模式唯一的音效入口
+  const [showFx, setShowFx] = useState(false);
 
   useEffect(() => {
     const page = pageTitleFor(location.pathname);
@@ -57,6 +60,16 @@ export default function MusicToolbar() {
       <div className="flex items-center gap-0.5 ml-auto">
         <button
           type="button"
+          onClick={() => setShowFx(true)}
+          aria-label="音效调节"
+          aria-pressed={showFx}
+          title="音效调节"
+          className={ICON_BTN}
+        >
+          <AudioLines size={15} />
+        </button>
+        <button
+          type="button"
           onClick={() => navigate('/music-sources')}
           aria-label="音乐媒体库"
           title="音乐媒体库"
@@ -86,6 +99,8 @@ export default function MusicToolbar() {
           <Clapperboard size={15} />
         </button>
       </div>
+
+      {showFx ? <AudioFxPanel onClose={() => setShowFx(false)} /> : null}
     </div>
   );
 }

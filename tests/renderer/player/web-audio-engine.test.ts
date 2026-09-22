@@ -52,10 +52,27 @@ function fakeAudio(): FakeAudio {
 /**
  * 假 AudioContext 的节点工厂（QYP3-068v 收敛成单一来源）。
  *
- * 引擎构造里的图构建被外层 `catch {}` **静默吞掉** —— 缺任何一个节点工厂
- * 都会让整张图直接降级（无频谱、无 EQ、无音效）却不报错。这份 stub 以前
+ * 引擎构造里的图构建被外层那个**空 catch 块**静默吞掉 —— 缺任何一个节点
+ * 工厂都会让整张图直接降级（无频谱、无 EQ、无音效）却不报错。这份 stub 以前
  * 抄了三份，加节点漏改一处就静默失效，所以现在统一从这里取。
  */
+/**
+ * 真实的 ChannelMergerNode 把 `channelCount` 固定为 1 —— 赋值会抛
+ * InvalidStateError。QYP3-068v 踩过这个坑：异常被引擎构造里那层**空
+ * catch 块**吞掉，而 MediaElementSource 早已把元素重定向进图，结果是
+ * **整条音频链静音且不报错**。假节点必须同样会抛，测试才抓得住。
+ */
+function makeFakeMerger(base: Record<string, unknown> = {}): Record<string, unknown> {
+  const n: Record<string, unknown> = { channelCountMode: 'explicit', connect: vi.fn(), ...base };
+  Object.defineProperty(n, 'channelCount', {
+    get: () => 1,
+    set: () => {
+      throw new DOMException('ChannelMerger: channelCount cannot be changed from 1', 'InvalidStateError');
+    },
+  });
+  return n;
+}
+
 function fakeNodeFactories(): Record<string, () => unknown> {
   const raw: Record<string, () => unknown> = {
     createMediaElementSource: () => ({ connect: vi.fn() }),
@@ -76,8 +93,7 @@ function fakeNodeFactories(): Record<string, () => unknown> {
     }),
     createGain: () => ({ gain: { value: 1 }, connect: vi.fn() }),
     createChannelSplitter: () => ({ connect: vi.fn() }),
-    createChannelMerger: () => ({ channelCount: 2, channelCountMode: 'explicit', connect: vi.fn() }),
-    createWaveShaper: () => ({ curve: null, oversample: 'none', connect: vi.fn() }),
+    createChannelMerger: () => makeFakeMerger({ numberOfInputs: 2, numberOfOutputs: 1 }),    createWaveShaper: () => ({ curve: null, oversample: 'none', connect: vi.fn() }),
   };
   // 用 vi.fn 包装：部分用例要靠 mock.results 取回建好的节点
   const wrapped: Record<string, () => unknown> = {};
@@ -224,7 +240,7 @@ function fakeCtxWithEdges(): { ctx: AudioContext; edges: string[] } {
     createBiquadFilter: () => node('filter', { type: '', frequency: { value: 0 }, Q: { value: 1 }, gain: { value: 0 } }),
     createGain: () => node('gain', { gain: { value: 1 } }),
     createChannelSplitter: () => node('splitter'),
-    createChannelMerger: () => node('merger', { channelCount: 2, channelCountMode: 'explicit' }),
+    createChannelMerger: () => makeFakeMerger(node('merger')),
     createWaveShaper: () => node('shaper', { curve: null, oversample: 'none' }),
     destination: { label: 'destination' },
     resume: vi.fn(async () => undefined),
@@ -374,8 +390,41 @@ describe('WebAudioEngine (QYP3-010)', () => {
     expect(Math.abs(mid - limit * 0.5)).toBeLessThan(0.02);
   });
 
-  it('stub factories cover every node the graph builds (missing one silently degrades)', () => {
-    // 图构建失败被 catch 吞掉，缺 factory 不会报错只会整张图消失
+  it('builds the WHOLE graph — a throw mid-build would leave it silently muted', () => {
+    // QYP3-068v 踩过：给 merger 设 channelCount 抛 InvalidStateError，被构造函数
+    // 那层 catch 吞掉。此时 MediaElementSource 已把元素重定向进图，图却连不到
+    // destination —— 表现是「静音且零报错」，只有这些字段能证明图建全了。
+    const { engine } = makeEngine();
+    void engine.playQueue([makeTrack(1)], 0, 'off', false);
+    const inner = engine as unknown as {
+      gain: unknown;
+      preamp: unknown;
+      filters: unknown[];
+      fieldMatrix: unknown[];
+      crossFilters: unknown[];
+      crossGains: unknown[];
+      shaper: unknown;
+    };
+    expect(inner.gain).not.toBeNull();
+    expect(inner.preamp).not.toBeNull();
+    expect(inner.filters).toHaveLength(AUDIO_FX_MAX_BANDS);
+    expect(inner.fieldMatrix).toHaveLength(4);
+    expect(inner.crossFilters).toHaveLength(2);
+    expect(inner.crossGains).toHaveLength(2);
+    expect(inner.shaper).not.toBeNull();
+  });
+
+  it('never assigns ChannelMerger.channelCount (the spec forbids it)', () => {
+    // 直接对假节点验证：赋值必须抛（真实 Chromium 行为），
+    // 这样引擎一旦这么写就会在构造时炸出来
+    const merger = makeFakeMerger();
+    expect(merger.channelCount).toBe(1);
+    expect(() => {
+      merger.channelCount = 2;
+    }).toThrow();
+  });
+
+  it('stub factories cover every node the graph builds (missing one silently degrades)', () => {    // 图构建失败被 catch 吞掉，缺 factory 不会报错只会整张图消失
     expect(Object.keys(fakeNodeFactories()).sort()).toEqual(
       [
         'createAnalyser',

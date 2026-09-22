@@ -3,12 +3,14 @@ import { MonitorUp, Sliders } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useResourceStore } from '../../stores/resource-store';
-import { EQ_BANDS } from '../../player/web-audio-engine';
+import AudioFxPanel from '../../components/AudioFxPanel';
 
 /**
- * 音乐播放偏好（QYP3-012）：引擎偏好、ReplayGain、均衡器、睡眠定时。
- * EQ 双引擎共用：renderer 引擎直连 BiquadFilter；mpv 引擎由
- * main 侧映射为 lavfi equalizer 链（主进程消费同一 10 段 dB 数组）。
+ * 音乐播放偏好（QYP3-012）：引擎偏好、ReplayGain、睡眠定时。
+ *
+ * 均衡器与音效**不在本页编辑**（QYP3-068v）：参量 EQ 需要频率/增益/Q 三个
+ * 维度，塞进设置页既拥挤又要和面板抢同一个配置键。这里只留入口，编辑唯一
+ * 发生在 `components/AudioFxPanel`。
  */
 
 /** 睡眠定时档位（分钟）；0 = 关闭。跨页共享的当前档位来自 store。 */
@@ -27,44 +29,6 @@ const tabButtonClass = (active: boolean): string =>
     active ? 'bg-secondary border-border text-foreground' : 'border-border text-muted-foreground hover:bg-accent'
   }`;
 
-const EQ_FREQ_LABELS = ['60', '170', '350', '1k', '3.5k', '6k', '9k', '12k', '14k', '16k'];
-const EQ_PRESETS_UI: Array<{ id: string; label: string; gains: number[] }> = [
-  { id: 'flat', label: '平直', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
-  { id: 'bass', label: '重低音', gains: [7, 6, 4, 2, 0, 0, 0, 0, 1, 2] },
-  { id: 'vocal', label: '人声', gains: [-3, -1, 2, 4, 4, 3, 1, 0, -1, -2] },
-  { id: 'treble', label: '高亮', gains: [-2, -1, 0, 0, 0, 2, 4, 6, 7, 7] },
-  { id: 'electronic', label: '电子', gains: [5, 4, 1, 0, -2, 0, 1, 3, 5, 6] },
-  { id: 'classical', label: '古典', gains: [4, 3, 1, 0, 0, 0, 1, 2, 4, 3] },
-  { id: 'rock', label: '摇滚', gains: [5, 4, 2, 0, -1, 0, 1, 3, 4, 4] },
-];
-
-/** 自定义预设（QYP3-012a）：存 app_config `playback.eqPresets`。 */
-export interface EqPreset {
-  id: string;
-  label: string;
-  gains: number[];
-}
-
-const EQ_PRESETS_KEY = 'playback.eqPresets';
-
-/** 只接受结构合法的条目（手改配置/旧版本残留不允许污染 UI）。 */
-export function parseEqPresets(raw: unknown): EqPreset[] {
-  if (!Array.isArray(raw)) return [];
-  const out: EqPreset[] = [];
-  for (const item of raw) {
-    const preset = item as { id?: unknown; label?: unknown; gains?: unknown };
-    if (typeof preset?.label !== 'string' || !Array.isArray(preset.gains)) continue;
-    if (preset.gains.length !== EQ_BANDS.length) continue;
-    if (preset.gains.some((v) => !Number.isFinite(Number(v)))) continue;
-    out.push({
-      id: typeof preset.id === 'string' ? preset.id : `custom-${out.length}`,
-      label: preset.label,
-      gains: preset.gains.map((v) => Number(v)),
-    });
-  }
-  return out;
-}
-
 export default function MusicSettings() {
   const addToast = useToastStore((s) => s.addToast);
   const [engine, setEngine] = useState<string>('spectrum-first');
@@ -73,9 +37,9 @@ export default function MusicSettings() {
   const [rgPreamp, setRgPreamp] = useState<number>(0);
   const [rgFallback, setRgFallback] = useState<number>(0);
   const [rgClip, setRgClip] = useState<boolean>(false);
-  const [eqGains, setEqGains] = useState<number[]>(new Array(10).fill(0));
-  const [customPresets, setCustomPresets] = useState<EqPreset[]>([]);
-  const [presetName, setPresetName] = useState('');
+  // 音效编辑唯一入口是面板（QYP3-068v）：设置页只放一个入口按钮，
+  // 免得两处 UI 各写各的键互相覆盖
+  const [showFx, setShowFx] = useState(false);
   // 桌面歌词（QYP3-022）
   const [deskOpen, setDeskOpen] = useState(false);
   const [deskFontSize, setDeskFontSize] = useState(28);
@@ -98,7 +62,6 @@ export default function MusicSettings() {
     [addToast]
   );
   const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -123,14 +86,6 @@ export default function MusicSettings() {
           data?: unknown;
         };
         setRgClip(c?.data === true || c?.data === 'true');
-        const q = (await window.electronAPI.getSettings('playback.eqGains')) as {
-          data?: unknown;
-        };
-        if (Array.isArray(q?.data) && q.data.length === 10) {
-          setEqGains(q.data.map((v) => Number(v) || 0));
-        }
-        const presets = (await window.electronAPI.getSettings(EQ_PRESETS_KEY)) as { data?: unknown };
-        setCustomPresets(parseEqPresets(presets?.data));
         const f = (await window.electronAPI.getSettings('deskLyrics.fontSize')) as { data?: unknown };
         if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
         const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
@@ -153,15 +108,12 @@ export default function MusicSettings() {
 
   const save = useCallback(
     async (key: string, value: unknown, message: string): Promise<void> => {
-      setSaving(true);
       try {
         const res = (await window.electronAPI.setSettings(key, value)) as { ok?: boolean };
         if (res?.ok !== false) addToast(message, 'success');
         else addToast('保存失败，请重试', 'error');
       } catch {
         addToast('保存失败，请重试', 'error');
-      } finally {
-        setSaving(false);
       }
     },
     [addToast]
@@ -194,14 +146,6 @@ export default function MusicSettings() {
       else if (key === 'Fallback') setRgFallback(value as number);
       else setRgClip(value as boolean);
       await save(`playback.replaygain${key}`, value, 'ReplayGain 设置已保存');
-    },
-    [save]
-  );
-
-  const applyEq = useCallback(
-    async (gains: number[], message: string): Promise<void> => {
-      setEqGains(gains);
-      await save('playback.eqGains', gains, message);
     },
     [save]
   );
@@ -272,62 +216,6 @@ export default function MusicSettings() {
       addToast(value ? '性能保护已开启' : '性能保护已关闭', 'success');
     },
     [addToast]
-  );
-
-  /** 保存/删除自定义预设（QYP3-012a）：整表覆盖写，持久化失败必须回滚。 */
-  const persistPresets = useCallback(
-    async (next: EqPreset[], message: string): Promise<void> => {
-      const prev = customPresets;
-      setCustomPresets(next);
-      try {
-        const res = (await window.electronAPI.setSettings(EQ_PRESETS_KEY, next)) as { ok?: boolean };
-        if (res?.ok === false) throw new Error('failed');
-        addToast(message, 'success');
-      } catch {
-        setCustomPresets(prev);
-        addToast('保存失败，请重试', 'error');
-      }
-    },
-    [customPresets, addToast]
-  );
-
-  const savePreset = useCallback(async (): Promise<void> => {
-    const label = presetName.trim();
-    if (!label) {
-      addToast('请先填写预设名称', 'error');
-      return;
-    }
-    if ([...EQ_PRESETS_UI, ...customPresets].some((p) => p.label === label)) {
-      addToast('已有同名预设', 'error');
-      return;
-    }
-    const next = [
-      ...customPresets,
-      { id: `custom-${Date.now()}`, label, gains: [...eqGains] },
-    ];
-    setPresetName('');
-    await persistPresets(next, `已保存预设：${label}`);
-  }, [presetName, customPresets, eqGains, persistPresets, addToast]);
-
-  const deletePreset = useCallback(
-    async (id: string): Promise<void> => {
-      await persistPresets(
-        customPresets.filter((p) => p.id !== id),
-        '预设已删除'
-      );
-    },
-    [customPresets, persistPresets]
-  );
-
-  const adjustBand = useCallback(
-    (index: number, value: number): void => {
-      setEqGains((prev) => {
-        const next = [...prev];
-        next[index] = value;
-        return next;
-      });
-    },
-    []
   );
 
   if (!loaded) return null;
@@ -527,79 +415,24 @@ export default function MusicSettings() {
         </div>
 
         <div className="bg-card border border-border rounded-xl p-4">
-          <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm flex items-center gap-1.5">
               <Sliders size={14} className="text-muted-foreground rotate-90" />
-              均衡器
+              均衡器与音效
             </span>
-            <div className="flex flex-wrap gap-1.5 ml-auto">
-              {[...EQ_PRESETS_UI, ...customPresets].map((p) => (
-                <span key={p.id} className="inline-flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => void applyEq(p.gains, `已应用预设：${p.label}`)}
-                    disabled={saving}
-                    className="px-2 py-1 text-[10px] border border-border rounded-l-lg hover:bg-accent focus-ring"
-                  >
-                    {p.label}
-                  </button>
-                  {p.id.startsWith('custom-') && (
-                    <button
-                      type="button"
-                      onClick={() => void deletePreset(p.id)}
-                      aria-label={`删除预设 ${p.label}`}
-                      className="px-1.5 py-1 text-[10px] border border-l-0 border-border rounded-r-lg text-muted-foreground hover:text-foreground hover:bg-accent focus-ring"
-                    >
-                      ×
-                    </button>
-                  )}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {eqGains.map((gain, i) => (
-              <div key={EQ_BANDS[i]} className="flex flex-col items-center gap-1 w-14">
-                <span className="text-[9px] text-muted-foreground">{gain > 0 ? `+${gain}` : gain}</span>
-                <input
-                  type="range"
-                  min={-12}
-                  max={12}
-                  step={1}
-                  value={gain}
-                  onChange={(e) => adjustBand(i, Number(e.target.value))}
-                  onMouseUp={() => void applyEq(eqGains, '均衡器已保存')}
-                  onTouchEnd={() => void applyEq(eqGains, '均衡器已保存')}
-                  onKeyUp={() => void applyEq(eqGains, '均衡器已保存')}
-                  className="w-full accent-primary"
-                  aria-label={`均衡器 ${EQ_FREQ_LABELS[i]}Hz`}
-                />
-                <span className="text-[9px] text-muted-foreground">{EQ_FREQ_LABELS[i]}</span>
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-2">
-            实时生效于音乐播放；视频播放不受均衡器影响。
-          </p>
-          <div className="flex flex-wrap items-center gap-2 mt-3">
-            <input
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              placeholder="预设名称"
-              aria-label="自定义预设名称"
-              className="bg-input border border-border rounded-lg px-2 py-1 text-xs focus-ring w-40"
-            />
             <button
               type="button"
-              onClick={() => void savePreset()}
-              className="px-3 py-1 text-xs rounded-lg border border-border hover:bg-accent focus-ring"
+              onClick={() => setShowFx(true)}
+              className="ml-auto px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-accent focus-ring"
             >
-              保存当前为预设
+              打开音效面板
             </button>
-            <span className="text-[11px] text-muted-foreground">
-              自定义预设存本地配置；点预设名右侧 × 可删除。
-            </span>
           </div>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            参量均衡器（频率 / 增益 / Q）、前置增益、削波保护与声场调节都在
+            音效面板里，也可从顶部工具条的音效按钮进入。视频播放不受影响。
+          </p>
+          {showFx ? <AudioFxPanel onClose={() => setShowFx(false)} /> : null}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-4">

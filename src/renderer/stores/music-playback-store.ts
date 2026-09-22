@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { WebAudioEngine, type QueueTrack, type RepeatMode } from '../player/web-audio-engine';
 import { isLocalFlacUrl } from '../player/flac-strip';
 import { estimatePosition, makeAnchor, type PositionAnchor } from '../player/spectrum-anchor';
+import { readSetting } from '../utils/read-setting';
 import type { MediaRef } from '../../shared/types/catalog';
 import type { MusicTrackRow } from '../../shared/types/music';
 import type { GetSpectrumResult, SpectrumReadyEvent } from '../../shared/types/music-spectrum';
@@ -123,6 +124,12 @@ export interface MusicPlaybackStore extends MusicPlayingState {
    * **这里不写盘**：写盘由面板在松手/关闭时做（沿用既有模式）。
    */
   applyAudioFx: (fx: AudioFxSettings) => void;
+  /**
+   * 从配置读回音效链并同步到 store 与当前引擎（QYP3-068v）：面板打开时调，
+   * 因为 store 里的值可能是起播时的快照（起播后到面板打开之间用户可能改过
+   * 设置，或起播走的是 mpv 路径没写过 store）。
+   */
+  syncAudioFx: () => Promise<void>;
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
   getSpectrum: () => Uint8Array | null;
@@ -652,16 +659,14 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
     replaygainClip: false,
   };
   try {
-    const read = async (key: string): Promise<unknown> => {
-      const res = (await window.electronAPI.getSettings(key)) as { data?: unknown };
-      return res?.data;
-    };
+    // 注意 `SETTINGS.GET` 直接返回值、不包 {ok,data}，所以不能读 `.data`
+    // —— 见 utils/read-setting.ts 的说明（QYP3-068v 踩过）
     const [eqValue, rgValue, preampValue, fallbackValue, clipValue] = await Promise.all([
-      read('playback.eqGains'),
-      read('playback.replaygain'),
-      read('playback.replaygainPreamp'),
-      read('playback.replaygainFallback'),
-      read('playback.replaygainClip'),
+      readSetting('playback.eqGains'),
+      readSetting('playback.replaygain'),
+      readSetting('playback.replaygainPreamp'),
+      readSetting('playback.replaygainFallback'),
+      readSetting('playback.replaygainClip'),
     ]);
     const rg = typeof rgValue === 'string' && rgValue !== 'off' ? rgValue : null;
     const num = (v: unknown): number | null => {
@@ -691,11 +696,11 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
  */
 async function readAudioFxSettings(): Promise<AudioFxSettings> {
   try {
-    const read = async (key: string): Promise<unknown> => {
-      const res = (await window.electronAPI.getSettings(key)) as { data?: unknown };
-      return res?.data;
-    };
-    const [fxValue, legacyValue] = await Promise.all([read(AUDIO_FX_KEY), read('playback.eqGains')]);
+    // 同上：不能读 `.data`（QYP3-068v：这里读错过，导致 mpv 起播的 af 恒为空）
+    const [fxValue, legacyValue] = await Promise.all([
+      readSetting(AUDIO_FX_KEY),
+      readSetting('playback.eqGains'),
+    ]);
     if (fxValue && typeof fxValue === 'object') return sanitizeAudioFx(fxValue);
     if (Array.isArray(legacyValue)) {
       const migrated = audioFxFromLegacyEq(legacyValue.map((v) => Number(v) || 0));
@@ -864,6 +869,16 @@ async function fallbackToMpv(track: EngineExtTrack): Promise<void> {
       errorMessage: e instanceof Error ? e.message : '这首曲目无法播放',
     });
   }
+}
+
+/**
+ * 把音效链下发到两个引擎（QYP3-068v）：内置引擎直改 AudioParam（真实时），
+ * mpv 走 IPC（主进程有门禁与防抖）。发两个通道由各自判断要不要处理——
+ * 当前只有一个在播，另一个的调用是空转但无害。
+ */
+function applyAudioFxToBoth(fx: AudioFxSettings): void {
+  engineSingleton?.setAudioFx(fx);
+  window.electronAPI?.applyAudioChain?.(fx).catch(() => {});
 }
 
 export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
@@ -1233,10 +1248,13 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
   applyAudioFx: (fx) => {
     const clean = sanitizeAudioFx(fx);
     set({ audioFx: clean });
-    // 内置引擎：直改 AudioParam，真实时
-    engineSingleton?.setAudioFx(clean);
-    // mpv：主进程那边有门禁（非 mpv 音乐会话直接忽略）与防抖
-    window.electronAPI?.applyAudioChain?.(clean).catch(() => {});
+    applyAudioFxToBoth(clean);
+  },
+
+  syncAudioFx: async () => {
+    const clean = await readAudioFxSettings();
+    set({ audioFx: clean });
+    applyAudioFxToBoth(clean);
   },
 
   clearError: () => set({ errorMessage: null }),

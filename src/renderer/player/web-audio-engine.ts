@@ -353,9 +353,11 @@ export class WebAudioEngine {
         // L' = a0·L + b0·R + crossR    R' = b1·L + a1·R + crossL
         const splitter = this.ctx.createChannelSplitter(2);
         const merger = this.ctx.createChannelMerger(2);
-        // 不显式指定的话，mono 源会按 speaker 解释方式落到左声道
-        merger.channelCount = 2;
-        merger.channelCountMode = 'explicit';
+        // 不要给 merger 设 channelCount —— 规范把它固定为 1，赋值会抛
+        // InvalidStateError；而这里的异常会被外层那个**空 catch 块**吞掉，
+        // 表现为 **完全静音且无任何报错**（source 已经把 audio 元素重定向
+        // 进图了，图却连不到 destination）。channelCountMode 本来就已是
+        // 'explicit'。
         node.connect(splitter);
         // Web Audio 的 connect 是求和的：多条线汇到同一个输入就相加
         for (let i = 0; i < 4; i += 1) {
@@ -396,8 +398,13 @@ export class WebAudioEngine {
         this.gain = this.ctx.createGain();
         node.connect(this.gain);
         this.gain.connect(this.ctx.destination);
-      } catch {
-        // 图构建失败（如无 MediaElementSource）→ 直连输出，无频谱/EQ
+      } catch (e) {
+        // 图构建失败 = 之后**整条链无声**（source 已经把 audio 元素重定向进
+        // 图里了，图却连不到 destination），而且频谱/音效一起失效。
+        // 这条必须留痕：QYP3-068v 排查「静音且零报错」花了一整轮，就是因为
+        // 这里原来是空 catch —— 一个 `merger.channelCount = 2`
+        // （规范禁止，抛 InvalidStateError）把整张图废掉了。
+        console.error('[audio] 音频图构建失败，本次会话将无声、无频谱、无音效：', e);
       }
     } else {
       this.ctx = this.ctx ?? null;
