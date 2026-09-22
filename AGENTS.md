@@ -64,7 +64,7 @@
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（转码/CUE/兼容性优先/非直解格式 → mpv；spectrum-first 且直连格式 → renderer 引擎——QYP3-037 起服务器/WebDAV 音频经 `qy-stream://` 认证流代理也走 renderer 引擎，`sourceKind` 不再强制 mpv）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次；引擎队列**按需懒解析**单曲 URL，服务器整队预解析是 N 次网络请求）
 - **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）；**本地 mpv 音源**（APE/兼容性优先/兜底）靠 `mpvQueue/mpvQueueIndex` 走播放时的列表（恢复态=全部曲目，QYP3-068f），fallbackToMpvNow 会把 webaudio 的 queueSnapshot 带进 mpvQueue。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId
 - **音乐会话**：`playback-engine/music-active.ts` 是唯一标志源（renderer 引擎靠 `SET_ENGINE_ACTIVE` 上报，mpv 音乐靠 `LOAD_FILE` 是否带 `audioChain`）；`player:on-state-change` 带 `music` 标记，renderer 侧 `attachMusicMpvBridge()`（幂等）据此把 mpv 进度写回音乐 store——**视频加载会结束音乐会话**（否则两路声音同时响、音乐条残留在视频上）。**恢复态（`restored` 为 true 而 `engine` 为 null）不算会话**（QYP3-053）：`CompactModeHost`/媒体键/自动精简都只看 `engine`，播放条与内容区留白另看 `restored`
-- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默。**LyricsPanel 的弹出位置由 `placement` 决定**（QYP3-058）：`above-bar`（默认，主窗口，悬在 ~150px 高的播放条**上方** `bottom-44` + `z-50`——播放条带频谱行，面板渲染在播放条之前，同级 z-index 会被频谱 canvas 压住）与 `overlay`（精简浮窗，`top-10 bottom-3` 铺满，**不要**套 `max-h-[46vh]`，浮窗 ~300px 高会被夹短）
+- **歌词**：扫描期从标签落盘 `<userData>/lyrics/<trackId>.lrc`（受保护分区，人工可编辑）；高亮行号只由 `playback-engine/lrc-parser.ts` 纯函数决定；桌面歌词窗口状态由 renderer 节流推送（≤10Hz）、主进程统一转发。**歌词按来源路由**：本地音轨读缓存分区，服务器曲目走 Jellyfin `/Audio/{id}/Lyrics`（Emby 无端点）并在主进程归一成 LRC（`online-connector/lyrics.ts`）——下游只有一套 LRC 解析；歌词永远是非关键路径，拉取放在 loadfile 之后且失败静默。**LyricsPanel 的弹出位置由 `placement` 决定**（QYP3-058）：`above-bar`（默认，主窗口，悬在 ~150px 高的播放条**上方** `bottom-44` + `z-50`——播放条带频谱行，面板渲染在播放条之前，同级 z-index 会被频谱 canvas 压住）与 `overlay`（精简浮窗，`top-10 bottom-3` 铺满，**不要**套 `max-h-[46vh]`，浮窗 ~240px 高会被夹短）
 - **曲目时长**（QYP3-052）：`music_tracks.duration` 有两条来源，**都不要拆**——
   ① 扫描期 `library-scanner/tag-parser.ts` 从文件头解析（FLAC STREAMINFO / m4a mvhd /
   mp3 的 Xing·Info 总帧数，退化到 ID3 `TLEN`，再退化到"前 40 帧码率完全一致"的 CBR
@@ -121,8 +121,10 @@
   `getNormalBounds()`（最大化时 `getBounds()` 是最大化矩形），且 profile 不是
   normal 时绝不覆盖——否则退出音乐模式会回到竖屏尺寸
 - **精简模式 = 主窗口原地缩小，不新开窗口**（QYP3-035）。播放音频时可点迷你条
-  的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗，
-  渲染层切到 `components/CompactPlayer`（复用 `SpectrumGraph`）。**必须同窗
+  的「精简」按钮（或设置里开「播放音频时自动进入」）把主窗口缩成右上角小浮窗
+  （`COMPACT_WIDTH/HEIGHT`，现为 **400×240**，`setResizable(false)`——尺寸
+  是常量算出来的，不是用户可拖的），渲染层切到 `components/CompactPlayer`
+  （复用 `SpectrumGraph`）。**必须同窗
   改尺寸**：播放状态与 30fps 频谱都在主窗口 renderer 里（`getSpectrum` 读同一个
   WebAudioEngine），另开 BrowserWindow 就得把频谱跨进程转发，老机 CPU 不划算。
   几何全在 `ui-shell/compact-window.ts`：进入前记住 bounds/resizable/置顶，

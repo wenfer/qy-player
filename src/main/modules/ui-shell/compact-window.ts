@@ -13,7 +13,13 @@ import { BrowserWindow, screen, type Rectangle } from 'electron';
  */
 
 export const COMPACT_WIDTH = 400;
-export const COMPACT_HEIGHT = 300;
+/**
+ * 浮窗高度（QYP3-068s：300 → 240）。频谱卡片是 `flex-1`，会把剩余高度全吃掉，
+ * 300 时画布有 134px、16 段 → 每格 6.4×6 正好是正方形，40 柱 × 16 行的方块
+ * 铺满整块面板，看着就是一堵密集点阵。收到 240 后画布 ≈74px，格子变成
+ * 6.4×3 的横向灯珠（老式功放 LED 的比例），整窗也更像个小挂件。
+ */
+export const COMPACT_HEIGHT = 240;
 export const COMPACT_MARGIN = 16;
 /**
  * 竖窄屏音乐窗口（QYP3-044，QYP3-068i 收窄、QYP3-068l 再收窄）：音乐模式
