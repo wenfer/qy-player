@@ -33,6 +33,11 @@ export const IPC_CHANNELS = {
     /** 播放期回填真实时长（QYP3-052）：扫描解析不出来的曲目，播放时补上。 */
     SET_TRACK_DURATION: 'music:set-track-duration',
     /**
+     * 音效链热更新（QYP3-068v）：会话中改音效立刻生效（mpv 侧防抖后应用，
+     * 因为改 af 会重建滤镜链）。renderer 内置引擎不走这里，直接改 AudioParam。
+     */
+    APPLY_AUDIO_CHAIN: 'music:apply-audio-chain',
+    /**
      * 当前播放的音乐状态（QYP3-053）：只存"上次在放哪首 + 放到哪"，
      * **不写播放历史**（音乐的观看进度不再是持久化概念，只在本次会话内有效）。
      */

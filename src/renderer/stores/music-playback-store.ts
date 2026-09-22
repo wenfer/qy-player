@@ -61,6 +61,8 @@ export interface MusicPlayingState {
   queueIndex: number;
   repeat: RepeatMode;
   shuffle: boolean;
+  /** 当前生效的音效链（QYP3-068v）。 */
+  audioFx: AudioFxSettings;
   errorMessage: string | null;
   /** 引擎队列快照（next/prev 后恢复 current；不进渲染热点）。 */
   queueSnapshot: EngineExtTrack[];
@@ -113,6 +115,14 @@ export interface MusicPlaybackStore extends MusicPlayingState {
    * （`setQueueMode`），拆成 setRepeat/toggleShuffle 就总有漏掉同步的口子。
    */
   cyclePlayMode: () => void;
+  /**
+   * 会话中改音效（QYP3-068v）：拖滑块即调用。
+   *
+   * 两个通道都发，由各自判断要不要处理——内置引擎改 AudioParam（真实时），
+   * mpv 走 IPC（主进程防抖；改 af 会重建滤镜链，连续改会爆音）。
+   * **这里不写盘**：写盘由面板在松手/关闭时做（沿用既有模式）。
+   */
+  applyAudioFx: (fx: AudioFxSettings) => void;
   clearError: () => void;
   /** 拾音器（QYP3-023）：实时频谱快照；非 renderer 引擎返回 null。 */
   getSpectrum: () => Uint8Array | null;
@@ -619,6 +629,8 @@ function maybeReportDuration(): void {
 
 /** 音频链设备侧参数（主进程按此 set_property；P2 增加 ReplayGain 高级项）。 */
 interface AudioChainSettings {
+  /** 音效链（QYP3-068v）：mpv 用它生成 af；eqGains 是其旧的 10 段形式。 */
+  audioFx: AudioFxSettings;
   eqGains: number[] | null;
   replaygain: string | null;
   replaygainPreamp: number | null;
@@ -627,11 +639,12 @@ interface AudioChainSettings {
 }
 
 /**
- * 音频链设置读取（QYP3-012 + P2）：EQ dB 数组 + ReplayGain（模式与
+ * 音频链设置读取（QYP3-012 + P2 + QYP3-068v）：音效链 + ReplayGain（模式与
  * 预增益/兜底增益/削波保护）。读不到的项留给主进程默认值。
  */
 async function readAudioChainSettings(): Promise<AudioChainSettings> {
   const empty: AudioChainSettings = {
+    audioFx: AUDIO_FX_DEFAULT,
     eqGains: null,
     replaygain: null,
     replaygainPreamp: null,
@@ -656,6 +669,7 @@ async function readAudioChainSettings(): Promise<AudioChainSettings> {
       return Number.isFinite(n) ? n : null;
     };
     return {
+      audioFx: await readAudioFxSettings(),
       eqGains: Array.isArray(eqValue) ? eqValue.map((v) => Number(v) || 0) : null,
       replaygain: rg,
       replaygainPreamp: num(preampValue),
@@ -698,6 +712,8 @@ async function readAudioFxSettings(): Promise<AudioFxSettings> {
 /** 音频链 → playerLoadFile 第 6 参数（未设置的模式不发键，主进程用默认值）。 */
 function audioChainPayload(chain: AudioChainSettings): Record<string, unknown> {
   return {
+    // QYP3-068v：完整音效链（mpv 侧据此生成 af）；eqGains 保留作兼容回退
+    fx: chain.audioFx,
     ...(chain.eqGains ? { eqGains: chain.eqGains } : {}),
     ...(chain.replaygain ? { replaygain: chain.replaygain } : {}),
     ...(chain.replaygainPreamp !== null ? { replaygainPreamp: chain.replaygainPreamp } : {}),
@@ -850,8 +866,11 @@ async function fallbackToMpv(track: EngineExtTrack): Promise<void> {
   }
 }
 
-export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({  engine: null,
+export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
+  engine: null,
   current: null,
+  /** 当前生效的音效链（QYP3-068v）；起播时从设置读进、面板可改。 */
+  audioFx: AUDIO_FX_DEFAULT,
   position: 0,
   duration: 0,
   isPlaying: false,
@@ -881,6 +900,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     resolveFailedIds.clear();
     const token = ++playToken;
     const startQueueId = queueIdFor(start, startIndex);
+    // 起播时读一次音效链：内置引擎在此灌进音频图，mpv 侧随 loadfile 的
+    // audioChain 下发（两者各走各的路，都由主进程/引擎自己判要不要处理）
+    let startFx = AUDIO_FX_DEFAULT;
     try {
       const resolution = (await window.electronAPI.resolvePlayback(
         refOfTrack(start)
@@ -942,8 +964,9 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
         }
         if (token !== playToken) return;
         const engineInstance = getEngine();
-        // QYP3-068v：音效链与起播时一致（机上还有 believed 的说法，见 setAudioFx）
-        engineInstance.setAudioFx(await readAudioFxSettings());
+        // QYP3-068v：起播时把当前音效链灌进引擎（节点常驻，会话中改也走同一条路）
+        startFx = await readAudioFxSettings();
+        engineInstance.setAudioFx(startFx);
         // 应用当前音量（换曲不重置用户设定的音量）
         engineInstance.setVolume(get().volume / 100);
         lastReportAt = Date.now();
@@ -978,6 +1001,7 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
           // mpv 引擎的本地队列只在 mpv 分支记（webaudio 走 queueSnapshot）
           mpvQueue: [],
           mpvQueueIndex: -1,
+          audioFx: startFx,
         });
         // QYP3-038：服务器曲目起播先开 Sessions/Playing 会话（本地清空）
         beginServerSession(queue[idx] ?? null);
@@ -1204,6 +1228,15 @@ export const useMusicPlaybackStore = create<MusicPlaybackStore>((set, get) => ({
     // 必须走 setQueueMode——`queueState` 是只读快照，往它上面写字段是静默
     // 空操作（QYP3-068t 修的就是这个：会话中切模式曾对内置引擎完全无效）
     engineSingleton?.setQueueMode(next.repeat, next.shuffle);
+  },
+
+  applyAudioFx: (fx) => {
+    const clean = sanitizeAudioFx(fx);
+    set({ audioFx: clean });
+    // 内置引擎：直改 AudioParam，真实时
+    engineSingleton?.setAudioFx(clean);
+    // mpv：主进程那边有门禁（非 mpv 音乐会话直接忽略）与防抖
+    window.electronAPI?.applyAudioChain?.(clean).catch(() => {});
   },
 
   clearError: () => set({ errorMessage: null }),

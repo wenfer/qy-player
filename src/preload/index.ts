@@ -219,6 +219,11 @@ const electronAPI = {
     position: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.SET_NOW_PLAYING, record),
   getNowPlaying: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.GET_NOW_PLAYING),
+  /**
+   * 音效链热更新（QYP3-068v）：把整份音效设置交给主进程，mpv 侧防抖后
+   * 重建 af 链。非 mpv 音乐会话（含 renderer 内置引擎）时主进程直接忽略。
+   */
+  applyAudioChain: (fx: unknown) => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.APPLY_AUDIO_CHAIN, fx),
   clearNowPlaying: () => ipcRenderer.invoke(IPC_CHANNELS.MUSIC.CLEAR_NOW_PLAYING),
   // 服务器音乐会话与进度（QYP3-038）：webaudio 播放不经 LOAD_FILE，
   // Sessions/Playing 系列由渲染层节流后经这两条通道上报
