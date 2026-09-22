@@ -42,9 +42,10 @@ export const useResourceStore = create<ResourceStoreState>((set) => ({
       })
       .catch(() => undefined);
     void Promise.resolve(window.electronAPI.getSettings?.('playback.powerSave'))
-      .then((res) => {
-        const v = (res as { data?: unknown } | undefined)?.data;
-        // 只有显式 false 才关闭（未设置 = 默认开启）
+      .then((v) => {
+        // 只有显式 false 才关闭（未设置 = 默认开启）。
+        // 注意 GET 直接返回值、不包 {ok,data}——读 `?.data` 会恒为 undefined，
+        // 于是关掉开关后重启又变回开（QYP3-068v 修）
         set({ powerSave: v !== false && v !== 'false' });
       })
       .catch(() => undefined);

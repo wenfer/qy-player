@@ -35,7 +35,7 @@ beforeEach(() => {
   // 注意：store 的事件桥只在首次 init 时挂载（模块级幂等标志），
   // 所以这里不能清空 expiredCb——它保存的是第一次挂载的回调，
   // 回调内部读的是实时状态，跨用例依然有效。
-  getSettings.mockResolvedValue({ ok: true, data: null });
+  getSettings.mockResolvedValue(null);
   setSettings.mockResolvedValue({ ok: true });
   getSleepTimer.mockResolvedValue({ ok: true, data: idle });
   setSleepTimer.mockImplementation((minutes: number) =>

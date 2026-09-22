@@ -15,6 +15,7 @@ import { useCompactModeStore } from '../../stores/compact-mode-store';
 import { useAppModeStore } from '../../stores/app-mode-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useToastStore } from '../../stores/toast-store';
+import { readSetting } from '../../utils/read-setting';
 import PlayModeButton from '../PlayModeButton';
 import LyricsPanel from '../LyricsPanel';
 import Visualizer, { type VisualizerMode } from '../Visualizer';
@@ -122,21 +123,18 @@ export default function MusicMiniBar() {
 
   useEffect(() => {
     // 拾音器设置（QYP3-023）：默认 auto（renderer 引擎→频谱，否则波形）
-    void window.electronAPI
-      .getSettings('playback.visualizer')
-      .then((res) => {
-        const value = (res as { data?: unknown })?.data;
+    void readSetting('playback.visualizer')
+      .then((value) => {
         if (typeof value === 'string') setVisualizer(value);
       })
       .catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    // 频谱显隐（QYP3-048）：JSON 对称——SET 字符串化、GET 由 decodeConfigValue 还原
-    void window.electronAPI
-      .getSettings('playback.showSpectrum')
-      .then((res) => {
-        const value = (res as { data?: unknown })?.data;
+    // 频谱显隐（QYP3-048）：JSON 对称——SET 字符串化、GET 由 decodeConfigValue 还原。
+    // 读值必须走 readSetting（GET 不包 {ok,data}），否则开关重启即复位
+    void readSetting('playback.showSpectrum')
+      .then((value) => {
         if (typeof value === 'boolean') setShowSpectrum(value);
       })
       .catch(() => undefined);

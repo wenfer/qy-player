@@ -3,6 +3,7 @@ import { MonitorUp, Sliders } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 import { useSleepTimerStore, formatRemaining } from '../../stores/sleep-timer-store';
 import { useResourceStore } from '../../stores/resource-store';
+import { readSetting } from '../../utils/read-setting';
 import AudioFxPanel from '../../components/AudioFxPanel';
 
 /**
@@ -66,38 +67,29 @@ export default function MusicSettings() {
   useEffect(() => {
     (async () => {
       try {
-        const e = (await window.electronAPI.getSettings('playback.musicEngine')) as {
-          data?: unknown;
-        };
-        setEngine(typeof e?.data === 'string' ? e.data : 'spectrum-first');
-        const r = (await window.electronAPI.getSettings('playback.replaygain')) as {
-          data?: unknown;
-        };
-        setReplaygain(typeof r?.data === 'string' ? r.data : 'off');
-        const p = (await window.electronAPI.getSettings('playback.replaygainPreamp')) as {
-          data?: unknown;
-        };
-        if (Number.isFinite(Number(p?.data))) setRgPreamp(Number(p?.data));
-        const fb = (await window.electronAPI.getSettings('playback.replaygainFallback')) as {
-          data?: unknown;
-        };
-        if (Number.isFinite(Number(fb?.data))) setRgFallback(Number(fb?.data));
-        const c = (await window.electronAPI.getSettings('playback.replaygainClip')) as {
-          data?: unknown;
-        };
-        setRgClip(c?.data === true || c?.data === 'true');
-        const f = (await window.electronAPI.getSettings('deskLyrics.fontSize')) as { data?: unknown };
-        if (Number.isFinite(Number(f?.data)) && Number(f?.data) > 0) setDeskFontSize(Number(f?.data));
-        const l = (await window.electronAPI.getSettings('deskLyrics.locked')) as { data?: unknown };
-        setDeskLocked(l?.data !== false && l?.data !== 'false');
-        const v = (await window.electronAPI.getSettings('playback.visualizer')) as { data?: unknown };
-        if (typeof v?.data === 'string') setVisualizer(v.data);
-        const os = (await window.electronAPI.getSettings('playback.offlineSpectrum')) as {
-          data?: unknown;
-        };
-        setOfflineSpectrum(os?.data !== false && os?.data !== 'false');
-        const ac = (await window.electronAPI.getSettings('playback.autoCompact')) as { data?: unknown };
-        setAutoCompact(ac?.data === true || ac?.data === 'true');
+        // 一律走 readSetting：`SETTINGS.GET` 直接返回解码后的值，不包
+        // { ok, data }。以前这里读 `?.data` 恒为 undefined，于是本页永远
+        // 显示默认值而不是存的值（QYP3-068v 修）
+        const e = await readSetting('playback.musicEngine');
+        setEngine(typeof e === 'string' ? e : 'spectrum-first');
+        const r = await readSetting('playback.replaygain');
+        setReplaygain(typeof r === 'string' ? r : 'off');
+        const p = await readSetting('playback.replaygainPreamp');
+        if (Number.isFinite(Number(p))) setRgPreamp(Number(p));
+        const fb = await readSetting('playback.replaygainFallback');
+        if (Number.isFinite(Number(fb))) setRgFallback(Number(fb));
+        const c = await readSetting('playback.replaygainClip');
+        setRgClip(c === true || c === 'true');
+        const f = await readSetting('deskLyrics.fontSize');
+        if (Number.isFinite(Number(f)) && Number(f) > 0) setDeskFontSize(Number(f));
+        const l = await readSetting('deskLyrics.locked');
+        setDeskLocked(l !== false && l !== 'false');
+        const v = await readSetting('playback.visualizer');
+        if (typeof v === 'string') setVisualizer(v);
+        const os = await readSetting('playback.offlineSpectrum');
+        setOfflineSpectrum(os !== false && os !== 'false');
+        const ac = await readSetting('playback.autoCompact');
+        setAutoCompact(ac === true || ac === 'true');
       } catch {
         // 默认值
       } finally {

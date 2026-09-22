@@ -76,7 +76,7 @@ beforeEach(() => {
     })
   );
   api.playerLoadFile.mockResolvedValue(undefined);
-  api.getSettings.mockResolvedValue({ ok: true, data: null });
+  api.getSettings.mockResolvedValue(null);
   api.getServerLyrics.mockResolvedValue({ ok: true, data: { hasLyrics: true, content: '[00:01.00]词' } });
   api.getMusicLyrics.mockResolvedValue({ ok: true, data: { hasLyrics: false, content: null } });
   api.getMusicAlbums.mockResolvedValue({ ok: true, data: { albums: [] } });

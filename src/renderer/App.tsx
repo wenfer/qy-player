@@ -79,8 +79,9 @@ export function CompactModeHost() {
     if (engine && !was) {
       if (useCompactModeStore.getState().compact) return;
       void Promise.resolve(window.electronAPI.getSettings?.('playback.autoCompact'))
-        .then((res) => {
-          const v = (res as { data?: unknown } | undefined)?.data;
+        .then((v) => {
+          // GET 直接返回解码后的值（不包 {ok,data}）——读 `?.data` 的话这个
+          // 开关永远不会生效（QYP3-068v 修）
           if (v === true || v === 'true') useCompactModeStore.getState().enter();
         })
         .catch(() => undefined);

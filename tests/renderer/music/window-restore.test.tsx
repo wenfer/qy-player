@@ -21,9 +21,8 @@ const api = {
   getWindowProfile: vi.fn(),
   setMusicMode: vi.fn(async () => ({ ok: true })),
   setCompactMode: vi.fn(async () => ({ ok: true })),
-  getSettings: vi.fn(
-    async (): Promise<{ ok: boolean; data: unknown }> => ({ ok: true, data: null })
-  ),
+  // SETTINGS.GET 直接返回值、不包 {ok,data}（见 src/renderer/utils/read-setting.ts）
+  getSettings: vi.fn(async (): Promise<unknown> => null),
   getMusicSpectrum: vi.fn(
     async (): Promise<{ ok: boolean; data: unknown }> => ({ ok: true, data: { status: 'none' } })
   ),
@@ -113,7 +112,7 @@ describe('窗口/模式恢复（QYP3-051）', () => {
   });
 
   it('会话从无到有：按设置自动进入精简模式（原有行为不回归）', async () => {
-    api.getSettings.mockResolvedValue({ ok: true, data: true });
+    api.getSettings.mockResolvedValue(true);
     render(<CompactModeHost />);
 
     setEngine('mpv');

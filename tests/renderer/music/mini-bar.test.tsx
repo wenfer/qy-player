@@ -18,9 +18,8 @@ const api = {
   onMusicSessionEnd: vi.fn(() => () => undefined),
   onMusicCommand: vi.fn(() => () => undefined),
   getMusicFavorites: vi.fn(() => Promise.resolve({ ok: true, data: { tracks: [] } })),
-  getSettings: vi.fn((_key: string): Promise<{ ok: boolean; data: unknown }> =>
-    Promise.resolve({ ok: true, data: null })
-  ),
+  // SETTINGS.GET 直接返回值、不包 {ok,data}（见 src/renderer/utils/read-setting.ts）
+  getSettings: vi.fn((_key: string): Promise<unknown> => Promise.resolve(null)),
   setSettings: vi.fn(() => Promise.resolve({ ok: true })),
   pushDeskLyricsState: vi.fn(() => Promise.resolve({ ok: true })),
   setMusicEngineActive: vi.fn(() => Promise.resolve({ ok: true })),
@@ -48,9 +47,7 @@ const serverTrack = { ...localTrack, id: 0, title: '以父之名', url: 'http://
 beforeEach(() => {
   vi.clearAllMocks();
   // getSettings 的实现会被单个用例按 key 改写，这里恢复默认，避免串味
-  api.getSettings.mockImplementation((_key: string) =>
-    Promise.resolve({ ok: true, data: null })
-  );
+  api.getSettings.mockImplementation((_key: string) => Promise.resolve(null));
   useCompactModeStore.setState({ compact: false });
   useSleepTimerStore.setState({ active: false, minutes: null, expiresAt: null, remainingMs: null });
   useMusicPlaybackStore.setState({
@@ -127,7 +124,7 @@ describe('mini bar spectrum toggle (QYP3-048)', () => {
 
   it('starts hidden when the persisted choice says so', async () => {
     api.getSettings.mockImplementation((key: string) =>
-      Promise.resolve({ ok: true, data: key === 'playback.showSpectrum' ? false : null })
+      Promise.resolve(key === 'playback.showSpectrum' ? false : null)
     );
     mountPlaying();
     await screen.findByText('以父之名');

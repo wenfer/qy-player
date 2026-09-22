@@ -20,7 +20,8 @@ import { useResourceStore } from '../../../src/renderer/stores/resource-store';
 
 const api = {
   setCompactMode: vi.fn(() => Promise.resolve({ ok: true })),
-  getSettings: vi.fn(() => Promise.resolve({ ok: true, data: null })),
+  // SETTINGS.GET 直接返回值、不包 {ok,data}
+  getSettings: vi.fn(() => Promise.resolve(null)),
   setSettings: vi.fn(() => Promise.resolve({ ok: true })),
   playerControl: vi.fn(() => Promise.resolve({ ok: true })),
   reportMusicProgress: vi.fn(() => Promise.resolve({ ok: true })),

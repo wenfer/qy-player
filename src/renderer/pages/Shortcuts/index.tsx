@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Keyboard, RotateCcw, Pencil, Check, X, Monitor, Play, Lock } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
+import { readSetting } from '../../utils/read-setting';
 import {
   GLOBAL_SHORTCUTS,
   MPV_BINDINGS,
@@ -75,14 +76,17 @@ export function ShortcutsContent() {
     (async () => {
       try {
         const [g, m] = await Promise.all([
-          window.electronAPI.getSettings('shortcuts'),
-          window.electronAPI.getSettings('mpv-shortcuts'),
+          readSetting('shortcuts'),
+          readSetting('mpv-shortcuts'),
         ]);
-        // SETTINGS.GET 已与 SET 对称解析（对象直接可用，无需再 JSON.parse）
+        // SETTINGS.GET 已与 SET 对称解析（对象直接可用，无需再 JSON.parse）。
+        // ⚠️ 它**不包 {ok,data}**：以前读 `?.data` 恒为 undefined，于是本页
+        // 永远加载成默认值——用户改一个键保存时会把整份配置覆盖成"默认值 +
+        // 这一处改动"，静默丢掉其余自定义绑定
         const asOverrides = (value: unknown): Overrides =>
           typeof value === 'object' && value !== null ? (value as Overrides) : {};
-        setGlobalOverrides(asOverrides((g as { data?: unknown })?.data));
-        setMpvOverrides(asOverrides((m as { data?: unknown })?.data));
+        setGlobalOverrides(asOverrides(g));
+        setMpvOverrides(asOverrides(m));
       } catch {
         // Fall back to defaults
       } finally {
