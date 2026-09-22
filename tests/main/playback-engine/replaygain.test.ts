@@ -59,4 +59,44 @@ describe('replaygain contract (P2)', () => {
       clip: true,
     });
   });
+
+  /**
+   * 真实调用方是主进程的 LOAD_FILE，拿到的是渲染层 `audioChainPayload` 的
+   * 扁平对象——键名带 `replaygain` 前缀（与配置键 `playback.replaygainPreamp`
+   * 一致），不是模块内部的 `preamp`/`fallback`/`clip`。
+   * 原来只认后者，于是 mode 生效而三个高级项全被静默吃掉（QYP3-068v 真机
+   * 实测：mpv 的 replaygain 是 track，但 replaygain-preamp 仍是 0）。
+   */
+  it('reads the renderer payload shape (replaygain* prefixed keys)', () => {
+    const payload = {
+      fx: { enabled: true },
+      replaygain: 'track',
+      replaygainPreamp: 4,
+      replaygainFallback: -3,
+      replaygainClip: true,
+    };
+    expect(normalizeReplayGain(payload)).toEqual({
+      mode: 'track',
+      preamp: 4,
+      fallback: -3,
+      clip: true,
+    });
+  });
+
+  it('prefers the short keys when both spellings are present', () => {
+    expect(
+      normalizeReplayGain({ replaygain: 'album', preamp: 1, replaygainPreamp: 9 })
+    ).toEqual({ mode: 'album', preamp: 1, fallback: 0, clip: false });
+  });
+
+  it('still clamps and sanitises the prefixed keys', () => {
+    expect(
+      normalizeReplayGain({
+        replaygain: 'track',
+        replaygainPreamp: 999,
+        replaygainFallback: '不是数字',
+        replaygainClip: 'yes',
+      })
+    ).toEqual({ mode: 'track', preamp: 15, fallback: 0, clip: false });
+  });
 });

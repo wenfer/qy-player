@@ -45,15 +45,25 @@ export function normalizeReplayGainMode(raw: unknown): ReplayGainMode {
 /**
  * 渲染进程传来的音频链片段 → 归一后的 ReplayGain 参数。
  * mode 为 off 时返回 null（= 不设置任何 RG 属性，等价关闭）。
+ *
+ * ⚠️ 三个高级项**两种键名都要收**：渲染层的 LOAD_FILE payload 是扁平对象
+ * `{ fx, replaygain, replaygainPreamp, replaygainFallback, replaygainClip }`
+ * （键名跟配置键 `playback.replaygainPreamp` 一致），而本模块起初按
+ * `{ preamp, fallback, clip }` 读——结果只有 mode 生效，预增益/兜底增益/
+ * 削波保护全被静默吃掉（`undefined` → clampDb 兜成 0 / `=== true` 为假）。
+ * 单测当时直接喂 `preamp`，正好绕过了真实 payload，所以一直绿。
+ * 归一化是本模块的唯一职责，键名差异就在这里吸收，不要推给调用方。
  */
 export function normalizeReplayGain(raw: unknown): ReplayGainChain | null {
   const input = (raw ?? {}) as Record<string, unknown>;
   const mode = normalizeReplayGainMode(input.mode ?? input.replaygain);
   if (mode === 'off') return null;
+  const pick = (short: string, prefixed: string): unknown =>
+    input[short] !== undefined ? input[short] : input[prefixed];
   return {
     mode,
-    preamp: clampDb(input.preamp),
-    fallback: clampDb(input.fallback),
-    clip: input.clip === true,
+    preamp: clampDb(pick('preamp', 'replaygainPreamp')),
+    fallback: clampDb(pick('fallback', 'replaygainFallback')),
+    clip: pick('clip', 'replaygainClip') === true || pick('clip', 'replaygainClip') === 'true',
   };
 }
