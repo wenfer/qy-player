@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  BAR_COLOR,
+  LED_AMBER,
+  LED_GREEN,
+  LED_RED,
   PEAK_COLOR,
   createBarsPainter,
   createSpectrumDecay,
   downsamplePeaks,
   litCells,
+  segmentColor,
+  shapeLevel,
 } from '../../../src/renderer/components/Visualizer/bars-painter';
 
 /**
  * 经典弹跳柱状频谱（QYP3-047）：分段 LED + 峰值帽。
  * 关注点：下采样取峰值、点亮的格数、峰值帽**缓慢下落**（不是跟着电平瞬间归零）。
+ * QYP3-068r：老式功放 LED 的三段分区配色（绿 → 琥珀 → 红）+ 电平整形。
  */
 
 /** 记录 fillRect 的假 2D 上下文。 */
@@ -47,16 +52,53 @@ describe('bars-painter helpers (QYP3-047)', () => {
     expect(litCells(2, 8)).toBe(8); // 钳制
     expect(litCells(0.5, 8)).toBe(4);
   });
+
+  it('segmentColor splits the column into green / amber / red zones (QYP3-068r)', () => {
+    // 8 段（拾音器）：绿 5 格 / 琥珀 2 格 / 红 1 格
+    expect(Array.from({ length: 8 }, (_, s) => segmentColor(s, 8))).toEqual([
+      LED_GREEN, LED_GREEN, LED_GREEN, LED_GREEN, LED_GREEN,
+      LED_AMBER, LED_AMBER,
+      LED_RED,
+    ]);
+    // 16 段（频谱图）：绿 10 格 / 琥珀 4 格 / 红 2 格——比例与 8 段一致
+    const tall = Array.from({ length: 16 }, (_, s) => segmentColor(s, 16));
+    expect(tall.filter((c) => c === LED_GREEN).length).toBe(10);
+    expect(tall.filter((c) => c === LED_AMBER).length).toBe(4);
+    expect(tall.filter((c) => c === LED_RED).length).toBe(2);
+    // 整格换色：三段各自连续（去重后的出现顺序就是绿→琥珀→红）
+    expect([...new Set(tall)]).toEqual([LED_GREEN, LED_AMBER, LED_RED]);
+  });
+
+  it('shapeLevel suppresses the noise floor and compresses mid levels (QYP3-068r)', () => {
+    expect(shapeLevel(0)).toBe(0);
+    expect(shapeLevel(-1)).toBe(0);
+    expect(shapeLevel(0.1)).toBe(0); // 噪声底以下一律不点亮
+    expect(shapeLevel(1)).toBeCloseTo(1, 6); // 满电平仍然顶格
+    // 中低电平被压下来：0.6 → ~0.30，0.8 → ~0.61（柱子之间才拉得开）
+    expect(shapeLevel(0.6)).toBeCloseTo(Math.pow(0.48 / 0.88, 2), 6);
+    expect(shapeLevel(0.6)).toBeLessThan(0.35);
+    expect(shapeLevel(0.8)).toBeLessThan(0.65);
+    // 单调不减（不会出现"电平更高却更矮"）
+    expect(shapeLevel(0.7)).toBeGreaterThan(shapeLevel(0.6));
+  });
 });
 
 describe('createBarsPainter (QYP3-047)', () => {
-  it('lights one LED cell per level step, all in the single amber color', () => {
+  it('lights one LED cell per level step in the three-zone LED colors', () => {
     const { ctx, rects } = fakeCtx();
     const painter = createBarsPainter(ctx, { bars: 1, segments: 8 });
     painter.paint(100, 80, new Uint8Array([255]), 16);
-    // 8 段全亮 + 1 条峰值帽；纯琥珀黄（用户偏好，无高度渐变）
-    expect(rects.filter((r) => r.style !== PEAK_COLOR).length).toBe(8);
-    expect(rects.filter((r) => r.style !== PEAK_COLOR).every((r) => r.style === BAR_COLOR)).toBe(true);
+    // 8 段全亮 + 1 条峰值帽；老式功放 LED 的绿/琥珀/红三段分区
+    const cells = rects.filter((r) => r.style !== PEAK_COLOR);
+    expect(cells.length).toBe(8);
+    expect(cells.map((r) => r.style)).toEqual([
+      LED_GREEN, LED_GREEN, LED_GREEN, LED_GREEN, LED_GREEN,
+      LED_AMBER, LED_AMBER,
+      LED_RED,
+    ]);
+    // 从下往上画：越靠上的格子 y 越小
+    const ys = cells.map((r) => r.y);
+    expect(ys).toEqual([...ys].sort((a, b) => b - a));
   });
 
   it('drops the peak cap gradually instead of snapping to zero', () => {
@@ -92,6 +134,25 @@ describe('createBarsPainter (QYP3-047)', () => {
     expect(rects.length).toBe(0);
     painter.paint(100, 80, new Uint8Array(0), 16);
     expect(rects.length).toBe(0);
+  });
+
+  it('auto-ranges quiet material instead of leaving the panel dark (QYP3-068r)', () => {
+    // 0.25 的电平（安静曲目）在新 painter 上要顶格点亮——不归一的话 16 格里只亮 4 格
+    const { ctx, rects } = fakeCtx();
+    const painter = createBarsPainter(ctx, { bars: 1, segments: 8 });
+    painter.paint(100, 80, new Uint8Array([64, 64]), 16);
+    expect(rects.some((r) => r.style === LED_RED)).toBe(true);
+  });
+
+  it('keeps the reference on a recent loud peak instead of following every frame', () => {
+    const { ctx, rects } = fakeCtx();
+    const painter = createBarsPainter(ctx, { bars: 1, segments: 8 });
+    painter.paint(100, 80, new Uint8Array([255]), 16); // 先来一记强拍
+    rects.length = 0;
+    painter.paint(100, 80, new Uint8Array([64, 64]), 16); // 紧跟着一小节安静
+    // 参考电平回落要 2.5s 时间常数：这一帧不该被立刻放大到顶格
+    expect(rects.some((r) => r.style === LED_RED)).toBe(false);
+    expect(rects.filter((r) => r.style !== PEAK_COLOR).length).toBeLessThan(8);
   });
 
   it('settled() turns true only after the caps have fallen back (QYP3-059)', () => {

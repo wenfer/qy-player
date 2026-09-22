@@ -57,7 +57,8 @@ interface VisualizerProps {
   className?: string;
 }
 
-const BARS = 48;
+/** QYP3-068r：48 → 32 柱（播放条 ~348px 宽、32px 高，再密就数不清灯珠了）。 */
+const BARS = 32;
 /** 拾音器 32px 高，8 段 LED 已经够密。 */
 const SEGMENTS = 8;
 const SPECTRUM_COLOR = 'rgba(255, 209, 102, 0.9)';

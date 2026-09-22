@@ -200,10 +200,25 @@
   同屏两个频谱）；瀑布声谱图与其持久化（`playback.spectrumChart`）已删除，
   只剩经典弹跳柱状一种。柱状绘制统一走 `Visualizer/bars-painter.ts`
   （分段 LED 柱 + 峰值帽，峰值帽按 `dt` 缓慢下落——`paint` 的 dt 必须在推进
-  `last` **之前**算，否则峰值帽永远不落）；`Visualizer`（48 柱/8 段）
-  与 `SpectrumGraph`（56 柱/16 段）复用同一个 painter。**painter 只画"点亮的
+  `last` **之前**算，否则峰值帽永远不落）；`Visualizer`（32 柱/8 段）
+  与 `SpectrumGraph`（40 柱/16 段）复用同一个 painter。**painter 只画"点亮的
   格 + 峰值帽"、不清底**——调用方每帧必须先 `clearRect`（SpectrumGraph 漏了
   导致浮窗里残影叠影，QYP3-058 修复；Visualizer 一直是清的，别再拆）。
+  **QYP3-068r 起按老式功放 LED 面板重做观感**（柱数/配色/电平三条都在
+  `bars-painter.ts`，别再各组件里各调一份）：
+  ①柱数 56→40（频谱图，浮窗只有 ~376px 宽）/ 48→32（拾音器），段间距
+  0.28→0.34——56 柱时每柱不到 5px、空隙被挤没，整块面板糊成一堵色墙；
+  ②配色是**整格换色**的三段分区 `LED_GREEN`(底部 60%) → `LED_AMBER`(25%) →
+  `LED_RED`(顶部 15%)，`segmentColor(s, segments)` 按格子中心取（8 段与 16 段
+  各段格数比例一致），峰值帽改中性亮白。这是把 QYP3-047 的"纯琥珀黄"换掉的
+  用户明确要求；
+  ③**电平必须先自动量程再过 γ 曲线**（`shapeLevel`）。实测同一批文件响度能
+  差 10dB（live 版 mp3 的带峰值 0.90，安静 FLAC 只有 0.51），固定刻度必然
+  二选一：要么把安静的歌压成一排黑，要么把响的歌顶成一片——所以 `paint` 里
+  按"最近的参考电平"归一（`AGC_RELEASE_MS` 2.5s 慢回落、峰值立刻跟上、
+  `AGC_MIN_REF` 0.25 兜住底噪），不做成固定窗口。
+  `createSpectrumDecay` 的 τ 随之上调到 450ms：衰减作用在**压缩前**的字节上，
+  压缩链会放大回落速度，τ 不跟着调暂停时柱子会"啪"一下塌掉。
   **QYP3-048 起**：播放条里的拾音器高 32px（`MusicMiniBar` 的
   `VISUALIZER_HEIGHT`），控制条上还有「显示/隐藏频谱」按钮（`Activity` 图标、
   `aria-pressed`），开关持久化到 `playback.showSpectrum`（走 SETTINGS 的 JSON
