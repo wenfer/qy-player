@@ -104,8 +104,8 @@ appImage:
 win:
   icon: build/icon.png
   # 未签名（无证书）：SmartScreen 会提示，由发布说明告知用户
-  signingHashAlgorithms:
-    - sha256
+  # 注：electron-builder 26 把 signingHashAlgorithms 挪进了 signtoolOptions，
+  # 且它只在真的签名时才有意义——本项目不签名，故整条删掉而不是搬家
   extraResources:
     # scripts/fetch-mpv-win.js 产出的 mpv.exe（+ d3dcompiler_47.dll）
     - from: build/mpv-win

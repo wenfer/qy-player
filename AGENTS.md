@@ -400,22 +400,56 @@
   `node-gyp failed to rebuild 'better-sqlite3'`，Linux 带完整工具链所以一直没暴露）：
   1. **macOS：Python 3.12+ 删了 `distutils`**，而 `electron-builder@25 →
      @electron/rebuild@3.6.1` 锁的 `node-gyp@9.4.1` 还在 import 它
-     （`ModuleNotFoundError: No module named 'distutils'`）。package.json 的
-     `overrides.node-gyp: ^11.5.0` **不能删**——11.x 的 gyp 已不依赖 distutils
-     （`grep -r distutils node_modules/node-gyp/gyp/` 为空可复核），且
-     `@electron/rebuild@4` 自己也是用 `^11.2.0`；它调 node-gyp 的那几个入口
-     （`parseArgv`/`commands`/`todo`/`devDir` + `module.exports = () => new Gyp()`）
-     在 11 上原样保留，已对着 `@electron/rebuild/lib/module-type/node-gyp/worker.js`
-     逐项核对。改 Electron / electron-builder 版本时一并复核。
-     注意**本机验不了这一步**：从零重建要下载 Electron headers，而
-     `artifacts.electronjs.org` 在本机网络会超时（`~/.electron-gyp` 无缓存时
-     直接卡住）——真实编译只能交给 CI。
+     （`ModuleNotFoundError: No module named 'distutils'`）。**正确修法是升
+     `electron-builder` 到 26**（`26.16.1 → app-builder-lib@26.16.1 →
+     @electron/rebuild@4.2.0 → node-gyp@12.4.0`），不要再往 package.json 里
+     塞 `overrides.node-gyp`：
+     - **光升 node-gyp 只会把报错换成永久挂起**（1.5.0 首发第二次 CI 实测，
+       四个 job **包括 Linux** 全卡在 `npm ci` 50 分钟无输出）。原因是
+       node-gyp ≥10 把 `commands[name]` 换成了 `async function configure
+       (gyp, argv)`（**没有 callback 形参**），而 rebuild 3.6.1 的 worker 写的是
+       `await util.promisify(nodeGyp.commands[name])(args)`——promisify 在等一个
+       永远不会被调用的 callback，**这个 promise 永不 settle**。10.3.1 也是
+       async 风格，所以**不存在**能配 3.6.1 又带新 gyp 的 node-gyp 版本。
+       rebuild 4.2.0 的 worker 改成 `await nodeGyp.commands[name](args)` 才对上
+       （`grep -n 'nodeGyp.commands' node_modules/@electron/rebuild/lib/module-type/node-gyp/worker.js`）
+     - **也不能只 override `@electron/rebuild` 到 4.x**：app-builder-lib 25 会
+       `require("@electron/rebuild/lib/search-module")`，而 4.x 的 `exports`
+       只声明了 `"."`，子路径导入直接 `ERR_PACKAGE_PATH_NOT_EXPORTED`
+     - **本机验"挂起没了"的土办法**（不用下载 headers）：先
+       `cp -r node_modules/better-sqlite3/build /tmp/bs3-backup`，删掉 `build/`，
+       再 `npm_config_nodedir=/tmp/fake-nodedir-xyz npx electron-builder
+       install-app-deps`——健康的话 ~3s 就报 `gyp: .../common.gypi not found`
+       并失败退出（挂起的那种则一直不动）；跑完必须把 `build/` 还原。
+       真实编译仍只能交给 CI：`artifacts.electronjs.org` 在本机网络超时
+     - **electron-builder 26 的配置 schema 也变了**：未知键直接启动就报
+       `Invalid configuration object`。已知 `win.signingHashAlgorithms` 被挪进
+       `signtoolOptions`（本项目不签名，故整条删掉而不是搬家）。查新键的权威是
+       `node_modules/app-builder-lib/scheme.json`
   2. **Windows：runner 镜像换了 VS 版本**。`windows-latest` 现在是
      `windows-2025-vs2026`（**Visual Studio 2026**），而 node-gyp（含 11.x）
      只把 major 15/16/17 映射成 2017/2019/2022，VS 18 被判 unsupported →
      `Could not find any Visual Studio installation to use`。**升级 node-gyp
      解决不了**，所以 workflow 钉在 `windows-2022`（仍带 VS 2022）；等 node-gyp
      支持 VS2026 再考虑换回 `windows-latest`。
+  3. **升完 26 要验 Linux 没变**（硬纪律：Linux 行为逐字节不变）。`--linux
+     dir/deb` 本机可跑通（`@electron/rebuild` 对已编好的 better-sqlite3 报
+     `preparing`→`finished` 即跳过，秒级；不再挂）。electron-builder 26 会多出一条
+     **`desktopName is not set in package.json`** 警告——本机实测**不要理它**：把
+     1.1.0（25 打的）与新包的 deb 各自解出 `usr/share/applications/qy-player.desktop`
+     做过 `diff`，**完全一致**（`StartupWMClass=QY Player` 仍在）。真去设
+     `desktopName`/`syncDesktopName` 反而会改掉 WM_CLASS，让 1.4.0 起已经装好的
+     用户丢失任务栏/桌面图标关联。
+     两处**已知且无害**的差别，别当成回归去修：
+     - **deb 变大约 15%**（73.6MB→84.7MB）：同一个 26 自带的 fpm 版本压出来的
+       `data.tar.xz` 比自己跑 `xz -6`（76.2MB）还差，是 fpm/多线程 xz 的参数问题，
+       与内容无关（解包后 299.9MiB→297.7MiB，反而略小）；electron-builder 只暴露
+       `compression: xz` 这一档，没有 level 旋钮
+     - `control` 成员从 `control.tar.gz` 变成 `control.tar.xz`：dpkg ≥1.17
+       （Debian 10/Deepin 20.9 是 1.19）本来就支持，不影响老系统安装
+     注意**本机跑不完整 `dist:all`**：rpm 目标要系统装 `rpm`（提供 `rpmbuild`），
+     pacman 要 `libarchive-tools`（提供 `bsdtar`）——本机缺这两个，会在 rpm 那步
+     中止，所以 rpm/pacman 只能靠 CI 验（CI 的 workflow 里两样都装了）
 - **CI runner 标签会过期/漂移**：`macos-13` 已退役，用它的 job 会永远 `queued`
   （不报错，看起来像"卡住"，1.5.0 首发实测 mac-x64 排队 30+ 分钟）；macOS 15 之后
   **不带后缀的 macOS 标签是 arm64**（`macos-15`/`macos-26`/`macos-latest`），
