@@ -43,7 +43,12 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    runs-on: windows-latest
+    # 不用 windows-latest：它已经是 windows-2025-vs2026（**Visual Studio 2026**），
+    # 而 node-gyp（含 11.x，只映射 major 15/16/17 → 2017/2019/2022）认不出 VS 18，
+    # 报 "Could not find any Visual Studio installation to use"——1.5.0 首次发布
+    # 实测就是这么挂的（挂在下游 `npm ci` 的 postinstall 重建 better-sqlite3）。
+    # windows-2022 仍带 VS 2022，等 node-gyp 支持 VS2026 再考虑换回 latest。
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,8 +79,14 @@ jobs:
   # mac 的 x64/arm64 必须分架构构建：better-sqlite3 原生模块按 runner
   # 宿主架构编译，arm64 runner 上打出的 x64 包里会是 arm64 模块（Intel
   # 机器上 better-sqlite3 直接加载失败）
+  #
+  # runner 标签（2026-09 起，见 actions/runner-images README）：`macos-13`
+  # 已退役——用它会永远排在队列里（1.5.0 首次发布实测：mac-x64 job
+  # queued 30+ 分钟没等到 runner）。macOS 15 之后**不带后缀的标签是
+  # arm64**（`macos-15`/`macos-26`/`macos-latest` 全是 arm64），Intel 的
+  # 标准标签是 `macos-15-intel`（`*-large` 属于付费大规格，别用）。
   build-mac-x64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Checkout
         uses: actions/checkout@v4

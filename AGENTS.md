@@ -395,6 +395,32 @@
   是定义化兜底）。`electronDist` 已从 yml 移到 linux dist 脚本的
   `-c.electronDist=`（mac 双架构必须按架构下载，固定本地目录只有宿主
   架构）；测试脚本用 `cross-env`（Windows shell 不认 `VAR=1 cmd`）
+- **原生模块重建只会在 win/mac 挂，且有两个不同的坑**（1.5.0 首发 CI 实测，
+  症状都是 `postinstall: electron-builder install-app-deps` 里
+  `node-gyp failed to rebuild 'better-sqlite3'`，Linux 带完整工具链所以一直没暴露）：
+  1. **macOS：Python 3.12+ 删了 `distutils`**，而 `electron-builder@25 →
+     @electron/rebuild@3.6.1` 锁的 `node-gyp@9.4.1` 还在 import 它
+     （`ModuleNotFoundError: No module named 'distutils'`）。package.json 的
+     `overrides.node-gyp: ^11.5.0` **不能删**——11.x 的 gyp 已不依赖 distutils
+     （`grep -r distutils node_modules/node-gyp/gyp/` 为空可复核），且
+     `@electron/rebuild@4` 自己也是用 `^11.2.0`；它调 node-gyp 的那几个入口
+     （`parseArgv`/`commands`/`todo`/`devDir` + `module.exports = () => new Gyp()`）
+     在 11 上原样保留，已对着 `@electron/rebuild/lib/module-type/node-gyp/worker.js`
+     逐项核对。改 Electron / electron-builder 版本时一并复核。
+     注意**本机验不了这一步**：从零重建要下载 Electron headers，而
+     `artifacts.electronjs.org` 在本机网络会超时（`~/.electron-gyp` 无缓存时
+     直接卡住）——真实编译只能交给 CI。
+  2. **Windows：runner 镜像换了 VS 版本**。`windows-latest` 现在是
+     `windows-2025-vs2026`（**Visual Studio 2026**），而 node-gyp（含 11.x）
+     只把 major 15/16/17 映射成 2017/2019/2022，VS 18 被判 unsupported →
+     `Could not find any Visual Studio installation to use`。**升级 node-gyp
+     解决不了**，所以 workflow 钉在 `windows-2022`（仍带 VS 2022）；等 node-gyp
+     支持 VS2026 再考虑换回 `windows-latest`。
+- **CI runner 标签会过期/漂移**：`macos-13` 已退役，用它的 job 会永远 `queued`
+  （不报错，看起来像"卡住"，1.5.0 首发实测 mac-x64 排队 30+ 分钟）；macOS 15 之后
+  **不带后缀的 macOS 标签是 arm64**（`macos-15`/`macos-26`/`macos-latest`），
+  Intel 的标准标签是 `macos-15-intel`（`*-large` 是付费大规格）。本机排查 CI：
+  `gh run view --job=<id> --log-failed`。
 
 ## 新增功能的固定套路
 
