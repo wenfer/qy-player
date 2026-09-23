@@ -395,6 +395,29 @@
   是定义化兜底）。`electronDist` 已从 yml 移到 linux dist 脚本的
   `-c.electronDist=`（mac 双架构必须按架构下载，固定本地目录只有宿主
   架构）；测试脚本用 `cross-env`（Windows shell 不认 `VAR=1 cmd`）
+- **构建脚本里两个「只有非 Linux 才炸」的坑**（1.5.0 三端 CI 实测：整条
+  `Build and package` 步骤在 win/mac 上 15~28 秒就挂，Linux 上永远看不到）：
+  - **rollup 的 `external` 要按平台判定**：`electron.vite.config.ts` 里原先是
+    `!id.startsWith('/')`，而入口模块是以**绝对路径**送进来的——Windows 上是
+    `D:\a\…\src\main\index.ts`，既不以 `.` 也不以 `/` 开头 → 判成 external →
+    `build:main` 直接 `Entry module "src/main/index.ts" cannot be external`
+    （报错里的路径是 CLI 原文，别被它误导成"相对路径"）。改用 `path.isAbsolute`
+    ——POSIX 上它与 `startsWith('/')` 完全等价，Linux 产物逐字节不变
+    （`cmp` 过 out/main.cjs、out/preload.cjs）。本机模拟该故障的做法：临时把
+    谓词改成 `!/^[A-Za-z]:/.test(id)` 就能在 Linux 上复现同一条报错
+  - **`scripts/collect-mpv-mac.sh` 要能在 bash 3.2 下跑**：macOS 的
+    `/bin/bash` 就是 3.2，而 CI 走 `bash scripts/collect-mpv-mac.sh` →
+    `declare -A` 报 `declare: -A: invalid option`，退出码 2（关联数组是 bash 4+
+    才有）。现在用普通数组 + `collected()` 线性查找（闭包只有几十个 dylib）。
+    同类 bash 4+ 禁忌：`mapfile`/`readarray`/`${var,,}`/`${var^^}`/`&>>`。
+    顺带修掉同文件里三处既存缺陷：警告文案原本走 stdout，而 `collectable_deps`
+    的 stdout 就是依赖清单，会被外层 `while read` 当成一条依赖路径去 `cp`
+    （改成 stderr 的 `warn()`）；`LC_RPATH` 提取用的 `awk '{getline; print $2}'`
+    读到的是 `cmdsize` 那一行而不是 `path`，@rpath 依赖永远"解析失败"（改成按
+    `path ` 前缀定位）；改写引用时拿 otool 原文去查收集表（表里是真实路径）导致
+    @rpath 引用不会被重写，现在统一经 `resolve_dep` 再查。该脚本无法在本机跑
+    （要 otool/install_name_tool/codesign），验证办法是用 PATH 里的桩脚本 +
+    `deps.map` 造假的 otool 输出驱动它，CI 侧还有脚本自带的冒烟测试兜底
 - **原生模块重建只会在 win/mac 挂，且有两个不同的坑**（1.5.0 首发 CI 实测，
   症状都是 `postinstall: electron-builder install-app-deps` 里
   `node-gyp failed to rebuild 'better-sqlite3'`，Linux 带完整工具链所以一直没暴露）：

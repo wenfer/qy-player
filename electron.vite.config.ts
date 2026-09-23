@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 
 export default defineConfig({
   build: {
@@ -22,7 +22,14 @@ export default defineConfig({
       // The main process runs in Node/Electron where node_modules is always
       // available; bundling packages like axios breaks their node adapters
       // (e.g. "adapter http is not available in the build").
-      external: (id) => !id.startsWith('.') && !id.startsWith('/'),
+      //
+      // 必须用 path.isAbsolute，不能写 `!id.startsWith('/')`：入口模块是以
+      // **绝对路径**送进来的，Windows 上是 `D:\a\...\src\main\index.ts`，
+      // 既不以 '.' 也不以 '/' 开头 → 被判成 external → rollup 直接抛
+      // `Entry module "src/main/index.ts" cannot be external`（1.5.0 三端
+      // CI 实测，Windows job 挂在这里；POSIX 主机上 isAbsolute 与
+      // startsWith('/') 完全等价，改它不影响 Linux/mac）
+      external: (id) => !id.startsWith('.') && !isAbsolute(id),
       output: {
         format: 'cjs',
       },

@@ -23,6 +23,9 @@ set -euo pipefail
 STAGING="${1:-build/mpv-mac}"
 
 log() { echo "[collect-mpv-mac] $*"; }
+# warn 必须走 stderr：collectable_deps 的 stdout 就是依赖清单，被调用方按行读进
+# `while read -r dep`，往 stdout 打日志会被当成一条依赖路径（cp 到不存在的文件）
+warn() { echo "[collect-mpv-mac] 警告：$*" >&2; }
 die() { echo "[collect-mpv-mac] 失败：$*" >&2; exit 1; }
 
 if [ "${QY_SKIP_MPV_BUNDLE:-0}" = "1" ]; then
@@ -52,8 +55,20 @@ MPV_BIN="$(realpath "$MPV_BIN")"
 log "mpv 来源：$MPV_BIN"
 
 # ---- 2. BFS 展开 dylib 闭包 ------------------------------------------------
-# 关联数组：REAL->已收集的真实路径（去重），NEEDS->某个已收集文件的全部非系统依赖
-declare -A COLLECTED=()
+# 已收集的真实路径（去重）。**故意用普通数组 + 线性查找**，不用 `declare -A`：
+# macOS 自带的是 bash 3.2（`/bin/bash`），关联数组是 bash 4+ 才有的，
+# CI 里 `bash scripts/collect-mpv-mac.sh` 会直接报 `declare: -A: invalid option`
+# 并以退出码 2 挂掉（1.5.0 三端 CI 实测，两个 mac job 都死在这）。闭包只有
+# 几十个 dylib，线性查找的开销可以忽略。
+COLLECTED=()
+
+collected() {
+  local x
+  for x in ${COLLECTED[@]+"${COLLECTED[@]}"}; do
+    [ "$x" = "$1" ] && return 0
+  done
+  return 1
+}
 
 is_system_path() {
   case "$1" in
@@ -82,12 +97,15 @@ resolve_dep() {
       if [ -f "$candidate" ]; then realpath "$candidate"; else echo ""; fi
       ;;
     @rpath/*)
-      # 按 LC_RPATH 列表逐个试
+      # 按 LC_RPATH 列表逐个试。otool -l 里一条 rpath 是三行
+      # （`cmd LC_RPATH` / `cmdsize N` / `path <dir> (offset …)`），
+      # 所以要靠 `path ` 前缀定位，别用 `getline` 数行——那样读到的是 cmdsize，
+      # 解析出来是 "24" 这种数字，所有 @rpath 依赖都会"解析失败"
       local rpath candidate
       while IFS= read -r rpath; do
         candidate="${rpath}/${dep#@rpath/}"
         if [ -f "$candidate" ]; then realpath "$candidate" && return; fi
-      done < <(otool -l "$referrer" | awk '/LC_RPATH/{getline; print $2}')
+      done < <(otool -l "$referrer" | awk '/cmd LC_RPATH/{want=1; next} want && /^[ \t]*path /{print $2; want=0}')
       echo ""
       ;;
     *)
@@ -105,7 +123,7 @@ collectable_deps() {
     if [ -n "$resolved" ]; then
       echo "$resolved"
     elif ! is_system_path "$dep"; then
-      log "警告：$file 依赖 $dep 无法解析，跳过（若运行期需要会由冒烟测试暴露）"
+      warn "$file 依赖 $dep 无法解析，跳过（若运行期需要会由冒烟测试暴露）"
     fi
   done < <(otool -L "$file" | tail -n +2 | cut -d'(' -f1)
 }
@@ -115,14 +133,14 @@ rm -rf "$STAGING/mpv" "$STAGING/lib"/*
 cp "$MPV_BIN" "$STAGING/mpv"
 
 QUEUE=("$MPV_BIN")
-COLLECTED["$MPV_BIN"]="$MPV_BIN"
+COLLECTED=("$MPV_BIN")
 while [ ${#QUEUE[@]} -gt 0 ]; do
   current="${QUEUE[0]}"
   QUEUE=("${QUEUE[@]:1}")
   while IFS= read -r dep; do
     [ -n "$dep" ] || continue
-    if [ -z "${COLLECTED[$dep]:-}" ]; then
-      COLLECTED["$dep"]="$dep"
+    if ! collected "$dep"; then
+      COLLECTED+=("$dep")
       base="$(basename "$dep")"
       log "收集 $(basename "$dep")"
       cp "$dep" "$STAGING/lib/$base"
@@ -136,20 +154,28 @@ log "共收集 ${#COLLECTED[@]} 个文件（含主程序）"
 # 主程序（位于 $STAGING 根）：依赖 → @executable_path/lib/<name>
 deps_of() { otool -L "$1" | tail -n +2 | cut -d'(' -f1 | awk '{print $1}'; }
 
-while IFS= read -r dep; do
-  if [ -n "${COLLECTED[$dep]:-}" ] && [ "$dep" != "$MPV_BIN" ]; then
-    install_name_tool -change "$dep" "@executable_path/lib/$(basename "$dep")" "$STAGING/mpv"
-  fi
-done < <(deps_of "$STAGING/mpv")
+# 把 $1 的非系统依赖引用改写到 $2（@executable_path/lib 或 @loader_path）。
+# **必须先经 resolve_dep 解析再查收集表**：表里存的是依赖的**真实路径**，而
+# otool 给出的可能是 `@rpath/libavcodec.dylib` 这类间接引用，拿原文去比对永远
+# 不命中——那样收进来的 dylib 会躺在包里没人引用，运行期照旧找不到
+rewrite_refs() {
+  local file="$1" prefix="$2" dep resolved
+  while IFS= read -r dep; do
+    [ -n "$dep" ] || continue
+    resolved="$(resolve_dep "$dep" "$file")"
+    [ -n "$resolved" ] || continue
+    collected "$resolved" || continue
+    [ "$resolved" != "$MPV_BIN" ] || continue
+    install_name_tool -change "$dep" "$prefix/$(basename "$resolved")" "$file"
+  done < <(deps_of "$file")
+}
+
+rewrite_refs "$STAGING/mpv" "@executable_path/lib"
 
 # 每个 dylib：自身 id → @loader_path/<name>；对其它 dylib 的引用 → @loader_path/<name>
 for dylib in "$STAGING"/lib/*; do
   install_name_tool -id "@loader_path/$(basename "$dylib")" "$dylib"
-  while IFS= read -r dep; do
-    if [ -n "${COLLECTED[$dep]:-}" ] && [ "$dep" != "$MPV_BIN" ]; then
-      install_name_tool -change "$dep" "@loader_path/$(basename "$dep")" "$dylib"
-    fi
-  done < <(deps_of "$dylib")
+  rewrite_refs "$dylib" "@loader_path"
 done
 
 # ---- 4. ad-hoc 重签名 ------------------------------------------------------
