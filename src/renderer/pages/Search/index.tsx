@@ -5,6 +5,7 @@ import PosterCard from '../../components/PosterCard';
 import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
 import { useToastStore } from '../../stores/toast-store';
 import { getServerMap, buildImageUrl } from '../../utils/server-images';
+import { mediaTypeFromKind } from '../../utils/media-card';
 import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
 import type { UnifiedCard } from '../../../main/modules/catalog/unified-query';
@@ -30,10 +31,14 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: Awaited<ReturnType<typ
     imageUrl,
     year: card.year,
     rating: card.rating,
-    type: card.kind ?? 'Movie',
+    // 与首页同一套归一：kind 有在线（Episode）/本地（episode）两种写法
+    type: mediaTypeFromKind(card.kind),
     serverId,
     serverType: isCatalog ? 'local' : provider,
     catalogRef: card.ref,
+    ...(card.seriesName ? { seriesName: card.seriesName } : {}),
+    ...(card.seasonNumber != null ? { seasonNumber: card.seasonNumber } : {}),
+    ...(card.episodeNumber != null ? { episodeNumber: card.episodeNumber } : {}),
   };
 }
 

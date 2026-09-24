@@ -18,6 +18,10 @@ export interface MediaItem {
   catalogRef?: import('../../../shared/types').MediaRef;
   /** Persisted progress from catalog_user_state. */
   catalogProgress?: { position: number; duration: number; isFinished: boolean };
+  /** 剧集条目（继续观看/搜索会返回单集）的剧名与季集编号。 */
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 interface HorizontalRowProps {
@@ -49,6 +53,9 @@ export default function HorizontalRow({ title, items, onItemClick, onItemPlay }:
               rating={item.rating}
               type={item.type}
               progress={item.progress}
+              seriesName={item.seriesName}
+              seasonNumber={item.seasonNumber}
+              episodeNumber={item.episodeNumber}
               onClick={() => onItemClick?.(item)}
               onPlay={() => onItemPlay?.(item)}
             />

@@ -6,6 +6,7 @@ import HorizontalRow from '../../components/HorizontalRow';
 import RowSkeleton from '../../components/Skeleton/RowSkeleton';
 import { useToastStore } from '../../stores/toast-store';
 import { getServerMap, buildImageUrl } from '../../utils/server-images';
+import { mediaTypeFromKind } from '../../utils/media-card';
 import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
 import type { UnifiedCard } from '../../../main/modules/catalog/unified-query';
@@ -33,10 +34,15 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: ReturnType<typeof getS
     imageUrl,
     year: card.year,
     rating: card.rating,
-    type: card.kind === 'series' || card.kind === 'Series' ? 'Series' : card.kind === 'episode' ? 'Episode' : 'Movie',
+    // 在线来源的 kind 是 Jellyfin 的大小写混合（Episode/Series），本地是小写
+    // ——必须走归一，否则单集会被兜底成 Movie（剧集卡挂"电影"角标）
+    type: mediaTypeFromKind(card.kind),
     serverId,
     serverType: isCatalog ? 'local' : provider,
     catalogRef: card.ref,
+    ...(card.seriesName ? { seriesName: card.seriesName } : {}),
+    ...(card.seasonNumber != null ? { seasonNumber: card.seasonNumber } : {}),
+    ...(card.episodeNumber != null ? { episodeNumber: card.episodeNumber } : {}),
     ...(card.position != null && card.duration
       ? {
           catalogProgress: { position: card.position, duration: card.duration, isFinished: card.isFinished ?? false },

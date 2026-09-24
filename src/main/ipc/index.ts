@@ -1195,6 +1195,9 @@ export function registerIpcHandlers(
             runtimeTicks: item.RunTimeTicks,
             primaryTag: item.ImageTags?.Primary,
             updatedAt: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) || 0 : 0,
+            seriesName: item.SeriesName,
+            seasonNumber: item.ParentIndexNumber,
+            episodeNumber: item.IndexNumber,
           });
         }
         } catch (err) {
@@ -1223,6 +1226,9 @@ export function registerIpcHandlers(
               year: item.ProductionYear,
               rating: item.CommunityRating,
               primaryTag: item.ImageTags?.Primary,
+              seriesName: item.SeriesName,
+              seasonNumber: item.ParentIndexNumber,
+              episodeNumber: item.IndexNumber,
             });
           }
         } catch (err) {

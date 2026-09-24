@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Play, RotateCcw } from 'lucide-react';
 import type { ResumeTarget } from '../../../shared/types/playback';
+import { episodeCode } from '../../utils/media-card';
 
 /**
  * Series primary resume button (QYP2-034, plan §12.2).
@@ -14,13 +15,12 @@ import type { ResumeTarget } from '../../../shared/types/playback';
  * 算法在 main 侧（renderer 不得复制）；本组件只负责取目标 + 文案。
  */
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
+export function formatEpisodeCode(target: ResumeTarget): string {
+  return episodeCode(target.seasonNumber, target.episodeNumber);
 }
 
-export function formatEpisodeCode(target: ResumeTarget): string {
-  if (target.seasonNumber == null && target.episodeNumber == null) return '';
-  return `S${pad(target.seasonNumber ?? 0)}E${pad(target.episodeNumber ?? 0)}`;
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
 }
 
 function formatTime(totalSeconds: number): string {

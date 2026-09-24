@@ -118,6 +118,48 @@ describe('Home unified sources (mixed)', () => {
     expect(screen.getByText('在线剧集')).toBeTruthy();
   });
 
+  it('continue-watching episode cards are labelled TV and show SxxExx (not 电影)', async () => {
+    unifiedContinueWatching.mockResolvedValue({
+      ok: true,
+      data: [
+        // 在线：kind 是 Jellyfin/Emby 的大小写混合
+        {
+          ref: { provider: 'emby', serverId: 7, itemId: 'ep-1' },
+          title: '第五集',
+          kind: 'Episode',
+          position: 600,
+          duration: 3000,
+          seriesName: '绝命毒师',
+          seasonNumber: 2,
+          episodeNumber: 5,
+        },
+        // 本地目录：catalog_items.kind 是小写
+        {
+          ref: { provider: 'catalog', sourceId: 3, itemId: '77' },
+          title: '第三集',
+          kind: 'episode',
+          position: 120,
+          duration: 3000,
+          seriesName: '本地剧',
+          seasonNumber: 1,
+          episodeNumber: 3,
+        },
+      ] as UnifiedCard[],
+    });
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByText('第五集')).toBeTruthy());
+
+    expect(screen.getByText('绝命毒师 · S02E05')).toBeTruthy();
+    expect(screen.getByText('本地剧 · S01E03')).toBeTruthy();
+    // 两张都标成「剧集」，一张都没有被兜底成电影
+    expect(screen.getAllByText('剧集')).toHaveLength(2);
+    expect(screen.queryByText('电影')).toBeNull();
+  });
+
   it('online-only failure of unified endpoints keeps the home page usable', async () => {
     unifiedContinueWatching.mockRejectedValue(new Error('boom'));
     unifiedRecent.mockRejectedValue(new Error('boom'));

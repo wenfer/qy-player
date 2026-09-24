@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Play, Star } from 'lucide-react';
+import { episodeCode } from '../../utils/media-card';
 
 interface PosterCardProps {
   id: string;
@@ -9,6 +10,10 @@ interface PosterCardProps {
   rating?: number;
   type: string;
   progress?: number;
+  /** 剧集条目才有的三项：用来显示 SxxExx 与剧名。 */
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
   onClick?: () => void;
   onPlay?: () => void;
 }
@@ -16,7 +21,7 @@ interface PosterCardProps {
 const TYPE_LABELS: Record<string, string> = {
   Movie: '电影',
   Series: '剧集',
-  Episode: '单集',
+  Episode: '剧集',
   Season: '季',
   Video: '视频',
   MusicVideo: 'MV',
@@ -32,6 +37,9 @@ export default function PosterCard({
   rating,
   type,
   progress,
+  seriesName,
+  seasonNumber,
+  episodeNumber,
   onClick,
   onPlay,
 }: PosterCardProps) {
@@ -39,6 +47,10 @@ export default function PosterCard({
   const [error, setError] = useState(false);
 
   const showProgress = progress !== undefined && progress > 0 && progress < 0.95;
+  const code = episodeCode(seasonNumber, episodeNumber);
+  // 剧名只在没把剧名当标题时才需要单独占一行
+  const seriesLine = seriesName && seriesName !== name ? seriesName : undefined;
+  const metaLine = [seriesLine, code].filter(Boolean).join(' · ');
 
   return (
     <article
@@ -46,7 +58,7 @@ export default function PosterCard({
       onClick={onClick}
       tabIndex={0}
       role="button"
-      aria-label={`${name}, ${TYPE_LABELS[type] || type}${year ? `, ${year}年` : ''}`}
+      aria-label={`${name}, ${TYPE_LABELS[type] || type}${code ? `, ${code}` : ''}${year ? `, ${year}年` : ''}`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -87,8 +99,10 @@ export default function PosterCard({
           </div>
         )}
 
-        {/* Type badge: only show movie / series */}
-        {(type === 'Movie' || type === 'Series') && (
+        {/* Type badge: movies / TV. Single episodes count as TV too (they come
+            back from resume as one episode of a series — labelling them 电影
+            was the bug). */}
+        {(type === 'Movie' || type === 'Series' || type === 'Episode') && (
           <span className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-medium rounded">
             {TYPE_LABELS[type]}
           </span>
@@ -117,8 +131,12 @@ export default function PosterCard({
       {/* Info */}
       <div className="p-2.5">
         <h3 className="font-medium text-sm leading-tight line-clamp-2">{name}</h3>
-        {year && (
-          <p className="mt-1 text-xs text-muted-foreground">{year}</p>
+        {metaLine ? (
+          <p className="mt-1 text-xs text-muted-foreground truncate" title={metaLine}>
+            {metaLine}
+          </p>
+        ) : (
+          year && <p className="mt-1 text-xs text-muted-foreground">{year}</p>
         )}
       </div>
     </article>

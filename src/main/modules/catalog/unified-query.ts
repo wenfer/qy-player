@@ -31,6 +31,13 @@ export interface UnifiedCard {
   /** 归一化的展示字段；renderer 不做 provider 特化拼接。 */
   poster?: { serverId?: number; tag?: string; itemId?: string } | null;
   updatedAt?: number;
+  /**
+   * 剧集条目（kind = episode/Episode）才有的信息。「继续观看」回到的是**某一集**，
+   * 没有这些字段界面就只能把剧集当成电影展示、也无从显示 SxxExx。
+   */
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 /** 完整 MediaRef 键：provider + owner + itemId（+ mediaSourceId 可选域）。 */
@@ -93,6 +100,18 @@ export interface CatalogContinueRow {
   position: number;
   duration: number | null;
   updated_at: number | null;
+  /** 下面三列只在剧集行上有值（见 catalogContinue 的 SQL）。 */
+  season_number?: number | null;
+  episode_number?: number | null;
+  series_title?: string | null;
+}
+
+/**
+ * 剧集行的展示标题兜底：单集常常没有自己的标题（NFO 只写了季/集编号），
+ * 这时退到剧名——否则「继续观看」里会挂一张写着"未知"的卡。
+ */
+function catalogEpisodeTitle(row: CatalogContinueRow): string {
+  return row.title ?? row.series_title ?? '未知';
 }
 
 export function cardFromCatalogContinue(row: CatalogContinueRow): UnifiedCard {
@@ -103,15 +122,19 @@ export function cardFromCatalogContinue(row: CatalogContinueRow): UnifiedCard {
   } catch {
     // rating 缺失/格式异常：跳过，绝不影响卡片
   }
+  const isEpisode = row.kind === 'episode';
   return {
     ref: { provider: 'catalog', sourceId: row.source_id, itemId: String(row.item_id) },
-    title: row.title ?? '未知',
+    title: isEpisode ? catalogEpisodeTitle(row) : row.title ?? '未知',
     kind: row.kind,
     ...(row.year != null ? { year: row.year } : {}),
     ...(rating !== undefined ? { rating } : {}),
     position: row.position,
     ...(row.duration != null ? { duration: row.duration } : {}),
     updatedAt: (row.updated_at ?? 0) * 1000,
+    ...(row.series_title != null ? { seriesName: row.series_title } : {}),
+    ...(row.season_number != null ? { seasonNumber: row.season_number } : {}),
+    ...(row.episode_number != null ? { episodeNumber: row.episode_number } : {}),
   };
 }
 
@@ -127,6 +150,10 @@ export interface OnlineContinueInput {
   runtimeTicks?: number;
   primaryTag?: string;
   updatedAt?: number;
+  /** 剧集三件套——Emby/Jellyfin 分别叫 SeriesName / ParentIndexNumber / IndexNumber。 */
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 export function cardFromOnlineContinue(input: OnlineContinueInput): UnifiedCard {
@@ -140,6 +167,9 @@ export function cardFromOnlineContinue(input: OnlineContinueInput): UnifiedCard 
     ...(input.runtimeTicks ? { duration: input.runtimeTicks / 10000000 } : {}),
     poster: { serverId: input.serverId, itemId: input.itemId, ...(input.primaryTag ? { tag: input.primaryTag } : {}) },
     ...(input.updatedAt != null ? { updatedAt: input.updatedAt } : {}),
+    ...(input.seriesName ? { seriesName: input.seriesName } : {}),
+    ...(input.seasonNumber != null ? { seasonNumber: input.seasonNumber } : {}),
+    ...(input.episodeNumber != null ? { episodeNumber: input.episodeNumber } : {}),
   };
 }
 
@@ -159,6 +189,11 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
     const rows = db
       .prepare(
         `SELECT ci.id AS item_id, ci.source_id, ls.kind AS source_kind, ci.title, ci.kind, ci.year,
+                ci.season_number, ci.episode_number,
+                (SELECT series.title
+                   FROM catalog_items season
+                   JOIN catalog_items series ON series.id = season.parent_id
+                  WHERE season.id = ci.parent_id AND series.kind = 'series') AS series_title,
                 us.position, us.duration, us.is_finished, us.updated_at,
                 (SELECT ms.value FROM catalog_metadata_sources ms WHERE ms.item_id = ci.id AND ms.field = 'rating' LIMIT 1) AS rating_json
          FROM catalog_items ci
