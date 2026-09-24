@@ -189,7 +189,7 @@ describe('CompactPlayer (QYP3-035)', () => {
     expect(btn.getAttribute('aria-pressed')).toBe('true');
     // LyricsPanel 渲染为 overlay（compact api 的 getMusicLyrics 返回无词）
     await waitFor(() => expect(screen.getByText(/还没有歌词/)).toBeTruthy());
-    expect(screen.getByText(/还没有歌词/).closest('.backdrop-blur')?.className).toContain('top-10');
+    expect(screen.getByText(/还没有歌词/).closest('[aria-label="歌词面板"]')?.className).toContain('top-10');
 
     fireEvent.click(screen.getByLabelText('关闭歌词面板'));
     expect(screen.queryByText(/还没有歌词/)).toBeNull();

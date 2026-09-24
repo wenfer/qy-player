@@ -99,6 +99,10 @@ export default function LyricsPanel({
 
   return (
     <div
+      // aria-label 同时是给读屏的名字与测试锚点：位置样式（placementClass）
+      // 会随布局调整变化，别拿视觉类去定位这个面板
+      role="region"
+      aria-label="歌词面板"
       className={`${placementClass} bg-card border border-border rounded-xl shadow-lg flex flex-col`}
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">

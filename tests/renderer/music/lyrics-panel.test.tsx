@@ -79,8 +79,9 @@ describe('LyricsPanel server tracks (QYP3-020b)', () => {
 });
 
 describe('LyricsPanel placement (QYP3-058)', () => {
+  // 按语义角色定位（不是按样式类）：面板的视觉类会随 UI 调整变化
   const rootClass = (): string =>
-    document.querySelector('.backdrop-blur')?.className ?? '';
+    document.querySelector('[aria-label="歌词面板"]')?.className ?? '';
 
   it('defaults to above-bar: above the spectrum-bearing mini bar, higher z-index', async () => {
     render(<LyricsPanel source={local} title="晴天" position={0} onSeek={vi.fn()} onClose={vi.fn()} />);
