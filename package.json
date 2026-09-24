@@ -1,6 +1,6 @@
 {
   "name": "qy-player",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "专为老版本 Linux (Deepin 20.9 / Debian 10, glibc 2.28) 开发的 MPV 内核桌面播放器，支持 Jellyfin/Emby",
   "main": "./out/main.cjs",
   "author": "QY Player Team",

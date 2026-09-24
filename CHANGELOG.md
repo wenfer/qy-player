@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.2（发布链路整理）
+## 1.5.3（发布链路整理）
 
 ### 变更
 - Windows 安装包、macOS 镜像、AppImage 的文件名改用不带空格的 `qy-player` 前缀

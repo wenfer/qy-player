@@ -176,6 +176,11 @@ jobs:
       - build-mac-arm64
     runs-on: ubuntu-latest
     steps:
+      # 发布说明要从 CHANGELOG.md 抽、macOS 更新元数据要用 scripts/ 下的合并脚本，
+      # 而本 job 只拿制品——所以得单独 checkout 一次仓库源码
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
