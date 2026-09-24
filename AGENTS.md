@@ -533,6 +533,24 @@ npm run dist:mac     # macOS（dmg x64+arm64；需在 mac 上跑，自动收集 
   release（`releaseType` 默认 draft），不需要 yml 里写 `publish`。最终
   `softprops/action-gh-release` 那个 job 再把它转正。所以"跑完 CI 发现多了个
   draft release"是正常现象；重跑时同名产物会被覆盖，不必先删 draft
+- **产物名一律从 `${name}`（qy-player，无空格）拼，不要用 `${productName}`**
+  （QY Player 带空格）：发布链上有两个上传方（各 job 的 electron-builder 自己、
+  发布 job 的 `action-gh-release`），空格会被两边 sanitize 成**不同**字符（前者
+  `-`、后者 `.`），于是同一个产物在发布页出现两份（1.5.1 及以前都这样）。改成
+  无空格后两边同名 → 合并成一条；deb/rpm/pacman 本来就是 qy-player，三端一致
+- **macOS 双架构的 `latest-mac.yml` 必须手工合并**：分 x64/arm64 两个 job 构建
+  （原生模块按宿主架构编译），而 electron-builder 给 macOS 写的更新元数据文件名
+  **不带架构后缀**（`getUpdateInfoFileName` 只对 Linux 加 `-<arch>`）——两个 job
+  上传同名文件，后完成的覆盖先完成的，线上只剩一个架构。所以两个 job 各自把它改名
+  成 `latest-mac-<arch>.yml` 再传制品，发布前由
+  `scripts/merge-mac-update-info.mjs` 合成、再用 `gh release upload --clobber`
+  覆盖（显式覆盖语义，不依赖 action 对同名资产的处理）
+  （注：本项目目前**没有**用 electron-updater，`src/` 里没有 autoUpdater，这些
+  yml 暂时没有消费方；将来要接的话记住 macOS 自动更新只吃 zip，dmg 不行）
+- **发布说明来自 CHANGELOG**：`scripts/release-notes.mjs` 抽 `## <version>` 段落
+  写进 release 的 body。原先挂在 workflow 上的 `generate_release_notes: true`
+  从来没产生过内容（1.4.0 / 1.5.0 的说明都是空的）。**没抽到就报错退出**——宁可
+  CI 红，也不要发一个说明为空的版本，所以新版本**必须先写 CHANGELOG 段落再打 tag**
 - 排查失败的 run：`gh run view <run-id> --json jobs`（步骤级结论，不用等结束）＋
   `gh api --allow-escape-sequences /repos/wenfer/qy-player/actions/jobs/<job-id>/logs`
   （单个 job 的完整日志，run 没结束也能拿到；会 302 到 Azure blob，本机网络

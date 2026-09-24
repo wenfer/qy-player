@@ -114,6 +114,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # electron-builder 给 **macOS** 写的更新元数据文件名不带架构后缀
+      # （getUpdateInfoFileName 只对 Linux 加 -<arch>），两个 mac job 的产物里
+      # 都是 dist/latest-mac.yml，release job 合并制品时会互相覆盖。按架构改名，
+      # 发布前再合成一份（scripts/merge-mac-update-info.mjs）。
+      - name: Tag update metadata by arch
+        run: mv dist/latest-mac.yml dist/latest-mac-x64.yml
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -150,6 +157,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 同上：改名为 latest-mac-arm64.yml，避免与 x64 那份同名覆盖
+      - name: Tag update metadata by arch
+        run: mv dist/latest-mac.yml dist/latest-mac-arm64.yml
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -171,10 +182,31 @@ jobs:
           path: dist/
           merge-multiple: true
 
+      # 发布说明取自 CHANGELOG 里本版本的段落：workflow 原先挂的
+      # generate_release_notes 一直没产生内容（1.4.0 / 1.5.0 的说明都是空的），
+      # 而 CHANGELOG 本来就是人工维护的真说明。抽不到就报错退出，宁可 CI 红。
+      - name: Build release notes
+        run: node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+
+      # 合成 macOS 双架构的 latest-mac.yml（写到 dist 外，避免被下一次 softprops
+      # 上传的动作当成待发布文件上传）
+      - name: Merge macOS update metadata
+        run: |
+          node scripts/merge-mac-update-info.mjs dist/latest-mac-x64.yml dist/latest-mac-arm64.yml > "$RUNNER_TEMP/latest-mac.yml"
+          rm dist/latest-mac-x64.yml dist/latest-mac-arm64.yml
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 两个 mac job 各自往草稿里传过自己的 latest-mac.yml（同名，后完成的覆盖先
+      # 完成的），这里用合并后的版本覆盖。--clobber 是确定的覆盖语义，不依赖
+      # action 对同名资产的处理方式。
+      - name: Upload merged macOS update metadata
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/latest-mac.yml" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

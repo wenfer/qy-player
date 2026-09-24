@@ -97,8 +97,13 @@ pacman:
     - libsecret
 
 # AppImage 专用配置
+# 产物名统一用 ${name}（qy-player，无空格）而不是 ${productName}（QY Player）：
+# 带空格的文件名在上传时会被两边各自 sanitize——electron-builder 自己传成 `-`，
+# release job 里的 action-gh-release 传成 `.`，发布页上同一个产物就出现两份
+# （1.5.1 及以前的版本都这样）。Linux 的 deb/rpm/pacman 本来就是 qy-player，
+# 这里改完三端一致。
 appImage:
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 
 # Windows 专用配置（QYP3-064：NSIS 安装版 + 免安装 portable，x64）
 win:
@@ -122,11 +127,11 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: ${productName}-Setup-${version}.${ext}
+  artifactName: ${name}-Setup-${version}.${ext}
   deleteAppDataOnUninstall: false
 
 portable:
-  artifactName: ${productName}-Portable-${version}.${ext}
+  artifactName: ${name}-Portable-${version}.${ext}
 
 # macOS 专用配置（QYP3-064：dmg，x64 + arm64）
 mac:
@@ -144,5 +149,6 @@ mac:
         - x64
         - arm64
 
+# ${name} 而非 ${productName} 的理由见上面 appImage 的注释
 dmg:
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
