@@ -256,7 +256,7 @@ export default function MusicMiniBar() {
         />
       )}
       <div
-        className={`fixed z-40 bg-card/95 backdrop-blur border-border px-4 py-3 flex flex-col gap-2 ${
+        className={`fixed z-40 bg-card border-border px-4 py-3 flex flex-col gap-2 ${
           docked
             ? 'bottom-0 left-0 right-0 border-t'
             : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-xl shadow-lg'

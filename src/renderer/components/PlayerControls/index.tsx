@@ -152,7 +152,7 @@ export default function PlayerControls() {
 
   return (
     <div
-      className={`fixed bottom-0 right-0 bg-background/95 backdrop-blur-md border-t border-border px-5 py-3 z-50 ${
+      className={`fixed bottom-0 right-0 bg-background border-t border-border px-5 py-3 z-50 ${
         railOffset ? 'left-0' : 'left-60'
       }`}
     >

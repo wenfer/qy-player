@@ -99,7 +99,7 @@ export default function LyricsPanel({
 
   return (
     <div
-      className={`${placementClass} bg-card/95 backdrop-blur border border-border rounded-xl shadow-lg flex flex-col`}
+      className={`${placementClass} bg-card border border-border rounded-xl shadow-lg flex flex-col`}
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
         <div className="min-w-0">

@@ -42,7 +42,7 @@ import { EqBandRow, FxRange, ICON_BTN, ROW } from './controls';
 // z-index 高于歌词面板（同为 z-50）与停靠播放条（z-40），低于 Toast（z-100）：
 // 两者同时打开时不该互相压住
 const PANEL =
-  'fixed left-3 right-3 top-10 bottom-40 z-[55] bg-card/95 backdrop-blur border border-border rounded-xl shadow-lg flex flex-col';
+  'fixed left-3 right-3 top-10 bottom-40 z-[55] bg-card border border-border rounded-xl shadow-lg flex flex-col';
 
 function balanceLabel(v: number): string {
   if (Math.abs(v) < 0.02) return '居中';
