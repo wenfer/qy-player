@@ -548,9 +548,15 @@ npm run dist:mac     # macOS（dmg x64+arm64；需在 mac 上跑，自动收集 
   （注：本项目目前**没有**用 electron-updater，`src/` 里没有 autoUpdater，这些
   yml 暂时没有消费方；将来要接的话记住 macOS 自动更新只吃 zip，dmg 不行）
 - **发布说明来自 CHANGELOG**：`scripts/release-notes.mjs` 抽 `## <version>` 段落
-  写进 release 的 body。原先挂在 workflow 上的 `generate_release_notes: true`
-  从来没产生过内容（1.4.0 / 1.5.0 的说明都是空的）。**没抽到就报错退出**——宁可
-  CI 红，也不要发一个说明为空的版本，所以新版本**必须先写 CHANGELOG 段落再打 tag**
+  写进 release 的 body，用 `gh release edit --notes-file` 落盘——**不要用
+  `softprops/action-gh-release` 的 `body_path`**：electron-builder 的每个 build
+  job 都会先传一份草稿，release job 面对的是"本 tag 已有草稿"，softprops 走
+  "Creating new release → 改复用已有草稿"这条路径时 `body_path` 不生效
+  （1.5.3 实测：其余步骤全绿，body 长度 0；同一份说明用 `gh release edit`
+  即刻写上）。原先挂在 workflow 上的 `generate_release_notes: true`
+  也从来没产生过内容（1.4.0 / 1.5.0 的说明都是空的）。
+  **没抽到就报错退出**——宁可 CI 红，也不要发一个说明为空的版本，所以新版本
+  **必须先写 CHANGELOG 段落再打 tag**
 - 排查失败的 run：`gh run view <run-id> --json jobs`（步骤级结论，不用等结束）＋
   `gh api --allow-escape-sequences /repos/wenfer/qy-player/actions/jobs/<job-id>/logs`
   （单个 job 的完整日志，run 没结束也能拿到；会 302 到 Azure blob，本机网络

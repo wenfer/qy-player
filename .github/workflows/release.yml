@@ -204,9 +204,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          body_path: ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 说明必须自己写：softprops 在「本 tag 已有草稿」的那条路径（electron-builder
+      # 每个 build job 都会先传一份草稿，release job 拿到的是这个局面）会走
+      # "Creating new release → 改复用已有草稿"，此时 with.body_path 不落盘——
+      # 1.5.3 实测：其余步骤全绿，body 长度仍是 0。gh 是确定的写。
+      - name: Set release notes
+        run: gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 两个 mac job 各自往草稿里传过自己的 latest-mac.yml（同名，后完成的覆盖先
       # 完成的），这里用合并后的版本覆盖。--clobber 是确定的覆盖语义，不依赖
