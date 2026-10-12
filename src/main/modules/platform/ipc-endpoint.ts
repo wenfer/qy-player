@@ -36,14 +36,14 @@ export function createIpcEndpoint(
   /** 每个轮询 tick 都要跑的失败探针：非 null → 立即失败。 */
   const checkFailed = (
     failed: (() => Error | null) | undefined,
-    poll: NodeJS.Timeout,
-    timer: NodeJS.Timeout,
+    poll: NodeJS.Timeout | undefined,
+    timer: NodeJS.Timeout | undefined,
     reject: (err: Error) => void
   ): boolean => {
     const err = failed?.();
     if (err) {
-      clearInterval(poll);
-      clearTimeout(timer);
+      if (poll) clearInterval(poll);
+      if (timer) clearTimeout(timer);
       reject(err);
       return true;
     }
@@ -82,7 +82,11 @@ export function createIpcEndpoint(
   const address = join(dir, `${namePrefix}-${process.pid}-${Date.now().toString(36)}.sock`);
   const waitUntilReady = (timeoutMs: number, failed?: () => Error | null): Promise<void> =>
     new Promise((resolve, reject) => {
-      if (checkFailed(failed, undefined, undefined, reject)) return;
+      const initialErr = failed?.();
+      if (initialErr) {
+        reject(initialErr);
+        return;
+      }
       if (existsSync(address)) {
         resolve();
         return;
