@@ -268,6 +268,50 @@ export function registerIpcHandlers(
     store: secretStore,
     getConfig: (key) => storage.getConfig(key),
     setConfig: (key, value) => storage.setConfig(key, value),
+    probe: async (pluginId, secret) => {
+      if (pluginId === 'tmdb') {
+        if (!secret) return { ok: false, retryable: false, message: '未配置 API Token' };
+        const ctx = getPluginContext('tmdb');
+        if (!ctx) return { ok: false, retryable: false, message: 'TMDB 插件未就绪' };
+        const isV3Key = /^[0-9a-fA-F]{32}$/.test(secret);
+        const headers: Record<string, string> = { accept: 'application/json' };
+        const query: Record<string, string> = {};
+        if (isV3Key) {
+          query.api_key = secret;
+        } else {
+          headers.Authorization = `Bearer ${secret}`;
+        }
+        const rawBaseUrl = typeof ctx.settings?.apiBaseUrl === 'string' ? ctx.settings.apiBaseUrl.trim() : '';
+        const baseUrl = rawBaseUrl && (rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://'))
+          ? rawBaseUrl.replace(/\/+$/, '')
+          : 'https://api.themoviedb.org/3';
+        try {
+          const parsed = new URL(baseUrl);
+          ctx.http.allowHosts([parsed.hostname]);
+          const res = await ctx.http.request({
+            url: `${baseUrl}/configuration`,
+            method: 'GET',
+            headers,
+            query,
+            timeoutMs: 6000,
+          });
+          if (res.status === 200) {
+            return { ok: true, retryable: false, message: '连接成功，API 响应正常' };
+          }
+          if (res.status === 401) {
+            return { ok: false, retryable: false, message: '认证失败（401）：Token 或 API Key 无效' };
+          }
+          if (res.status === 429) {
+            return { ok: false, retryable: true, message: 'TMDB 限流（429），请稍后重试' };
+          }
+          return { ok: false, retryable: true, message: `TMDB 返回 HTTP ${res.status}` };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { ok: false, retryable: true, message: `连接失败: ${msg}` };
+        }
+      }
+      return { ok: true, retryable: false, message: '已就绪' };
+    },
   });
   try {
     migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
@@ -289,6 +333,7 @@ export function registerIpcHandlers(
   // ADR-0006 gate (contract test enforces no other wiring references it).
   const tmdbRegistration = registerPlugin(buildTmdbPlugin(), {
     getSecret: (namespace, key) => secretStore.getSecret(namespace, key),
+    getSettings: () => pluginConfigService.getConfig('tmdb').settings,
     appVersion: app.getVersion(),
     locale: 'zh-CN',
   });

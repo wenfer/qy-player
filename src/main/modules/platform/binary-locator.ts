@@ -48,14 +48,21 @@ function firstExisting(candidates: string[], exists: (p: string) => boolean): st
   return null;
 }
 
+function getDefaultResourcesPath(): string {
+  if (typeof process !== 'undefined' && (process as { resourcesPath?: string }).resourcesPath) {
+    return (process as { resourcesPath?: string }).resourcesPath!;
+  }
+  return '';
+}
+
 /** mpv 解析。Linux 分支与历史行为逐字节一致（含 LD_LIBRARY_PATH 注入）。 */
 export function resolveMpvBinary(deps?: LocatorDeps): BinaryResolution {
   const platform = deps?.platform ?? process.platform;
   const env = deps?.env ?? process.env;
   const homeDir = deps?.homeDir ?? env.HOME ?? '/home';
-  const resourcesPath = deps?.resourcesPath ?? '';
-  const exists = deps?.exists ?? ((p: string) => existsSync(p));
   const join = joinFor(platform);
+  const resourcesPath = deps?.resourcesPath !== undefined ? deps.resourcesPath : getDefaultResourcesPath();
+  const exists = deps?.exists ?? ((p: string) => existsSync(p));
 
   // 1. 显式覆盖
   const override = env.QY_MPV_PATH;

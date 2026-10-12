@@ -14,13 +14,22 @@ import { PluginError, type PluginContext, type PluginHttpRequest } from '../../.
 export const TMDB_API_HOST = 'api.themoviedb.org';
 export const TMDB_IMAGE_HOST = 'image.tmdb.org';
 
-const BASE_URL = 'https://api.themoviedb.org/3';
+const DEFAULT_BASE_URL = 'https://api.themoviedb.org/3';
+const V3_KEY_REGEX = /^[0-9a-fA-F]{32}$/;
 
 export class TmdbClient {
   private readonly ctx: PluginContext;
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
+  }
+
+  private baseUrl(): string {
+    const raw = typeof this.ctx.settings?.apiBaseUrl === 'string' ? this.ctx.settings.apiBaseUrl.trim() : '';
+    if (raw && (raw.startsWith('http://') || raw.startsWith('https://'))) {
+      return raw.replace(/\/+$/, '');
+    }
+    return DEFAULT_BASE_URL;
   }
 
   private token(): string {
@@ -33,7 +42,7 @@ export class TmdbClient {
   }
 
   private statusToError(status: number): PluginError {
-    if (status === 401) return new PluginError('AUTH_REQUIRED', 'TMDB 认证失败（401），请检查 Token');
+    if (status === 401) return new PluginError('AUTH_REQUIRED', 'TMDB 认证失败（401），请检查 Token 或 API Key');
     if (status === 429) return new PluginError('RATE_LIMITED', 'TMDB 限流（429），请稍后重试');
     if (status === 404) return new PluginError('NOT_FOUND', 'TMDB 资源不存在（404）');
     return new PluginError('UPSTREAM_CHANGED', `TMDB 请求失败（HTTP ${status}）`);
@@ -46,12 +55,21 @@ export class TmdbClient {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) query[key] = value;
     }
+
+    const isV3Key = V3_KEY_REGEX.test(token);
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+    };
+
+    if (isV3Key) {
+      query.api_key = token;
+    } else {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     const request: PluginHttpRequest = {
-      url: `${BASE_URL}${path}`,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        accept: 'application/json',
-      },
+      url: `${this.baseUrl()}${path}`,
+      headers,
       query,
       signal,
     };

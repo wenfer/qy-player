@@ -109,13 +109,14 @@ const EPISODE_EN = {
   vote_average: 8.1,
 };
 
-function makeContext(secret: string | null) {
+function makeContext(secret: string | null, settings?: Record<string, string | number | boolean>) {
   const requests: Array<{ url: string; headers: Record<string, string>; query: Record<string, unknown> }> = [];
   const responses = new Map<string, unknown>();
   const context: PluginContext = {
     pluginId: 'tmdb',
     locale: 'zh-CN',
     appVersion: 'test',
+    settings,
     http: {
       allowHosts: vi.fn(),
       request: async (req) => {
@@ -194,6 +195,35 @@ describe('TMDB plugin (QYP2-029)', () => {
       expect(request.headers.Authorization).toBe('Bearer secret-token-abc');
       expect(JSON.stringify(request.query)).not.toContain('secret-token-abc');
     }
+  });
+
+  it('sends 32-hex token as v3 api_key query parameter', async () => {
+    const plugin = buildTmdbPlugin();
+    const v3Key = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const ctx = makeContext(v3Key);
+    ctx.respond('/search/movie', 'zh-CN', { results: [] });
+    ctx.respond('/search/movie', 'en-US', { results: [] });
+    await plugin.search({ query: '流浪地球' }, ctx.context);
+    expect(ctx.requests.length).toBeGreaterThan(0);
+    for (const request of ctx.requests) {
+      expect(request.headers.Authorization).toBeUndefined();
+      expect(request.query.api_key).toBe(v3Key);
+    }
+  });
+
+  it('honors custom apiBaseUrl setting', async () => {
+    const plugin = buildTmdbPlugin();
+    const ctx = makeContext('tok', { apiBaseUrl: 'https://tmdb-proxy.example.com/3' });
+    ctx.respond('/search/movie', 'zh-CN', { results: [] });
+    ctx.respond('/search/movie', 'en-US', { results: [] });
+    await plugin.search({ query: '流浪地球' }, ctx.context);
+    expect(ctx.requests.length).toBeGreaterThan(0);
+    for (const request of ctx.requests) {
+      expect(request.url).toContain('https://tmdb-proxy.example.com/3');
+    }
+    expect(ctx.context.http.allowHosts).toHaveBeenCalledWith(
+      expect.arrayContaining(['tmdb-proxy.example.com'])
+    );
   });
 
   it('Checkpoint E: the token never leaks into error messages (canary scan)', async () => {

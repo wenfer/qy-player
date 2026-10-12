@@ -110,7 +110,7 @@ describe('PluginContext: narrow capability contract (plan §11.1)', () => {
     const context = getPluginContext('test-provider');
     expect(context).toBeDefined();
     const keys = Object.keys(context as object).sort();
-    expect(keys).toEqual(['appVersion', 'cache', 'http', 'locale', 'pluginId', 'secrets']);
+    expect(keys).toEqual(['appVersion', 'cache', 'http', 'locale', 'pluginId', 'secrets', 'settings']);
     // The nested surfaces are closed too.
     expect(Object.keys(context!.http).sort()).toEqual(['allowHosts', 'request']);
     expect(Object.keys(context!.cache).sort()).toEqual(['clear', 'delete', 'get', 'set']);

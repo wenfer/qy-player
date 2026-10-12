@@ -96,6 +96,21 @@ describe('resolveMpvBinary (QYP3-061)', () => {
     });
     expect(r.path).toBe('/opt/homebrew/bin/mpv');
   });
+
+  it('打包内置：当 deps 未指定 resourcesPath 时，默认从 process.resourcesPath 查找', () => {
+    const originalResourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+    try {
+      (process as { resourcesPath?: string }).resourcesPath = '/Applications/QY Player.app/Contents/Resources';
+      const r = resolveMpvBinary({
+        platform: 'darwin',
+        env: {},
+        exists: (p) => p === '/Applications/QY Player.app/Contents/Resources/mpv/mpv',
+      });
+      expect(r.path).toBe('/Applications/QY Player.app/Contents/Resources/mpv/mpv');
+    } finally {
+      (process as { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+    }
+  });
 });
 
 describe('ffmpegCandidates (QYP3-061)', () => {

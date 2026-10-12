@@ -78,9 +78,15 @@ export function createIpcEndpoint(
   }
 
   // unix（linux/darwin）：与历史行为一致——随机文件名 + 预清理 + existsSync 轮询
-  const address = join(dir, `${namePrefix}-${process.pid}-${Date.now()}.sock`);
+  // macOS 下 sockaddr_un.sun_path 上限仅 104 字符，时间戳取 base36 压缩长度
+  const address = join(dir, `${namePrefix}-${process.pid}-${Date.now().toString(36)}.sock`);
   const waitUntilReady = (timeoutMs: number, failed?: () => Error | null): Promise<void> =>
     new Promise((resolve, reject) => {
+      if (checkFailed(failed, undefined, undefined, reject)) return;
+      if (existsSync(address)) {
+        resolve();
+        return;
+      }
       const poll = setInterval(() => {
         if (checkFailed(failed, poll, timer, reject)) return;
         if (existsSync(address)) {
@@ -88,7 +94,7 @@ export function createIpcEndpoint(
           clearTimeout(timer);
           resolve();
         }
-      }, 100);
+      }, 50);
       const timer = setTimeout(() => {
         clearInterval(poll);
         reject(new Error(`IPC 端点 ${address} 等待超时`));

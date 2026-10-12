@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, RefreshCw, Wand2, XCircle } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 
@@ -49,9 +50,11 @@ export default function ScrapeDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const [pluginId, setPluginId] = useState<string | null>(null);
   const [providers, setProviders] = useState<PluginListEntry[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(true);
   const [phase, setPhase] = useState<'idle' | 'running' | 'confirm' | 'applied' | 'rejected' | 'failed'>('idle');
   const [message, setMessage] = useState('');
   const [candidates, setCandidates] = useState<Array<{ id: string; title: string; score: number }>>([]);
@@ -162,6 +165,7 @@ export default function ScrapeDialog({
     setMessage('');
     setCandidates([]);
     (async () => {
+      setLoadingProviders(true);
       try {
         const res = (await window.electronAPI.listPlugins()) as { ok: boolean; data?: PluginListEntry[] };
         const usable = (res.ok ? res.data ?? [] : []).filter(
@@ -171,6 +175,8 @@ export default function ScrapeDialog({
         setPluginId(usable[0]?.id ?? null);
       } catch {
         setProviders([]);
+      } finally {
+        setLoadingProviders(false);
       }
     })();
     return () => {
@@ -195,6 +201,27 @@ export default function ScrapeDialog({
           <Wand2 size={18} className="text-primary" />
           <h2 className="text-base font-semibold">刮削元数据</h2>
         </div>
+
+        {!loadingProviders && providers.length === 0 && (
+          <div className="py-6 text-center">
+            <p className="text-sm text-foreground font-medium mb-1">
+              尚未启用任何元数据刮削插件
+            </p>
+            <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto leading-relaxed">
+              当前尚未开启任何刮削插件（如 TMDB）。请前往设置开启插件并配置 API Token，配置后即可自动获取海报、简介与演职员信息。
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                navigate('/settings');
+              }}
+              className="px-3.5 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-xs focus-ring inline-flex items-center gap-1.5 shadow-sm"
+            >
+              前往设置
+            </button>
+          </div>
+        )}
 
         {providers.length > 1 && (
           <label className="block mb-4 text-xs text-muted-foreground">
@@ -268,7 +295,7 @@ export default function ScrapeDialog({
         )}
 
         <div className="flex flex-wrap gap-2 mt-5">
-          {(phase === 'failed' || phase === 'rejected') && (
+          {providers.length > 0 && (phase === 'failed' || phase === 'rejected') && (
             <button
               type="button"
               onClick={() => void start()}

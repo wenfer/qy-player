@@ -1,5 +1,7 @@
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
+import * as net from 'net';
+import * as tls from 'tls';
 import { URL } from 'url';
 import { PluginError, type PluginContext, type PluginHttpRequest, type PluginHttpResponse } from '../../../shared/types/plugins';
 
@@ -19,6 +21,10 @@ export interface PluginContextOptions {
   /** Secret reader bound to the host SecretStore (may return null). */
   getSecret: (namespace: string, key: string) => string | null;
   hasSecret?: (namespace: string, key: string) => boolean;
+  /** Non-sensitive plugin settings reader (returns latest snapshot). */
+  getSettings?: () => Record<string, string | number | boolean>;
+  /** Optional custom proxy URL or getter, e.g. 'http://127.0.0.1:7890'. */
+  proxyUrl?: string | (() => string | null);
   locale?: string;
   appVersion?: string;
   /** Defaults: 8s timeout, 2 MiB cap, 1 req/s per host, 256-entry cache. */
@@ -42,13 +48,97 @@ const DEFAULTS = {
   cacheTtlMs: 6 * 60 * 60 * 1000,
 };
 
+function getProxyUrlFor(url: URL, configuredProxy?: string | null): URL | null {
+  const envProxy =
+    configuredProxy ||
+    (url.protocol === 'https:'
+      ? process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy
+      : process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy);
+  if (!envProxy) return null;
+  try {
+    const raw = envProxy.startsWith('http://') || envProxy.startsWith('https://') ? envProxy : `http://${envProxy}`;
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+}
+
+function createTunneledTlsSocket(proxyUrl: URL, targetUrl: URL, timeoutMs: number): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const proxyPort = Number(proxyUrl.port) || (proxyUrl.protocol === 'https:' ? 443 : 80);
+    const proxyHost = proxyUrl.hostname;
+
+    const proxySocket = net.connect({
+      host: proxyHost,
+      port: proxyPort,
+    });
+
+    const timer = setTimeout(() => {
+      proxySocket.destroy();
+      reject(new PluginError('NETWORK_ERROR', `代理连接超时（${proxyHost}:${proxyPort}）`));
+    }, timeoutMs);
+
+    proxySocket.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new PluginError('NETWORK_ERROR', `代理连接失败: ${err.message}`));
+    });
+
+    proxySocket.on('connect', () => {
+      const targetPort = targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80);
+      let connectReq = `CONNECT ${targetUrl.hostname}:${targetPort} HTTP/1.1\r\nHost: ${targetUrl.hostname}:${targetPort}\r\n`;
+      if (proxyUrl.username || proxyUrl.password) {
+        const auth = Buffer.from(
+          `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`
+        ).toString('base64');
+        connectReq += `Proxy-Authorization: Basic ${auth}\r\n`;
+      }
+      connectReq += '\r\n';
+      proxySocket.write(connectReq);
+    });
+
+    let headerBuf = '';
+    const onData = (chunk: Buffer): void => {
+      headerBuf += chunk.toString('utf8');
+      const headerEnd = headerBuf.indexOf('\r\n\r\n');
+      if (headerEnd !== -1) {
+        proxySocket.off('data', onData);
+        clearTimeout(timer);
+        const statusLine = headerBuf.split('\r\n')[0] || '';
+        const statusCode = parseInt(statusLine.split(' ')[1] || '0', 10);
+        if (statusCode >= 200 && statusCode < 300) {
+          const tlsSocket = tls.connect({
+            socket: proxySocket,
+            servername: targetUrl.hostname,
+          });
+          tlsSocket.on('error', (err) => {
+            reject(new PluginError('NETWORK_ERROR', `代理 TLS 握手失败: ${err.message}`));
+          });
+          resolve(tlsSocket);
+        } else {
+          proxySocket.destroy();
+          reject(new PluginError('NETWORK_ERROR', `代理握手响应异常: ${statusLine}`));
+        }
+      }
+    };
+    proxySocket.on('data', onData);
+  });
+}
+
 /** Single HTTP request honoring absolute deadline, abort, maxBytes. */
-function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, maxBytes: number): Promise<PluginHttpResponse> {
+function performRequest(
+  url: URL,
+  req: PluginHttpRequest,
+  timeoutMs: number,
+  maxBytes: number,
+  configuredProxy?: string | null
+): Promise<PluginHttpResponse> {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     return Promise.reject(new PluginError('NETWORK_ERROR', '不支持的协议'));
   }
+  const proxyUrl = getProxyUrlFor(url, configuredProxy);
   return new Promise((resolve, reject) => {
-    const transport = url.protocol === 'https:' ? httpsRequest : httpRequest;
+    const isHttps = url.protocol === 'https:';
+    const transport = isHttps ? httpsRequest : httpRequest;
     let settled = false;
     let deadlineTimer: ReturnType<typeof setTimeout>;
     let idleTimer: ReturnType<typeof setTimeout>;
@@ -75,44 +165,74 @@ function performRequest(url: URL, req: PluginHttpRequest, timeoutMs: number, max
       cleanup();
       reject(fail());
     }
-    const request = transport(
-      {
-        hostname: url.hostname,
-        port: url.port || undefined,
-        path: `${url.pathname}${url.search}`,
-        method: req.method ?? 'GET',
-        headers: req.headers ?? {},
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        let total = 0;
-        res.on('data', (chunk: Buffer) => {
-          if (settled) return;
-          total += chunk.length;
-          if (total > maxBytes) {
-            res.destroy();
-            // Over-cap fails the whole request - no half-trusted bodies.
-            settle(() => new PluginError('INVALID_RESPONSE', `响应超过 ${Math.round(maxBytes / 1024)} KiB 上限`));
-            return;
-          }
-          chunks.push(chunk);
-        });
-        res.on('end', () => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          const headers: Record<string, string> = {};
-          for (const [key, value] of Object.entries(res.headers)) {
-            if (typeof value === 'string') headers[key] = value;
-            else if (Array.isArray(value)) headers[key] = value.join(', ');
-          }
-          resolve({ status: res.statusCode ?? 0, headers, body: Buffer.concat(chunks) });
-        });
-        res.on('error', (err) => {
-          settle(() => new PluginError('NETWORK_ERROR', `响应读取失败: ${err.message}`));
-        });
+
+    const headers: Record<string, string> = { ...(req.headers ?? {}) };
+    let reqPath = `${url.pathname}${url.search}`;
+    let reqHostname = url.hostname;
+    let reqPort: number | string | undefined = url.port || undefined;
+
+    const requestOptions: Record<string, unknown> = {
+      method: req.method ?? 'GET',
+      headers,
+    };
+
+    if (proxyUrl) {
+      if (isHttps) {
+        requestOptions.createConnection = (
+          _opts: unknown,
+          oncreate: (err: Error | null, socket?: tls.TLSSocket) => void
+        ) => {
+          createTunneledTlsSocket(proxyUrl, url, timeoutMs)
+            .then((socket) => oncreate(null, socket))
+            .catch((err) => oncreate(err as Error));
+        };
+      } else {
+        reqHostname = proxyUrl.hostname;
+        reqPort = proxyUrl.port || 80;
+        reqPath = url.href;
+        headers.Host = url.host;
+        if (proxyUrl.username || proxyUrl.password) {
+          const auth = Buffer.from(
+            `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`
+          ).toString('base64');
+          headers['Proxy-Authorization'] = `Basic ${auth}`;
+        }
       }
-    );
+    }
+
+    requestOptions.hostname = reqHostname;
+    requestOptions.port = reqPort;
+    requestOptions.path = reqPath;
+
+    const request = transport(requestOptions, (res) => {
+      const chunks: Buffer[] = [];
+      let total = 0;
+      res.on('data', (chunk: Buffer) => {
+        if (settled) return;
+        total += chunk.length;
+        if (total > maxBytes) {
+          res.destroy();
+          // Over-cap fails the whole request - no half-trusted bodies.
+          settle(() => new PluginError('INVALID_RESPONSE', `响应超过 ${Math.round(maxBytes / 1024)} KiB 上限`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('end', () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const resHeaders: Record<string, string> = {};
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (typeof value === 'string') resHeaders[key] = value;
+          else if (Array.isArray(value)) resHeaders[key] = value.join(', ');
+        }
+        resolve({ status: res.statusCode ?? 0, headers: resHeaders, body: Buffer.concat(chunks) });
+      });
+      res.on('error', (err) => {
+        settle(() => new PluginError('NETWORK_ERROR', `响应读取失败: ${err.message}`));
+      });
+    });
     // Socket-idle guard (secondary): resets on activity, so the absolute
     // deadline above is what actually bounds the request.
     idleTimer = setTimeout(() => {
@@ -193,7 +313,8 @@ export function createPluginContext(pluginId: string, options: PluginContextOpti
       if (req.signal?.aborted) {
         throw new PluginError('CANCELLED', '请求已取消');
       }
-      return performRequest(effectiveUrl, req, timeout, cap);
+      const proxyParam = typeof options.proxyUrl === 'function' ? options.proxyUrl() : options.proxyUrl;
+      return performRequest(effectiveUrl, req, timeout, cap, proxyParam);
     },
   };
 
@@ -201,6 +322,9 @@ export function createPluginContext(pluginId: string, options: PluginContextOpti
     pluginId,
     locale: options.locale ?? 'zh-CN',
     appVersion: options.appVersion ?? '',
+    get settings() {
+      return options.getSettings?.();
+    },
     http,
     cache: {
       get<T>(key: string): T | undefined {

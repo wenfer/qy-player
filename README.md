@@ -51,7 +51,9 @@ Deepin 20.9、Debian 10 (buster) 这类老系统的 glibc 只有 **2.28**：
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/wenfer/qy-player/releases) 下载对应格式：
+从 [GitHub Releases](https://github.com/wenfer/qy-player/releases) 下载对应平台格式：
+
+### Linux
 
 ```bash
 # Debian / Ubuntu / Deepin（推荐，自动处理 mpv 等依赖）
@@ -59,7 +61,7 @@ sudo dpkg -i qy-player_*_amd64.deb
 sudo apt-get install -f
 
 # 通用 Linux（无需安装）
-chmod +x QY-Player-*_x86_64.AppImage && ./QY-Player-*_x86_64.AppImage
+chmod +x qy-player-*_x86_64.AppImage && ./qy-player-*_x86_64.AppImage
 
 # Fedora / CentOS / openSUSE
 sudo rpm -i qy-player-*.x86_64.rpm
@@ -69,6 +71,49 @@ sudo pacman -U qy-player-*.pacman
 ```
 
 系统依赖：`mpv`（deb/rpm/pacman 包会自动声明）。想要更好的字幕渲染和 OSC，可按 [docs/BUILD-MPV.md](docs/BUILD-MPV.md) 自编译 mpv 0.32 放到 `~/.local/bin/`，应用会自动优先使用它。
+
+### Windows
+
+- 下载 `qy-player-Setup-*.exe`（安装版）或 `qy-player-Portable-*.exe`（免安装便携版），内置 mpv，安装/解压即用。
+- 首次运行时若遇到 Windows SmartScreen 提示，点击「更多信息」→「仍要运行」即可。
+
+### macOS
+
+- 下载对应芯片架构的 `.dmg` 安装包，打开后将 `QY Player` 拖入「应用程序（Applications）」：
+  - Apple Silicon 芯片（M1 / M2 / M3 / M4 系列）：下载 `qy-player-*-arm64.dmg`
+  - Intel 处理器：下载 `qy-player-*-x64.dmg`
+- 安装包内已内置 mpv 及其依赖库，无需额外配置。
+
+#### macOS 提示「程序已损坏」解决办法
+
+由于开源项目未购买苹果开发者证书进行签名和公证，macOS Gatekeeper（安全机制）在打开从网络下载的应用时可能会拦截并提示：
+> **“QY Player”已损坏，打不开。您应该将它移到废纸篓。**
+> 或 **无法打开“QY Player”，因为无法验证开发者。**
+
+**解决步骤（移除隔离属性）：**
+
+1. 确保已将 `QY Player.app` 拖入访达的「**应用程序**（`/Applications`）」目录中。
+2. 打开系统自带的「**终端**（Terminal）」（可通过 Spotlight 聚焦搜索或在「应用程序」→「实用工具」中找到）。
+3. 执行以下命令：
+   ```bash
+   sudo xattr -rd com.apple.quarantine "/Applications/QY Player.app"
+   ```
+4. 按回车后输入你的 Mac 开机密码（**输入密码时终端不会显示任何字符或星号，正常输完直接回车即可**）。
+5. 执行完成后重新打开 QY Player 即可正常运行。
+
+> **提示**：
+> - 如果应用未放置在「应用程序」目录，可先在终端输入 `sudo xattr -rd com.apple.quarantine `（注意末尾加一个空格），然后直接将 `QY Player.app` 拖入终端窗口自动补全路径，再回车执行。
+> - 若系统仅提示「无法验证开发者」而未提示损坏，也可以在访达「应用程序」中按住 `Control` 键点击（或右键点击）应用图标选择「打开」，并在弹窗中再次点击「打开」；或前往「系统设置」→「隐私与安全性」下方的安全性区域，点击「仍要打开」。
+
+#### macOS 提示「spawn mpv ENOENT」解决办法
+
+若在播放时提示 `spawn mpv ENOENT`（未找到 mpv 命令），可通过在终端为内置的 mpv 创建软链接解决：
+
+```bash
+sudo mkdir -p /usr/local/bin && sudo ln -sf "/Applications/QY Player.app/Contents/Resources/mpv/mpv" /usr/local/bin/mpv
+```
+
+执行后完全退出并重新打开 QY Player 即可正常播放（或通过 Homebrew 安装：`brew install mpv`）。
 
 ## 使用说明
 
@@ -123,7 +168,7 @@ src/
 git tag v1.0.x && git push origin v1.0.x
 ```
 
-产物：AppImage / deb / rpm / pacman / tar.gz / tar.xz（x86_64）。
+产物：Linux（deb / AppImage / rpm / pacman / tar.gz / tar.xz，x86_64）、Windows（Setup 安装包 / Portable 便携版，x64）、macOS（dmg，x64 / arm64）。
 
 ## 许可证
 

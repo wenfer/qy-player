@@ -130,6 +130,8 @@ export interface PluginContext {
   readonly pluginId: string;
   readonly locale: string;
   readonly appVersion: string;
+  /** Non-sensitive plugin settings configured by the user (read-only). */
+  readonly settings?: Record<string, string | number | boolean>;
   /** Allowlisted, timed, rate-limited, size-capped HTTP with sanitized errors. */
   http: {
     /** Registers the only hosts this plugin may contact (appends). */

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.5（修复内置 mpv 定位与 TMDB 刮削）
+
+### 修复
+- **播放报错 spawn mpv ENOENT**：`binary-locator` 二进制定位模块原先将打包资源目录硬编码默认回退为空字符串，导致打包后的 Electron 应用在主进程无参调用 `resolveMpvBinary()` 时跳过了安装包携带的内置 mpv（`process.resourcesPath/mpv`），在未单独安装系统 mpv 的机器上抛出 `spawn mpv ENOENT`。现已修复为自动识别 Electron 打包资源路径 `process.resourcesPath`（及 `app.asar` 外层目录），安装后开箱即用。
+- **TMDB 元数据刮削完全不可用**：
+  - 交互体验：修复单项刮削弹窗在未启用插件时内容完全空白的问题，补充清晰的未启用提示与“前往设置”一键跳转；批量刮削增加友好指引。
+  - 凭据适配：兼容常用的 32 位 TMDB v3 API Key（通过 `api_key` 参数传递）与长字符 v4 Read Access Token（Bearer 传递），解决填入 32 位 API Key 导致 401 报错的问题。
+  - 网络连通性：底层网络请求接入 HTTP CONNECT 代理隧道，自动识别系统与环境变量代理（`HTTP_PROXY` / `HTTPS_PROXY`）；插件设置支持自定义 API 镜像/反代加速地址，并动态放行域名白名单。
+  - 健康检查：插件设置“测试连接”接入真实探针，向 TMDB 验证连通性与密钥有效性，杜绝“假绿灯”。
+
 ## 1.5.4（继续观看里的剧集卡）
 
 ### 变更

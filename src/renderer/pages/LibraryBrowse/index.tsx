@@ -566,7 +566,12 @@ export default function LibraryBrowse() {
         error?: { message: string };
       };
       if (!res.ok) {
-        addToast(res.error?.message ?? '任务启动失败', 'error');
+        const msg = res.error?.message ?? '任务启动失败';
+        if (msg.includes('插件已停用') || msg.includes('未注册')) {
+          addToast('TMDB 刮削插件未启用，请前往“设置 → 插件”开启', 'error');
+        } else {
+          addToast(msg, 'error');
+        }
         return;
       }
       addToast(`批量刮削已开始（${targets.length} 项）`, 'success');

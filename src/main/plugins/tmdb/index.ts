@@ -98,7 +98,19 @@ export function buildTmdbPlugin(): MetadataProviderPlugin {
   };
 
   function prepare(context: PluginContext): PluginContext {
-    context.http.allowHosts([TMDB_API_HOST, TMDB_IMAGE_HOST]);
+    const hosts = [TMDB_API_HOST, TMDB_IMAGE_HOST];
+    const rawBaseUrl = typeof context.settings?.apiBaseUrl === 'string' ? context.settings.apiBaseUrl.trim() : '';
+    if (rawBaseUrl) {
+      try {
+        const parsed = new URL(rawBaseUrl);
+        if (parsed.hostname) {
+          hosts.push(parsed.hostname);
+        }
+      } catch {
+        // ignore malformed URL
+      }
+    }
+    context.http.allowHosts(hosts);
     return context;
   }
 

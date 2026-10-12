@@ -41,6 +41,7 @@ export default function PluginSettings() {
   const [plugins, setPlugins] = useState<PluginListEntry[]>([]);
   const [health, setHealth] = useState<Record<string, PluginHealth | 'loading'>>({});
   const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+  const [baseUrlDrafts, setBaseUrlDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const applyHealth = useCallback((pluginId: string, promise: Promise<unknown>): void => {
@@ -72,6 +73,9 @@ export default function PluginSettings() {
       const rows = res.ok && Array.isArray(res.data) ? res.data : [];
       setPlugins(rows);
       for (const plugin of rows) {
+        if (typeof plugin.settings?.apiBaseUrl === 'string') {
+          setBaseUrlDrafts((prev) => ({ ...prev, [plugin.id]: plugin.settings.apiBaseUrl as string }));
+        }
         applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
       }
     } catch {
@@ -82,6 +86,33 @@ export default function PluginSettings() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleSaveBaseUrl = useCallback(
+    async (plugin: PluginListEntry) => {
+      const url = baseUrlDrafts[plugin.id] ?? '';
+      setBusy(plugin.id);
+      try {
+        const nextSettings = { ...plugin.settings, apiBaseUrl: url.trim() };
+        const result = (await window.electronAPI.setPluginConfig(plugin.id, {
+          settings: nextSettings,
+        })) as { ok: boolean };
+        if (result.ok) {
+          setPlugins((rows) =>
+            rows.map((p) => (p.id === plugin.id ? { ...p, settings: nextSettings } : p))
+          );
+          addToast('API 地址已保存', 'success');
+          applyHealth(plugin.id, window.electronAPI.testPlugin(plugin.id));
+        } else {
+          addToast('保存失败', 'error');
+        }
+      } catch {
+        addToast('保存失败', 'error');
+      } finally {
+        setBusy(null);
+      }
+    },
+    [baseUrlDrafts, addToast, applyHealth]
+  );
 
   const handleToggle = useCallback(
     async (plugin: PluginListEntry, enabled: boolean) => {
@@ -251,7 +282,7 @@ export default function PluginSettings() {
                   type="password"
                   value={secretDrafts[plugin.id] ?? ''}
                   onChange={(e) => setSecretDrafts((prev) => ({ ...prev, [plugin.id]: e.target.value }))}
-                  placeholder={hasSecret ? '已设置（输入可更换）' : 'API Token'}
+                  placeholder={hasSecret ? '已设置（输入可更换）' : 'API Token（支持 v3 32位 API Key 或 v4 JWT Token）'}
                   autoComplete="new-password"
                   aria-label={`${plugin.name} API Token`}
                   className="flex-1 min-w-[200px] px-3 py-1.5 bg-secondary border border-border rounded-md text-xs focus-ring"
@@ -286,6 +317,35 @@ export default function PluginSettings() {
                   </span>
                 )}
               </div>
+
+              {plugin.id === 'tmdb' && (
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <label className="block text-[11px] text-muted-foreground mb-1">
+                    API 镜像 / 反代加速地址（可选，国内直连超时时建议配置）
+                  </label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      value={baseUrlDrafts[plugin.id] ?? ((plugin.settings.apiBaseUrl as string) ?? '')}
+                      onChange={(e) => setBaseUrlDrafts((prev) => ({ ...prev, [plugin.id]: e.target.value }))}
+                      placeholder="默认: https://api.themoviedb.org/3"
+                      className="flex-1 min-w-[240px] px-3 py-1.5 bg-secondary border border-border rounded-md text-xs focus-ring"
+                      aria-label="TMDB API 镜像地址"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveBaseUrl(plugin)}
+                      disabled={busy === plugin.id}
+                      className="px-2.5 py-1.5 text-xs border border-border rounded-md hover:bg-accent focus-ring text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    >
+                      保存地址
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1.5">
+                    说明：支持 TMDB 申请的 32 位 API Key 或 v4 Read Access Token；支持系统/环境变量代理（HTTP_PROXY/HTTPS_PROXY）。
+                  </p>
+                </div>
+              )}
             </div>
           );
         })}
