@@ -21,11 +21,12 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const REPO = 'zhongfly/mpv-winbuild';
-const DEFAULT_TAG = '2026-09-20-e76a35ec95';
+const DEFAULT_TAG = '2026-10-23-0fae469547';
 // 只要普通 x86_64 构建：排除 v3（要求 AVX2 的指令集子集）、debug、dev（libmpv 头文件包）
 const ASSET_PATTERN = /^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$/;
 
-const tag = process.env.MPV_WINBUILD_TAG || DEFAULT_TAG;
+const explicitTag = process.env.MPV_WINBUILD_TAG;
+const tag = explicitTag || DEFAULT_TAG;
 const outDir = path.resolve('build/mpv-win');
 const exePath = path.join(outDir, 'mpv.exe');
 // 解压后只保留运行所需文件；doc/installer/mpv/ 等杂物清掉，安装包不带
@@ -56,10 +57,23 @@ async function main() {
     return;
   }
 
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  const headers = {
+    'User-Agent': 'qy-player-release-script',
+    'Accept': 'application/vnd.github+json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
   log(`查询 release tag=${tag}`);
-  const releaseRes = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, {
-    headers: { 'User-Agent': 'qy-player-release-script', 'Accept': 'application/vnd.github+json' },
+  let releaseRes = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, {
+    headers,
   });
+  if (releaseRes.status === 404 && !explicitTag) {
+    log(`tag ${tag} 不存在（upstream 已清理旧构建），回退到 releases/latest`);
+    releaseRes = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers,
+    });
+  }
   if (!releaseRes.ok) {
     throw new Error(
       `查询 release 失败（HTTP ${releaseRes.status}）。` +

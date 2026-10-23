@@ -101,11 +101,27 @@ resolve_dep() {
       # （`cmd LC_RPATH` / `cmdsize N` / `path <dir> (offset …)`），
       # 所以要靠 `path ` 前缀定位，别用 `getline` 数行——那样读到的是 cmdsize，
       # 解析出来是 "24" 这种数字，所有 @rpath 依赖都会"解析失败"
-      local rpath candidate
+      local rpath candidate rel_path
+      rel_path="${dep#@rpath/}"
       while IFS= read -r rpath; do
-        candidate="${rpath}/${dep#@rpath/}"
+        [ -n "$rpath" ] || continue
+        # rpath 自身可能包含 @loader_path 或 @executable_path，需对应展开
+        rpath="${rpath//@loader_path/$(dirname "$referrer")}"
+        rpath="${rpath//@executable_path/$(dirname "$MPV_BIN")}"
+        candidate="${rpath}/${rel_path}"
         if [ -f "$candidate" ]; then realpath "$candidate" && return; fi
-      done < <(otool -l "$referrer" | awk '/cmd LC_RPATH/{want=1; next} want && /^[ \t]*path /{print $2; want=0}')
+      done < <(otool -l "$referrer" | awk '/cmd LC_RPATH/{want=1; next} want && /^[ \t]*path /{ sub(/^[ \t]*path[ \t]+/, ""); sub(/[ \t]+\(offset.*$/, ""); print; want=0 }')
+
+      # 兜底：若 referrer 自身未带 LC_RPATH（或引用同包兄弟 dylib），
+      # 尝试引用方同目录、mpv lib 目录以及 Homebrew 常见 lib 路径
+      for candidate in \
+        "$(dirname "$referrer")/$rel_path" \
+        "$(dirname "$MPV_BIN")/../lib/$rel_path" \
+        "/opt/homebrew/lib/$rel_path" \
+        "/usr/local/lib/$rel_path"; do
+        if [ -f "$candidate" ]; then realpath "$candidate" && return; fi
+      done
+
       echo ""
       ;;
     *)
@@ -186,10 +202,12 @@ codesign -f -s - "$STAGING/mpv" >/dev/null 2>&1 || die "主程序签名失败"
 
 # ---- 5. 冒烟测试（仅 Darwin 可执行） --------------------------------------
 if [ "$(uname)" = "Darwin" ]; then
-  if ! "$STAGING/mpv" --version 2>/dev/null | grep -q '^mpv'; then
+  smoke_output="$("$STAGING/mpv" --version 2>&1 || true)"
+  if ! echo "$smoke_output" | grep -q '^mpv'; then
+    echo "$smoke_output" >&2
     die "冒烟测试失败：$STAGING/mpv --version 无法运行（dylib 闭包不完整？）"
   fi
-  log "冒烟测试通过：$("$STAGING/mpv" --version | head -n 1)"
+  log "冒烟测试通过：$(echo "$smoke_output" | head -n 1)"
 else
   log "非 Darwin 主机，跳过冒烟测试（改在 macOS CI 上验证）"
 fi
