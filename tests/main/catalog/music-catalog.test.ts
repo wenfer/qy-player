@@ -195,6 +195,28 @@ describe('music domain scoping (QYP3-055)', () => {
     repo.setSourcePurpose(videoId, 'music');
     expect(repo.listMusicSourceIds()).toEqual([videoId]);
   });
+
+  it('excludes disabled music sources from listMusicSourceIds and unified search', async () => {
+    expect(repo.listMusicSourceIds()).toEqual([sourceId]);
+    repo.setSourceEnabled(sourceId, false);
+    expect(repo.listMusicSourceIds()).toEqual([]);
+
+    const db = openDatabaseAtPath(join(dbDir, 'catalog.db'));
+    const unified = createUnifiedQueryService({
+      db,
+      onlineContinueWatching: async () => [],
+      onlineSearch: async () => [],
+      onlineRecent: async () => [],
+    });
+    const { items } = await unified.search('晴天', 1);
+    expect(items.filter((c) => c.ref.provider === 'music')).toHaveLength(0);
+
+    // Re-enabling brings them back
+    repo.setSourceEnabled(sourceId, true);
+    expect(repo.listMusicSourceIds()).toEqual([sourceId]);
+    const { items: reEnabledItems } = await unified.search('晴天', 1);
+    expect(reEnabledItems.filter((c) => c.ref.provider === 'music')).toHaveLength(1);
+  });
 });
 
 describe('upsert tri-state flags (QYP3-060)', () => {

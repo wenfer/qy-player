@@ -45,7 +45,7 @@ afterAll(() => {
 describe('music tables (migration 007)', () => {
   it('creates music/playlist tables with business-key uniqueness', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
     const names = tableNames(db);
     expect(names).toEqual(expect.arrayContaining(['music_tracks', 'music_cue_entries', 'playlists', 'playlist_items']));
     db.prepare(
@@ -144,7 +144,7 @@ function getVersion(db: Database.Database): number {
 describe('skip_overrides (migration 006)', () => {
   it('applies migration 006 and round-trips series-scope overrides', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
     const storage = createStorage(db);
     // 初次无设定
     expect(storage.getSkipOverride('jellyfin', 7, 'ep-1', '绝命毒师')).toBeNull();
@@ -199,7 +199,7 @@ describe('source purpose normalization (migration 010, QYP3-041)', () => {
     v9.close();
 
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
     const rows = db
       .prepare('SELECT name, purpose FROM library_sources ORDER BY id')
       .all() as Array<{ name: string; purpose: string }>;
@@ -249,7 +249,7 @@ describe('music history cleanup (migration 011, QYP3-053)', () => {
     v10.close();
 
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
 
     const titles = db
       .prepare('SELECT title FROM watch_history ORDER BY title')
@@ -285,7 +285,7 @@ describe('getWatchHistory localOnly filter', () => {
 describe('catalog migrations (005)', () => {
   it('applies the full chain on an empty database', () => {
     const db = openDatabaseAtPath(makeDbPath());
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
     const tables = tableNames(db);
     for (const table of CATALOG_TABLES) expect(tables).toContain(table);
     for (const table of LEGACY_TABLES) expect(tables).toContain(table);
@@ -314,7 +314,7 @@ describe('catalog migrations (005)', () => {
 
     // Reopen through the normal path: 005 + 006 both apply (append-only chain).
     const db = openDatabaseAtPath(path);
-    expect(getVersion(db)).toBe(11);
+    expect(getVersion(db)).toBe(12);
     expect((db.prepare('SELECT COUNT(*) AS n FROM local_media').get() as { n: number }).n).toBe(1);
     expect((db.prepare('SELECT position FROM playback_progress').get() as { position: number }).position).toBe(600);
 
@@ -477,5 +477,25 @@ describe('catalog migrations (005)', () => {
 
     // metadata_revision is untouched by catalog upserts (owned by QYP2-022).
     expect(item.metadata_revision).toBe(0);
+  });
+});
+
+describe('library_sources enabled column (migration 012)', () => {
+  it('applies migration 012 and defaults enabled to 1', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    expect(getVersion(db)).toBe(12);
+    db.prepare("INSERT INTO library_sources (kind, name, root) VALUES ('local', '默认启用', '/media/1')").run();
+    const row = db.prepare("SELECT name, enabled FROM library_sources WHERE name = '默认启用'").get() as {
+      name: string;
+      enabled: number;
+    };
+    expect(row.enabled).toBe(1);
+
+    db.prepare("UPDATE library_sources SET enabled = 0 WHERE name = '默认启用'").run();
+    const updated = db.prepare("SELECT name, enabled FROM library_sources WHERE name = '默认启用'").get() as {
+      name: string;
+      enabled: number;
+    };
+    expect(updated.enabled).toBe(0);
   });
 });

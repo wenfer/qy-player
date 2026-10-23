@@ -9,6 +9,7 @@ import { createIpcEndpoint, type IpcEndpoint } from '../platform/ipc-endpoint';
 
 export interface MpvOptions {
   extraArgs?: string[];
+  hwdec?: string;
 }
 
 export class MpvProcessManager extends EventEmitter {
@@ -86,9 +87,10 @@ export class MpvProcessManager extends EventEmitter {
       // 音乐（QYP3-012）：曲间无爆音衔接；对视频无副作用（仅音频轨道过渡）
       '--gapless-audio=weak',
       '--fs=no',
-      // Software decoding only: hwdec on Linux (vaapi/vdpau) is unstable
-      // with online streams and commonly freezes after ~30s of playback.
-      '--hwdec=no',
+      // Hardware decoding (QYP3-070): defaults to 'no' for strict legacy Linux
+      // driver compatibility (Rule 2 in AGENTS.md); configurable in Settings
+      // to allow modern GPUs (Intel QuickSync/VA-API/NVDEC) to decode 4K/H.265 smoothly.
+      `--hwdec=${options?.hwdec || 'no'}`,
       // Network stream buffering: prevents stutter on slow/congested LAN
       '--cache=yes',
       '--cache-secs=30',

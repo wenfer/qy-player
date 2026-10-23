@@ -75,7 +75,9 @@ export default function ServerMusicBrowser({ library }: { library: MusicLibraryR
   }, [loadAlbums]);
 
   const coverUrl = (album: ServerAlbum): string | undefined =>
-    buildImageUrl(serverMap, library.serverId, library.serverType, album.id, 'Primary', album.tag ?? undefined, 300);
+    album.tag
+      ? buildImageUrl(serverMap, library.serverId, library.serverType, album.imageId ?? album.id, 'Primary', album.tag, 300)
+      : undefined;
 
   const playFrom = useCallback(
     async (list: ServerTrack[], trackId: string): Promise<void> => {

@@ -1,5 +1,6 @@
 import { Play, RotateCcw } from 'lucide-react';
 import { RESUME_FINISHED_RATIO } from '../../../shared/types/playback';
+import { resolveItemPrimaryImage } from '../../utils/server-images';
 import type { Episode } from './index';
 
 /**
@@ -25,7 +26,7 @@ export default function EpisodeGrid({
   onPlayFromStart,
 }: {
   episodes: Episode[];
-  getImageUrl: (itemId: string, imageType: string, tag: string) => string | undefined;
+  getImageUrl: (itemId: string, imageType: string, tag?: string) => string | undefined;
   onPlay: (episode: Episode) => void;
   onPlayFromStart: (episode: Episode) => void;
 }) {
@@ -34,7 +35,8 @@ export default function EpisodeGrid({
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
       {episodes.map((ep) => {
         const msId = ep.MediaSources?.[0]?.Id;
-        const epPosterUrl = ep.ImageTags?.Primary ? getImageUrl(ep.Id, 'Primary', ep.ImageTags.Primary) : undefined;
+        const epTarget = resolveItemPrimaryImage(ep);
+        const epPosterUrl = epTarget ? getImageUrl(epTarget.itemId, 'Primary', epTarget.tag) : undefined;
         const duration = ep.RunTimeTicks ? ep.RunTimeTicks / 10000000 : 0;
         const position = ep.UserData?.PlaybackPositionTicks ? ep.UserData.PlaybackPositionTicks / 10000000 : 0;
         const finished = ep.UserData?.Played === true || (duration > 0 && position / duration > RESUME_FINISHED_RATIO);
@@ -69,7 +71,8 @@ export default function EpisodeGrid({
                 </div>
               )}
               {finished && (
-                <span className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/90 text-white">
+                <span className="absolute top-1.5 right-1.5 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-sm text-white/90 border border-white/10 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   已看完
                 </span>
               )}

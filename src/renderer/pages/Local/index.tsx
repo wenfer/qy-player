@@ -37,8 +37,8 @@ export default function Local() {
     setSourcesError(null);
     try {
       const result = (await window.electronAPI.listSources()) as Array<SourceListEntry>;
-      // 只列影视来源（QYP3-041）：音乐来源在音乐模式的媒体库里管
-      setSources(result.filter((s) => s.purpose === 'video'));
+      // 只列影视来源（QYP3-041）且仅限已启用来源：音乐来源在音乐模式的媒体库里管，已禁用来源不在此列
+      setSources(result.filter((s) => s.purpose === 'video' && s.enabled !== false));
     } catch (err) {
       setSourcesError(err instanceof Error ? err.message : '加载来源失败');
     } finally {
@@ -225,7 +225,7 @@ export default function Local() {
       {/* Catalog sources */}
       <section className="mb-12">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
             <Library size={14} />
             媒体库
           </h2>
@@ -306,7 +306,7 @@ export default function Local() {
       {/* History */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
             <Clock size={14} />
             最近播放
           </h2>
@@ -395,7 +395,7 @@ export default function Local() {
                 </button>
                 <button
                   onClick={() => handleDeleteItem(item)}
-                  className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-ring flex-shrink-0"
+                  className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-ring flex-shrink-0"
                   aria-label={`删除 ${item.title} 的播放记录`}
                 >
                   <Trash2 size={14} />

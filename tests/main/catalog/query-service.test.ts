@@ -301,4 +301,31 @@ describe('catalog query service', () => {
     expect(isCatalogSearchQuerySafe({ query: '' })).toBe(false);
     expect(isCatalogSearchQuerySafe({ query: 'ok' })).toBe(true);
   });
+
+  it('omits disabled sources from search, getDetail, and getPlayback', async () => {
+    const sourceId = makeSource();
+    await scanTree(
+      sourceId,
+      makeTree({
+        '电影/流浪地球.mkv': { size: 100, mtime: 1 },
+        '电影/流浪地球.nfo': { size: 10, mtime: 1, content: MOVIE_NFO },
+      })
+    );
+    expect(query.search({ sourceId, query: '流浪' }).items).toHaveLength(1);
+    const item = query.search({ sourceId, query: '流浪' }).items[0];
+    const itemId = Number(item.ref.itemId);
+    expect(query.getDetail(sourceId, itemId)).not.toBeNull();
+    expect(query.getPlayback(sourceId, itemId)).not.toBeNull();
+
+    // Disable source
+    repo.setSourceEnabled(sourceId, false);
+
+    // Search scoped to sourceId returns empty
+    expect(query.search({ sourceId, query: '流浪' }).items).toHaveLength(0);
+    // Global fan-out search also omits disabled source
+    expect(query.search({ query: '流浪' }).items).toHaveLength(0);
+    // getDetail and getPlayback return null
+    expect(query.getDetail(sourceId, itemId)).toBeNull();
+    expect(query.getPlayback(sourceId, itemId)).toBeNull();
+  });
 });

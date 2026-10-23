@@ -240,7 +240,7 @@ export function ShortcutsContent() {
 
       {/* Global shortcuts - editable */}
       <section className="mb-10" aria-label="全局快捷键">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-4">
           <Monitor size={14} />
           全局快捷键（系统级，应用在后台也生效）
         </h2>
@@ -291,7 +291,7 @@ export function ShortcutsContent() {
 
       {/* MPV window bindings - editable */}
       <section className="mb-6" aria-label="播放窗口快捷键">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-4">
           <Play size={14} />
           播放窗口快捷键（MPV 窗口内，修改后实时生效）
         </h2>
@@ -336,7 +336,7 @@ export function ShortcutsContent() {
 
       {/* Fixed MPV bindings - display only */}
       <section aria-label="固定按键">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-4">
           <Lock size={14} />
           固定按键（不可修改）
         </h2>

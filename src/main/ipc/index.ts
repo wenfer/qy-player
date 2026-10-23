@@ -4,11 +4,12 @@ import { randomUUID } from 'crypto';
 import { basename, extname, join } from 'path';
 import { app } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc-channels';
-import { PlayerCore } from '../modules/player-core';
+import { PlayerCore, formatMediaTitle } from '../modules/player-core';
 import { getDatabase, createStorage, closeDatabase } from '../modules/storage/db';
 import { decodeConfigValue, encodeConfigValue } from '../modules/storage/config-value';
 import { PlaybackStateManager } from '../modules/playback-state';
 import { createClient } from '../modules/online-connector';
+import type { JellyfinLibrary } from '../modules/online-connector/jellyfin-client';
 import { lyricsToLrc } from '../modules/online-connector/lyrics';
 import {
   MEDIA_SERVER_NAMESPACE,
@@ -1172,6 +1173,17 @@ export function registerIpcHandlers(
   );
   // QYP3-005：音乐封面（派生缓存，可清扫后按需再生成）
   registerCoversPartition(cacheManager, join(app.getPath('userData'), 'covers'));
+  // 在线媒体库海报与封面磁盘缓存（派生缓存，256MB 配额，mtime-LRU，可清扫）
+  cacheManager.register(
+    {
+      id: 'image-cache',
+      description: '在线媒体库海报与封面磁盘缓存（mtime-LRU）',
+      rootDir: join(app.getPath('userData'), 'image-cache'),
+      quota: { maxBytes: 256 * 1024 * 1024 },
+      sweepable: true,
+    },
+    []
+  );
   // QYP3-019：歌词（人工可编辑，永不清扫）
   registerLyricsPartition(cacheManager, lyricsDir);
 
@@ -1228,6 +1240,8 @@ export function registerIpcHandlers(
         try {
         const items = await client.getContinueWatching();
         for (const item of items) {
+          const primaryTag = item.ImageTags?.Primary || item.PrimaryImageTag;
+          const imageItemId = (!item.ImageTags?.Primary && item.PrimaryImageItemId) ? item.PrimaryImageItemId : undefined;
           rows.push({
             provider: config.type as 'jellyfin' | 'emby',
             serverId: config.id,
@@ -1238,7 +1252,8 @@ export function registerIpcHandlers(
             rating: item.CommunityRating,
             positionTicks: item.UserData?.PlaybackPositionTicks,
             runtimeTicks: item.RunTimeTicks,
-            primaryTag: item.ImageTags?.Primary,
+            primaryTag,
+            ...(imageItemId ? { imageItemId } : {}),
             updatedAt: item.UserData?.LastPlayedDate ? Date.parse(item.UserData.LastPlayedDate) || 0 : 0,
             seriesName: item.SeriesName,
             seasonNumber: item.ParentIndexNumber,
@@ -1262,6 +1277,8 @@ export function registerIpcHandlers(
             limit: 100,
           });
           for (const item of items) {
+            const primaryTag = item.ImageTags?.Primary || item.PrimaryImageTag;
+            const imageItemId = (!item.ImageTags?.Primary && item.PrimaryImageItemId) ? item.PrimaryImageItemId : undefined;
             rows.push({
               provider: config.type as 'jellyfin' | 'emby',
               serverId: config.id,
@@ -1270,7 +1287,8 @@ export function registerIpcHandlers(
               kind: item.Type,
               year: item.ProductionYear,
               rating: item.CommunityRating,
-              primaryTag: item.ImageTags?.Primary,
+              primaryTag,
+              ...(imageItemId ? { imageItemId } : {}),
               seriesName: item.SeriesName,
               seasonNumber: item.ParentIndexNumber,
               episodeNumber: item.IndexNumber,
@@ -1294,6 +1312,8 @@ export function registerIpcHandlers(
             limit: 50,
           });
           for (const item of items) {
+            const primaryTag = item.ImageTags?.Primary || item.PrimaryImageTag;
+            const imageItemId = (!item.ImageTags?.Primary && item.PrimaryImageItemId) ? item.PrimaryImageItemId : undefined;
             rows.push({
               provider: config.type as 'jellyfin' | 'emby',
               serverId: config.id,
@@ -1302,7 +1322,8 @@ export function registerIpcHandlers(
               kind: item.Type,
               year: item.ProductionYear,
               rating: item.CommunityRating,
-              primaryTag: item.ImageTags?.Primary,
+              primaryTag,
+              ...(imageItemId ? { imageItemId } : {}),
               updatedAt: item.DateCreated ? Date.parse(item.DateCreated) || 0 : 0,
             });
           }
@@ -1400,8 +1421,12 @@ export function registerIpcHandlers(
     streamSessionId?: string,
     audioChain?: AudioChainPayload
   ) => {
+    const rawHwdec = decodeConfigValue(storage.getConfig('playback.hwdec'));
+    const hwdec = typeof rawHwdec === 'string' ? rawHwdec : 'no';
     if (!player.isReady()) {
-      await player.start();
+      await player.start({ hwdec });
+    } else {
+      void player.setHwdec(hwdec);
     }
 
     // 音乐音频链（QYP3-012 + P2 ReplayGain 高级）：仅音乐加载时设置，
@@ -1477,7 +1502,8 @@ export function registerIpcHandlers(
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
 
-      await player.loadFile(path, finalPosition, effectiveHeaders);
+      const mediaTitle = formatMediaTitle(mediaContext, path);
+      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle);
       // Auto-next dedupe anchor only after the load actually succeeded
       // (a failed loadfile must not re-point the eof gate).
       autoNext.markLoaded({ mediaType: 'local', mediaId: path });
@@ -1485,9 +1511,12 @@ export function registerIpcHandlers(
       // sub-add before mpv's file-loaded event fails on 0.29, so wait for
       // it first; on timeout attempt once anyway (best-effort, per-track
       // isolated - never blocks playback, plan §13).
-      if (!(await player.waitForFileLoaded(5000))) {
-        await injectAttachedSubtitles(player, catalogRepo, mediaContext?.mediaType, mediaContext?.mediaId);
-      }
+      void (async () => {
+        try {
+          await player.waitForFileLoaded(5000);
+        } catch {}
+        await injectAttachedSubtitles(player, catalogRepo, 'local', path).catch(() => {});
+      })();
     } else {
       // Online streaming: key progress by the ITEM id (not the stream URL,
       // which differs between direct/transcode and would split the record)
@@ -1543,7 +1572,8 @@ export function registerIpcHandlers(
       const finalPosition = startPosition !== undefined
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
-      await player.loadFile(path, finalPosition, effectiveHeaders);
+      const mediaTitle = formatMediaTitle(mediaContext, path);
+      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle);
       // Auto-next anchor after successful load (same rule as local).
       autoNext.markLoaded({
         mediaType,
@@ -1559,8 +1589,13 @@ export function registerIpcHandlers(
       );
       // QYP2-021: WebDAV streams accept local subtitles too (plan §13);
       // same file-loaded gate as the local branch.
-      if (!(await player.waitForFileLoaded(5000))) {
-        await injectAttachedSubtitles(player, catalogRepo, mediaContext?.mediaType, mediaContext?.mediaId);
+      if (mediaType === 'webdav') {
+        void (async () => {
+          try {
+            await player.waitForFileLoaded(5000);
+          } catch {}
+          await injectAttachedSubtitles(player, catalogRepo, mediaType, mediaId).catch(() => {});
+        })();
       }
     }
   });
@@ -1904,6 +1939,9 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SETTINGS.SET, (_event, key: string, value: unknown) => {
     assertNotSecretConfigKey(key);
     storage.setConfig(key, encodeConfigValue(value));
+    if (key === 'playback.hwdec' && typeof value === 'string') {
+      void player.setHwdec(value);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS.GET_SERVERS, () => {
@@ -1978,10 +2016,17 @@ export function registerIpcHandlers(
     }
   });
 
+  // 媒体服务器结构与条目内存缓存（网络故障/超时兜底）
+  const serverViewsCache = new Map<number, JellyfinLibrary[]>();
+  const serverItemsCache = new Map<string, unknown[]>();
+
   // Online handlers
-  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_LIBRARIES, async (_event) => {
+  ipcMain.handle(IPC_CHANNELS.ONLINE.GET_LIBRARIES, async (_event, targetServerId?: number) => {
     const results = [];
-    for (const serverConfig of storage.getServers().filter((s) => s.is_active)) {
+    const activeServers = storage
+      .getServers()
+      .filter((s) => s.is_active && (!targetServerId || s.id === targetServerId));
+    for (const serverConfig of activeServers) {
       const apiKey = resolveServerApiKey(serverConfig, secretStore);
       if (!apiKey || !serverConfig.user_id) {
         results.push({
@@ -2002,6 +2047,7 @@ export function registerIpcHandlers(
           userId: serverConfig.user_id,
         });
         const views = await client.getViews();
+        serverViewsCache.set(serverConfig.id, views);
         results.push({
           serverId: serverConfig.id,
           serverName: serverConfig.name,
@@ -2011,14 +2057,25 @@ export function registerIpcHandlers(
         });
       } catch (err) {
         console.error(`[GET-LIBRARIES] 服务器 ${serverConfig.name} 获取失败:`, err);
-        results.push({
-          serverId: serverConfig.id,
-          serverName: serverConfig.name,
-          serverType: serverConfig.type,
-          baseUrl: serverConfig.base_url,
-          views: [],
-          error: describeNetworkError(err),
-        });
+        const cachedViews = serverViewsCache.get(serverConfig.id);
+        if (cachedViews && cachedViews.length > 0) {
+          results.push({
+            serverId: serverConfig.id,
+            serverName: serverConfig.name,
+            serverType: serverConfig.type,
+            baseUrl: serverConfig.base_url,
+            views: cachedViews,
+          });
+        } else {
+          results.push({
+            serverId: serverConfig.id,
+            serverName: serverConfig.name,
+            serverType: serverConfig.type,
+            baseUrl: serverConfig.base_url,
+            views: [],
+            error: describeNetworkError(err),
+          });
+        }
       }
     }
     return results;
@@ -2026,6 +2083,7 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.ONLINE.GET_ITEMS, async (_event, parentId: string, options?: unknown, serverId?: number) => {
     // QYP2-015: strict routing when the caller knows the server.
+    const cacheKey = `${serverId || 'all'}:${parentId || 'root'}:${JSON.stringify(options || {})}`;
     if (Number.isInteger(serverId) && (serverId as number) > 0) {
       try {
         const binding = bindServerById(storage, secretStore, serverId as number);
@@ -2035,20 +2093,28 @@ export function registerIpcHandlers(
           apiKey: binding.apiKey,
           userId: binding.userId,
         });
-        return await client.getItems(parentId, options as Record<string, unknown>);
+        const items = await client.getItems(parentId, options as Record<string, unknown>);
+        serverItemsCache.set(cacheKey, items);
+        return items;
       } catch (e) {
         console.error('[GET-ITEMS] 服务器列表获取失败:', e instanceof Error ? e.message : e);
+        const cached = serverItemsCache.get(cacheKey);
+        if (cached) return cached;
         return [];
       }
     }
     for (const { config, client } of getActiveServerClients(storage, secretStore)) {
       try {
-        return await client.getItems(parentId, options as Record<string, unknown>);
+        const items = await client.getItems(parentId, options as Record<string, unknown>);
+        serverItemsCache.set(cacheKey, items);
+        return items;
       } catch (err) {
         console.error(`[GET-ITEMS] 服务器 ${config.name} 获取失败:`, err);
         continue;
       }
     }
+    const cached = serverItemsCache.get(cacheKey);
+    if (cached) return cached;
     return [];
   });
 
@@ -2294,6 +2360,7 @@ function registerCatalogHandlers(
             : { ...LOCAL_SOURCE_CAPABILITIES },
         hasCredential: source.secret_ref ? secretStore.hasSecretByRef(source.secret_ref) : false,
         purpose: source.purpose,
+        enabled: source.enabled !== 0,
         ...(health
           ? {
               health: health.health,
@@ -2386,6 +2453,29 @@ function registerCatalogHandlers(
     }
   );
 
+  // 来源启用/禁用状态切换
+  ipcMain.handle(
+    IPC_CHANNELS.CATALOG.SOURCE_SET_ENABLED,
+    (_event, args: { sourceId: number; enabled: unknown }): ActionResult<{ enabled: boolean }> => {
+      const sourceId = Number(args?.sourceId);
+      if (!Number.isInteger(sourceId) || sourceId <= 0) {
+        return err('VALIDATION_FAILED', '来源 ID 不合法');
+      }
+      if (typeof args?.enabled !== 'boolean') {
+        return err('VALIDATION_FAILED', '启用状态不合法');
+      }
+      const source = repo.getSource(sourceId);
+      if (!source) return err('NOT_FOUND', '来源不存在');
+      const enabled = args.enabled;
+      if (!enabled && activeScanJobs.has(sourceId)) {
+        activeScanJobs.get(sourceId)?.cancel();
+        activeScanJobs.delete(sourceId);
+      }
+      repo.setSourceEnabled(sourceId, enabled);
+      return ok({ enabled });
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, async (_event, sourceId: number): Promise<ActionResult<string>> => {
     if (!Number.isInteger(sourceId) || sourceId <= 0) {
       return err('VALIDATION_FAILED', '来源 ID 不合法');
@@ -2414,6 +2504,11 @@ function registerCatalogHandlers(
     }
     if (activeScanJobs.has(sourceId)) {
       return err('CONFLICT', '该来源已有扫描任务在运行');
+    }
+    const source = repo.getSource(sourceId);
+    if (!source) return err('NOT_FOUND', '来源不存在');
+    if (source.enabled === 0) {
+      return err('UNAVAILABLE', '来源已禁用，无法扫描');
     }
     let adapter;
     try {
@@ -2552,6 +2647,10 @@ function registerCatalogHandlers(
   ipcMain.handle(IPC_CHANNELS.CATALOG.LIST, (_event, input: CatalogBrowseQuery): ActionResult<unknown> => {
     if (!isCatalogBrowseQuery(input)) {
       return err('VALIDATION_FAILED', '浏览查询不合法');
+    }
+    const source = repo.getSource(input.sourceId);
+    if (source && source.enabled === 0) {
+      return err('UNAVAILABLE', '媒体来源已禁用');
     }
     try {
       return ok(queryService.listPage(input));

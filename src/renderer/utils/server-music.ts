@@ -47,6 +47,7 @@ export function pickMusicLibraries(groups: ServerLibraryGroup[]): MusicLibraryRe
 
 export interface ServerAlbum {
   id: string;
+  imageId?: string;
   name: string;
   artist: string | null;
   year: number | null;
@@ -74,6 +75,8 @@ interface RawItem {
   IndexNumber?: number;
   ChildCount?: number;
   ImageTags?: { Primary?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
@@ -81,13 +84,18 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 
 export function mapServerAlbums(items: unknown[]): ServerAlbum[] {
   return (items as RawItem[])
     .filter((it) => str(it?.Id))
-    .map((it) => ({
-      id: it.Id as string,
-      name: str(it.Name) ?? '未知专辑',
-      artist: str(it.AlbumArtist) ?? (Array.isArray(it.Artists) ? str(it.Artists[0]) : null),
-      year: typeof it.ProductionYear === 'number' ? it.ProductionYear : null,
-      tag: str(it.ImageTags?.Primary),
-    }));
+    .map((it) => {
+      const primaryTag = str(it.ImageTags?.Primary) ?? str(it.PrimaryImageTag);
+      const imageId = (!it.ImageTags?.Primary && str(it.PrimaryImageItemId)) ? str(it.PrimaryImageItemId)! : undefined;
+      return {
+        id: it.Id as string,
+        ...(imageId ? { imageId } : {}),
+        name: str(it.Name) ?? '未知专辑',
+        artist: str(it.AlbumArtist) ?? (Array.isArray(it.Artists) ? str(it.Artists[0]) : null),
+        year: typeof it.ProductionYear === 'number' ? it.ProductionYear : null,
+        tag: primaryTag,
+      };
+    });
 }
 
 export function mapServerTracks(items: unknown[]): ServerTrack[] {

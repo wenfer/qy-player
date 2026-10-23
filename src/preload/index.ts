@@ -74,6 +74,9 @@ const electronAPI = {
   /** 来源转域（QYP3-055）：改用途标签，已索引内容不动（音乐域查询按 purpose 过滤）。 */
   setSourcePurpose: (sourceId: number, purpose: 'music' | 'video') =>
     ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SET_PURPOSE, { sourceId, purpose }),
+  /** 启用/停用来源。 */
+  setSourceEnabled: (sourceId: number, enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_SET_ENABLED, { sourceId, enabled }),
   sourceHealth: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SOURCE_HEALTH, sourceId),
   startScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_START, sourceId),
   cancelScan: (sourceId: number) => ipcRenderer.invoke(IPC_CHANNELS.CATALOG.SCAN_CANCEL, sourceId),
@@ -118,7 +121,7 @@ const electronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.LIBRARY.DELETE_HISTORY, mediaType, mediaId),
 
   // Online
-  getLibraries: () => ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_LIBRARIES),
+  getLibraries: (serverId?: number) => ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_LIBRARIES, serverId),
   getItems: (parentId: string, options?: unknown, serverId?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.ONLINE.GET_ITEMS, parentId, options, serverId),
   getItemDetails: (itemId: string, serverId?: number) =>

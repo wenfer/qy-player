@@ -41,9 +41,13 @@ const electronAPI = {
 vi.stubGlobal('electronAPI', electronAPI);
 
 // Detail page pulls the server map through utils/server-images.
-vi.mock('../../../src/renderer/utils/server-images', () => ({
-  getServerMap: vi.fn(async () => new Map()),
-}));
+vi.mock('../../../src/renderer/utils/server-images', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/renderer/utils/server-images')>();
+  return {
+    ...actual,
+    getServerMap: vi.fn(async () => new Map()),
+  };
+});
 
 const REQUEST = {
   ref: { provider: 'jellyfin', serverId: 1, itemId: 'item-1' },

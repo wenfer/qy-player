@@ -164,7 +164,7 @@ export default function ServerForm({
         <button
           onClick={onSave}
           disabled={saving}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all text-sm font-medium focus-ring disabled:opacity-50 disabled:active:scale-100"
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors duration-150 text-sm font-medium focus-ring disabled:opacity-50"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           {isEditing ? '保存修改' : '保存'}

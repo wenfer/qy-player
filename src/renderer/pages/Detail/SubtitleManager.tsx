@@ -127,7 +127,7 @@ export default function SubtitleManager({ itemId }: { itemId: number }) {
           type="button"
           onClick={handleImport}
           disabled={importing}
-          className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all focus-ring disabled:opacity-50"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors duration-150 focus-ring disabled:opacity-50"
         >
           {importing ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
           导入字幕

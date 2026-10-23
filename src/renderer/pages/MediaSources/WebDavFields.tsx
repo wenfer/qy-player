@@ -66,16 +66,16 @@ export default function WebDavFields({
         </p>
       )}
       {isHttp && (
-        <div className="flex items-start gap-2 p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg" role="alert">
-          <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2.5 p-3 bg-secondary/60 border border-border rounded-xl" role="alert">
+          <AlertTriangle size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="min-w-0">
-            <p className="text-xs text-amber-500">该地址使用 http 明文传输，密码可能被网络中间人截获。</p>
-            <label className="flex items-center gap-1.5 mt-1 text-xs text-foreground cursor-pointer">
+            <p className="text-xs text-foreground font-medium">该地址使用 http 明文传输，密码可能被网络中间人截获。</p>
+            <label className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
               <input
                 type="checkbox"
                 checked={values.confirmPlaintext}
                 onChange={(e) => onChange({ ...values, confirmPlaintext: e.target.checked })}
-                className="accent-current"
+                className="accent-primary"
               />
               我了解风险，仍要使用 http 明文连接
             </label>

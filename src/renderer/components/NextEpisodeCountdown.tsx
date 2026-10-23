@@ -148,7 +148,7 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
       </div>
       <div className="h-1 w-full bg-muted rounded-full overflow-hidden" role="progressbar" aria-valuenow={secondsLeft} aria-valuemax={totalSeconds}>
         <div
-          className="h-full bg-primary transition-all duration-1000 ease-linear"
+          className="h-full bg-primary transition-[width] duration-1000 ease-linear"
           style={{ width: `${totalSeconds > 0 ? (secondsLeft / totalSeconds) * 100 : 0}%` }}
         />
       </div>

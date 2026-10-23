@@ -25,12 +25,12 @@ interface ScrapeJobRecord {
   pluginId: string;
 }
 
-const STATUS_BADGE: Record<ScrapeJobRecord['status'], { label: string; cls: string }> = {
-  running: { label: '进行中', cls: 'bg-primary/10 text-primary' },
-  completed: { label: '已完成', cls: 'bg-emerald-500/10 text-emerald-500' },
-  cancelled: { label: '已取消', cls: 'bg-muted text-muted-foreground' },
-  failed: { label: '已暂停/失败', cls: 'bg-amber-500/10 text-amber-500' },
-  interrupted: { label: '上次未完成', cls: 'bg-amber-500/10 text-amber-500' },
+const STATUS_BADGE: Record<ScrapeJobRecord['status'], { label: string; dot: string }> = {
+  running: { label: '进行中', dot: 'bg-primary' },
+  completed: { label: '已完成', dot: 'bg-emerald-400' },
+  cancelled: { label: '已取消', dot: 'bg-muted-foreground' },
+  failed: { label: '已暂停/失败', dot: 'bg-amber-400' },
+  interrupted: { label: '上次未完成', dot: 'bg-amber-400' },
 };
 
 /** Provider display names (no internal ids in the UI). */
@@ -143,7 +143,10 @@ export default function ScrapeJobs() {
           return (
             <div key={job.id} className="bg-card border border-border rounded-xl p-4">
               <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className={`text-xs px-2 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-md bg-secondary border border-border text-foreground font-medium">
+                  <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                  {badge.label}
+                </span>
                 <span className="text-xs text-muted-foreground">{PROVIDER_NAMES[job.pluginId] ?? '第三方插件'}</span>
                 <span className="text-xs text-muted-foreground">
                   {done}/{total} 项 · 成功 {applied}
@@ -200,7 +203,7 @@ export default function ScrapeJobs() {
                 </div>
               )}
               {job.status === 'failed' && job.items.some((entry) => entry.errorCode === 'UPSTREAM_CHANGED') && (
-                <p className="text-[11px] text-amber-500 mt-2">
+                <p className="text-[11px] text-amber-400 mt-2 font-medium">
                   上游页面结构变化，任务已自动暂停。待插件适配后可恢复剩余条目。
                 </p>
               )}

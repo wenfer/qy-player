@@ -23,7 +23,7 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: Awaited<ReturnType<typ
     : card.ref.serverId;
   const imageUrl =
     !isCatalog && card.poster?.tag
-      ? buildImageUrl(serverMap, serverId, provider, card.ref.itemId, 'Primary', card.poster.tag)
+      ? buildImageUrl(serverMap, serverId, provider, card.poster?.itemId || card.ref.itemId, 'Primary', card.poster.tag)
       : undefined;
   return {
     id: String(card.ref.itemId),

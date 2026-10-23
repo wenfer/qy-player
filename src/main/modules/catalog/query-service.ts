@@ -154,10 +154,14 @@ export function createCatalogQueryService(db: Database.Database): CatalogQuerySe
     search(query: CatalogSearchQuery): Page<CatalogItemSummary> {
       const { page, pageSize } = normalizePageQuery(query);
       const like = `%${escapeLike(query.query)}%`;
-      // One source, or a fan-out across all sources (deterministic id order).
-      const sourceIds = query.sourceId !== undefined
-        ? [query.sourceId]
-        : repo.listSources().map((s) => s.id);
+      // One source, or a fan-out across all enabled sources (deterministic id order).
+      let sourceIds: number[];
+      if (query.sourceId !== undefined) {
+        const source = repo.getSource(query.sourceId);
+        sourceIds = source && source.enabled !== 0 ? [query.sourceId] : [];
+      } else {
+        sourceIds = repo.listSources().filter((s) => s.enabled !== 0).map((s) => s.id);
+      }
       const collected: CatalogItemSummary[] = [];
       let remaining = pageSize;
       // Per-source skip accounting: earlier sources consume the global
@@ -185,6 +189,8 @@ export function createCatalogQueryService(db: Database.Database): CatalogQuerySe
     },
 
     getDetail(sourceId: number, itemId: number): CatalogItemDetail | null {
+      const source = repo.getSource(sourceId);
+      if (source && source.enabled === 0) return null;
       const row = repo.getItem(itemId);
       if (!row || row.source_id !== sourceId) return null;
       const item = toSummary(row, sourceId);
@@ -267,6 +273,8 @@ export function createCatalogQueryService(db: Database.Database): CatalogQuerySe
     },
 
     getPlayback(sourceId: number, itemId: number): PlaybackIntent | null {
+      const source = repo.getSource(sourceId);
+      if (source && source.enabled === 0) return null;
       const row = repo.getItem(itemId);
       if (!row || row.source_id !== sourceId) return null;
       const files = repo.listFilesByItem(itemId);

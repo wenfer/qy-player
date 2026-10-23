@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useToastStore } from '../../stores/toast-store';
+import { readSetting } from '../../utils/read-setting';
 
 /**
- * 播放偏好：自动连播（QYP2-035）+ 剧集跳过片头/片尾。
+ * 播放偏好：自动连播（QYP2-035）+ 剧集跳过片头/片尾 + 硬件加速解码（QYP3-070）。
  * 开关实时读取（main 侧每次命中/EOF 重新取值，改完即生效）。
  */
 export default function PlaybackSettings() {
@@ -10,6 +11,7 @@ export default function PlaybackSettings() {
   const [autoNext, setAutoNext] = useState<boolean | null>(null);
   const [skipIntro, setSkipIntro] = useState<boolean | null>(null);
   const [skipOutro, setSkipOutro] = useState<boolean | null>(null);
+  const [hwdec, setHwdec] = useState<string>('no');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -30,6 +32,12 @@ export default function PlaybackSettings() {
       } catch {
         setSkipIntro(true);
         setSkipOutro(false);
+      }
+      try {
+        const savedHwdec = await readSetting<string>('playback.hwdec');
+        setHwdec(typeof savedHwdec === 'string' ? savedHwdec : 'no');
+      } catch {
+        setHwdec('no');
       }
     })();
   }, []);
@@ -72,12 +80,48 @@ export default function PlaybackSettings() {
     }
   }, [skipIntro, skipOutro]);
 
+  const updateHwdec = useCallback(async (value: string): Promise<void> => {
+    setSaving(true);
+    try {
+      await window.electronAPI.setSettings('playback.hwdec', value);
+      setHwdec(value);
+      addToast(value === 'no' ? '已切换为软件解码' : '已开启硬件加速解码', 'success');
+    } catch {
+      addToast('设置保存失败，请重试', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   if (autoNext === null && skipIntro === null && skipOutro === null) return null;
 
   return (
     <div className="mt-8">
       <h2 className="text-base font-semibold mb-3">播放</h2>
       <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm font-medium">硬件加速解码 (GPU)</span>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                利用显卡芯片进行硬件解码。默认关闭以兼容老旧 Linux 设备与早期驱动。
+              </p>
+            </div>
+            <select
+              value={hwdec}
+              onChange={(e) => void updateHwdec(e.target.value)}
+              disabled={saving}
+              className="bg-secondary text-foreground text-xs rounded-lg px-2.5 py-1.5 border border-border focus-ring cursor-pointer ml-4"
+            >
+              <option value="no">关闭（纯软件解码，兼容老旧设备）</option>
+              <option value="auto-safe">开启（自动选择，推荐现代独立/集成显卡）</option>
+              <option value="vaapi">VA-API（Linux Intel/AMD 平台专属）</option>
+            </select>
+          </div>
+          <span className="text-xs text-muted-foreground leading-relaxed">
+            若播放 4K 或 H.265 (HEVC) 高码率视频出现卡顿、掉帧或 CPU 负载过高，建议切换为「开启（自动选择）」或「VA-API」。
+          </span>
+        </div>
         <label className="flex flex-wrap items-center gap-3 bg-card border border-border rounded-xl p-4 cursor-pointer">
           <input
             type="checkbox"

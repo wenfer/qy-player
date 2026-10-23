@@ -1,16 +1,32 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ServerOff, RefreshCw, Film, AlertCircle, Tv, Music, FolderOpen, Clapperboard } from 'lucide-react';
+import {
+  ServerOff,
+  RefreshCw,
+  Film,
+  AlertCircle,
+  Tv,
+  Music,
+  FolderOpen,
+  Clapperboard,
+  LayoutGrid,
+  Server,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import HorizontalRow from '../../components/HorizontalRow';
 import RowSkeleton from '../../components/Skeleton/RowSkeleton';
 import { useToastStore } from '../../stores/toast-store';
-import { getServerMap, buildImageUrl } from '../../utils/server-images';
+import { getServerMap, buildImageUrl, buildItemImageUrl, type ServerMediaItemLike } from '../../utils/server-images';
 import { mediaTypeFromKind } from '../../utils/media-card';
 import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
 import type { UnifiedCard } from '../../../main/modules/catalog/unified-query';
 import type { MediaRef } from '../../../shared/types/catalog';
+import {
+  getCachedHomeData,
+  setCachedHomeData,
+  type CachedLibraryRow,
+} from '../../utils/media-cache';
 
 /**
  * QYP2-036: 统一卡片 → MediaItem 适配。catalog 卡走 /browse 路由 +
@@ -26,7 +42,7 @@ function unifiedToMediaItem(card: UnifiedCard, serverMap: ReturnType<typeof getS
       : card.ref.serverId;
   const imageUrl =
     !isCatalog && card.poster?.tag
-      ? buildImageUrl(serverMap, serverId, provider, card.ref.itemId, 'Primary', card.poster.tag)
+      ? buildImageUrl(serverMap, serverId, provider, card.poster?.itemId || card.ref.itemId, 'Primary', card.poster.tag)
       : undefined;
   return {
     id: String(card.ref.itemId),
@@ -79,14 +95,9 @@ interface LibraryResult {
   error?: string;
 }
 
-interface LibraryRow {
-  viewId: string;
-  rawViewId: string;
-  serverId: number;
-  title: string;
-  collectionType: string;
-  items: MediaItem[];
-}
+type LibraryRow = CachedLibraryRow;
+
+const HOME_SELECTED_SERVER_KEY = 'qy_home_selected_server';
 
 const COLLECTION_ICONS: Record<string, LucideIcon> = {
   movies: Clapperboard,
@@ -103,7 +114,7 @@ function LibraryCard({
   onClick,
 }: {
   title: string;
-  count: number;
+  count?: number;
   collectionType: string;
   imageUrl?: string;
   thumbUrl?: string;
@@ -115,8 +126,8 @@ function LibraryCard({
   return (
     <button
       onClick={onClick}
-      className="group relative aspect-[16/9] rounded-xl overflow-hidden bg-card border border-border transition-all duration-200 hover:border-primary/40 card-lift focus-ring text-left"
-      aria-label={`打开媒体库 ${title}，共 ${count} 部影片`}
+      className="group relative aspect-[16/9] rounded-xl overflow-hidden bg-card border border-border transition-colors duration-150 hover:border-primary/40 card-lift focus-ring text-left"
+      aria-label={`打开媒体库 ${title}${count ? `，共 ${count} 部影片` : ''}`}
     >
       {bg ? (
         <img
@@ -132,33 +143,61 @@ function LibraryCard({
       <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
       <div className="absolute bottom-0 left-0 right-0 p-3">
         <div className="font-semibold text-sm truncate drop-shadow">{title}</div>
-        <div className="text-xs text-muted-foreground">{count} 部影片</div>
+        <div className="text-xs text-muted-foreground">
+          {count != null && count > 0 ? `${count} 部影片` : '媒体库'}
+        </div>
       </div>
     </button>
   );
 }
 
 export default function Home() {
-  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
-  const [libraryRows, setLibraryRows] = useState<LibraryRow[]>([]);
-  const [recentlyAdded, setRecentlyAdded] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = useRef(getCachedHomeData()).current;
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>(
+    () => cached?.continueWatching || []
+  );
+  const [libraryRows, setLibraryRows] = useState<LibraryRow[]>(
+    () => cached?.libraryRows || []
+  );
+  const [recentlyAdded, setRecentlyAdded] = useState<MediaItem[]>(
+    () => cached?.recentAdditions || []
+  );
+  const hasCache = !!(cached?.libraryRows?.length || cached?.continueWatching?.length);
+  const [loading, setLoading] = useState(!hasCache);
   const [error, setError] = useState<string | null>(null);
   const [servers, setServers] = useState<ServerInfo[]>([]);
   const [libraryErrors, setLibraryErrors] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 服务端切换状态（记住上次选中的服务器）
+  const [selectedServerId, setSelectedServerId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(HOME_SELECTED_SERVER_KEY) || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+
   const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   // Re-entrancy guard: focus/eof/manual refresh can overlap otherwise,
   // causing interleaved setState and duplicated backend requests.
   const loadingRef = useRef(false);
 
-  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+  // 保持对动态 state 的 ref 引用，避免成为 useCallback 不稳定依赖
+  const libraryRowsRef = useRef(libraryRows);
+  libraryRowsRef.current = libraryRows;
+  const continueWatchingRef = useRef(continueWatching);
+  continueWatchingRef.current = continueWatching;
+  const selectedServerIdRef = useRef(selectedServerId);
+  selectedServerIdRef.current = selectedServerId;
+
+  const loadData = useCallback(async (opts?: { silent?: boolean; serverId?: string }) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     if (opts?.silent) {
       setRefreshing(true); // background refresh: keep existing content visible
-    } else {
+    } else if (!hasCache) {
       setLoading(true);
     }
     setError(null);
@@ -172,6 +211,22 @@ export default function Home() {
       if (activeServers.length === 0) {
         setLoading(false);
         return;
+      }
+
+      // 确定当前请求的目标服务器（若选定的 ID 不在激活列表中，回退到 'all'）
+      const currentSelected = opts?.serverId ?? selectedServerIdRef.current;
+      let effectiveServerId = currentSelected;
+      if (currentSelected !== 'all') {
+        const numId = Number(currentSelected);
+        if (!activeServers.some((s) => s.id === numId)) {
+          effectiveServerId = 'all';
+          setSelectedServerId('all');
+          try {
+            localStorage.setItem(HOME_SELECTED_SERVER_KEY, 'all');
+          } catch {
+            // ignore
+          }
+        }
       }
 
       // 统一继续观看（QYP2-036）：目录 + 在线合并、MediaRef 去重、
@@ -197,9 +252,10 @@ export default function Home() {
         // 最近添加可选
       }
 
-      // Libraries - one row per media library view (matches server categorization)
+      // 媒体库：若指定目标服务器，仅请求目标服务器的视图，避免并发全量拉取或被故障服务器阻塞
+      const targetServerNum = effectiveServerId !== 'all' ? Number(effectiveServerId) : undefined;
       const rows: LibraryRow[] = [];
-      const libs = (await window.electronAPI.getLibraries()) as LibraryResult[];
+      const libs = (await window.electronAPI.getLibraries(targetServerNum)) as LibraryResult[];
       const errors: string[] = [];
       for (const lib of libs) {
         if (lib.error) {
@@ -209,68 +265,32 @@ export default function Home() {
         const libServerMap = new Map(
           activeServers.filter((s) => s.id === lib.serverId).map((s) => [s.id, s])
         );
-        // Fetch all views in parallel (one IPC per view; serial awaits
-        // made multi-library servers load noticeably slower)
-        const viewItems = await Promise.all(
-          lib.views.map((view) =>
-            window.electronAPI
-              .getItems(view.Id as string, {
-                sortBy: 'DateCreated',
-                sortOrder: 'Descending',
-                limit: 20,
-              })
-              .catch(() => [] as Array<Record<string, unknown>>)
-          )
-        );
-        for (let vi = 0; vi < lib.views.length; vi++) {
-          const view = lib.views[vi];
-          const items = viewItems[vi];
-
-          const mapped = (items as Array<Record<string, unknown>>).map((item) => {
-            const imageTags = item.ImageTags as Record<string, string> | undefined;
-            const itemServerType = (item.serverType as string) || lib.serverType || 'jellyfin';
-            const baseServerId = (item.serverId as number) || lib.serverId;
-            return {
-              id: item.Id as string,
-              name: (item.Name as string) || '未知',
-              imageUrl: buildImageUrl(
-                libServerMap,
-                baseServerId,
-                itemServerType,
-                item.Id as string,
-                'Primary',
-                imageTags?.Primary
-              ),
-              // Landscape thumbnail - far better suited as a wide card bg
-              // than a cropped portrait poster
-              thumbUrl: imageTags?.Thumb
-                ? buildImageUrl(
-                    libServerMap,
-                    baseServerId,
-                    itemServerType,
-                    item.Id as string,
-                    'Thumb',
-                    imageTags.Thumb,
-                    800
-                  )
-                : undefined,
-              year: item.ProductionYear as number,
-              rating: item.CommunityRating as number,
-              type: item.Type as string,
-              serverId: (item.serverId as number) || lib.serverId,
-              serverType: itemServerType,
-              dateCreated: item.DateCreated as string | undefined,
-            };
-          });
-
-          // Keep the server's own library name (e.g. 电影 / 电视剧 / 音乐)
+        for (const view of lib.views) {
+          const viewImageUrl = buildItemImageUrl(
+            libServerMap,
+            lib.serverId,
+            lib.serverType,
+            view as ServerMediaItemLike,
+            'Primary',
+            500
+          );
+          const viewThumbUrl = buildItemImageUrl(
+            libServerMap,
+            lib.serverId,
+            lib.serverType,
+            view as ServerMediaItemLike,
+            'Thumb',
+            800
+          );
           rows.push({
             viewId: `${lib.serverId}-${view.Id}`,
             rawViewId: view.Id as string,
             serverId: lib.serverId,
             title: (view.Name as string) || lib.serverName || '未命名媒体库',
             collectionType: (view.CollectionType as string) || '',
-            items: mapped,
+            viewImageUrl,
+            viewThumbUrl,
+            items: [],
           });
         }
       }
@@ -282,16 +302,40 @@ export default function Home() {
       setContinueWatching(cwItems);
       setLibraryRows(rows);
       setRecentlyAdded(recentItems);
+
+      // 仅在全部服务器模式下持久化 SWR 缓存
+      if (effectiveServerId === 'all') {
+        setCachedHomeData({
+          continueWatching: cwItems,
+          recentAdditions: recentItems,
+          libraryRows: rows,
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '未知错误';
-      setError(msg);
-      addToast(`加载数据失败: ${msg}`, 'error');
+      if (!libraryRowsRef.current.length && !continueWatchingRef.current.length) {
+        setError(msg);
+        addToast(`加载数据失败: ${msg}`, 'error');
+      }
     } finally {
       loadingRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [addToast]);
+  }, [addToast, hasCache]);
+
+  const handleSelectServer = useCallback(
+    (idStr: string) => {
+      setSelectedServerId(idStr);
+      try {
+        localStorage.setItem(HOME_SELECTED_SERVER_KEY, idStr);
+      } catch {
+        // ignore
+      }
+      void loadData({ serverId: idStr, silent: true });
+    },
+    [loadData]
+  );
 
   useEffect(() => {
     loadData();
@@ -330,6 +374,25 @@ export default function Home() {
   );
 
   const handleItemPlay = usePlayItem();
+
+  // 根据当前选中的服务器过滤展示
+  const displayedLibraryRows = useMemo(() => {
+    if (selectedServerId === 'all') return libraryRows;
+    const srvId = Number(selectedServerId);
+    return libraryRows.filter((r) => r.serverId === srvId);
+  }, [libraryRows, selectedServerId]);
+
+  const displayedContinueWatching = useMemo(() => {
+    if (selectedServerId === 'all') return continueWatching;
+    const srvId = Number(selectedServerId);
+    return continueWatching.filter((it) => it.serverId === srvId);
+  }, [continueWatching, selectedServerId]);
+
+  const displayedRecentlyAdded = useMemo(() => {
+    if (selectedServerId === 'all') return recentlyAdded;
+    const srvId = Number(selectedServerId);
+    return recentlyAdded.filter((it) => it.serverId === srvId);
+  }, [recentlyAdded, selectedServerId]);
 
   // Loading state with skeletons
   if (loading) {
@@ -382,11 +445,13 @@ export default function Home() {
 
   // Content state
   const hasContent =
-    continueWatching.length > 0 || libraryRows.length > 0 || recentlyAdded.length > 0;
+    displayedContinueWatching.length > 0 ||
+    displayedLibraryRows.length > 0 ||
+    displayedRecentlyAdded.length > 0;
 
   return (
     <div className="p-8 max-w-none">
-      <header className="mb-10 flex items-start justify-between">
+      <header className="mb-8 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">首页</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -394,8 +459,10 @@ export default function Home() {
           </p>
         </div>
         <button
-          onClick={() => loadData({ silent: servers.length > 0 })}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-accent transition-colors focus-ring"
+          onClick={() => {
+            void loadData({ silent: servers.length > 0 });
+          }}
+          className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-accent transition-colors duration-150 focus-ring"
           aria-label="刷新媒体库"
         >
           <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
@@ -408,13 +475,13 @@ export default function Home() {
           {libraryErrors.map((e, i) => (
             <div
               key={i}
-              className="flex items-center gap-2 p-3 bg-amber-500/10 text-amber-600 rounded-lg text-sm"
+              className="flex items-center gap-2.5 p-3 bg-card border border-border text-foreground rounded-xl text-sm"
             >
-              <AlertCircle size={16} className="flex-shrink-0" />
-              {e}
+              <AlertCircle size={16} className="text-amber-400 flex-shrink-0" />
+              <span className="flex-1">{e}</span>
               <button
                 onClick={() => navigate('/media-sources')}
-                className="ml-auto text-xs underline underline-offset-2 hover:no-underline flex-shrink-0"
+                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 hover:no-underline flex-shrink-0 transition-colors"
               >
                 前往媒体库
               </button>
@@ -423,26 +490,65 @@ export default function Home() {
         </div>
       )}
 
+      {/* 服务端切换标签栏：多于 1 个服务器时展示 */}
+      {servers.length > 1 && (
+        <nav className="flex flex-wrap items-center gap-2 mb-8" role="tablist" aria-label="服务端切换">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedServerId === 'all'}
+            onClick={() => handleSelectServer('all')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg border transition-colors duration-150 focus-ring ${
+              selectedServerId === 'all'
+                ? 'bg-secondary border-border text-foreground font-semibold shadow-sm'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            }`}
+          >
+            <LayoutGrid size={13} />
+            全部
+          </button>
+          {servers.map((srv) => {
+            const isSelected = selectedServerId === String(srv.id);
+            return (
+              <button
+                key={srv.id}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => handleSelectServer(String(srv.id))}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg border transition-colors duration-150 focus-ring ${
+                  isSelected
+                    ? 'bg-secondary border-border text-foreground font-semibold shadow-sm'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                }`}
+              >
+                <Server size={13} />
+                {srv.name}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       {hasContent ? (
         <>
-          {/* Media library categories - primary navigation */}
-          {libraryRows.length > 0 && (
+          {/* 媒体库分类入口卡片 */}
+          {displayedLibraryRows.length > 0 && (
             <section className="mb-10" aria-label="媒体库分类">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+              <h2 className="text-sm font-semibold text-muted-foreground mb-4">
                 媒体库
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {libraryRows.map((row) => (
+                {displayedLibraryRows.map((row) => (
                   <LibraryCard
                     key={row.viewId}
                     title={row.title}
-                    count={row.items.length}
                     collectionType={row.collectionType}
-                    imageUrl={row.items[0]?.imageUrl}
-                    thumbUrl={row.items[0]?.thumbUrl}
+                    imageUrl={row.viewImageUrl}
+                    thumbUrl={row.viewThumbUrl}
                     onClick={() =>
                       navigate(`/library/${row.serverId}/${encodeURIComponent(row.rawViewId)}`, {
-                        state: { name: row.title },
+                        state: { name: row.title, collectionType: row.collectionType },
                       })
                     }
                   />
@@ -451,18 +557,18 @@ export default function Home() {
             </section>
           )}
 
-          {continueWatching.length > 0 && (
+          {displayedContinueWatching.length > 0 && (
             <HorizontalRow
               title="继续观看"
-              items={continueWatching}
+              items={displayedContinueWatching}
               onItemClick={handleItemClick}
               onItemPlay={handleItemPlay}
             />
           )}
-          {recentlyAdded.length > 0 && (
+          {displayedRecentlyAdded.length > 0 && (
             <HorizontalRow
               title="最近添加"
-              items={recentlyAdded}
+              items={displayedRecentlyAdded}
               onItemClick={handleItemClick}
               onItemPlay={handleItemPlay}
             />

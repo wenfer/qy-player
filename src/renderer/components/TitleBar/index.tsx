@@ -60,7 +60,7 @@ export default function TitleBar({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className="flex-none flex items-stretch justify-between bg-card border-b border-border select-none"
+      className="flex-none flex items-stretch justify-between bg-card border-b border-border select-none relative z-50"
       style={{ ...DRAG, height }}
       data-testid="title-bar"
     >

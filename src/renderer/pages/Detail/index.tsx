@@ -12,7 +12,7 @@ import SkipOverrideDialog, { SkipOverrideTrigger } from './SkipOverrideDialog';
 import ProgressSummary from './ProgressSummary';
 import type { MediaProbeOutcome, ProbeItemInput } from '../../../shared/types/media-info';
 import { useToastStore } from '../../stores/toast-store';
-import { getServerMap } from '../../utils/server-images';
+import { getServerMap, resolveItemPrimaryImage } from '../../utils/server-images';
 import { usePlayerStore } from '../../stores/player-store';
 
 interface ItemDetails {
@@ -29,7 +29,9 @@ interface ItemDetails {
   SeasonName?: string;
   IndexNumber?: number;
   ParentIndexNumber?: number;
-  ImageTags?: { Primary?: string; Backdrop?: string };
+  ImageTags?: { Primary?: string; Backdrop?: string; Thumb?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
   BackdropImageTags?: string[];
   MediaSources?: Array<{ Id: string; Size?: number }>;
   People?: Array<{ Name: string; Type: string; Role?: string }>;
@@ -48,7 +50,9 @@ export interface Episode {
   IndexNumber?: number;
   ParentIndexNumber?: number;
   Overview?: string;
-  ImageTags?: { Primary?: string };
+  ImageTags?: { Primary?: string; Thumb?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
   RunTimeTicks?: number;
   MediaSources?: Array<{ Id: string }>;
   /** Server-side watch state (§12.1: server UserData preferred). */
@@ -212,6 +216,7 @@ export default function Detail() {
       return;
     }
     try {
+      addToast('正在获取播放地址...', 'info');
       const result = (await window.electronAPI.resolvePlayback(
         { provider: serverType, serverId, itemId: targetId },
         { mode: playMode, ...(mediaSourceId ? { mediaSourceId } : {}) }
@@ -252,7 +257,9 @@ export default function Detail() {
         resolved.streamSessionId
       );
       addToast(
-        playMode === 'transcode' ? '开始播放（服务端转码）' : '开始播放（直连/客户端解码）',
+        playMode === 'transcode'
+          ? '开始播放（服务端转码）'
+          : '已发起播放，正在连接服务器缓冲...',
         'success'
       );
       // 静默重解析交给 focus 事件：播放刚启动时服务器 UserData 尚未
@@ -350,10 +357,11 @@ export default function Detail() {
   }, [details, serverId]);
 
   const getImageUrl = useCallback(
-    (itemId: string, imageType: string, tag: string) => {
+    (itemId: string, imageType: string, tag?: string) => {
       if (!baseUrl) return undefined;
       const prefix = serverType === 'emby' ? '/emby' : '';
-      return `${baseUrl}${prefix}/Items/${itemId}/Images/${imageType}?tag=${tag}&maxHeight=800&quality=90`;
+      const tagParam = tag ? `&tag=${tag}` : '';
+      return `${baseUrl}${prefix}/Items/${itemId}/Images/${imageType}?maxHeight=800&quality=90${tagParam}`;
     },
     [serverType, baseUrl]
   );
@@ -402,8 +410,9 @@ export default function Detail() {
   const backdropUrl = details.BackdropImageTags?.[0]
     ? getImageUrl(details.Id, 'Backdrop', details.BackdropImageTags[0])
     : undefined;
-  const posterUrl = details.ImageTags?.Primary
-    ? getImageUrl(details.Id, 'Primary', details.ImageTags.Primary)
+  const primaryTarget = resolveItemPrimaryImage(details);
+  const posterUrl = primaryTarget
+    ? getImageUrl(primaryTarget.itemId, 'Primary', primaryTarget.tag)
     : undefined;
 
   const typeBadge = TYPE_BADGE[details.Type];
@@ -413,10 +422,10 @@ export default function Detail() {
       {/* Full-screen backdrop */}
       {backdropUrl && (
         <>
-          <div className="fixed inset-0 z-0">
+          <div className="fixed inset-0 top-9 z-0 pointer-events-none">
             <img src={backdropUrl} alt="" className="w-full h-full object-cover" />
           </div>
-          <div className="fixed inset-0 z-0 bg-background/60 backdrop-blur-sm" />
+          <div className="fixed inset-0 top-9 z-0 bg-background/60 backdrop-blur-sm pointer-events-none" />
         </>
       )}
 

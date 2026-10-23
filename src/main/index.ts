@@ -29,6 +29,7 @@ import { registerStreamProtocol } from './modules/playback-engine/stream-protoco
 import { createStreamRouteCache } from './modules/security/stream-route-cache';
 import { resolveCoverFileName } from './modules/library-scanner/cover-service';
 import { parseQyFileUrl } from './modules/platform/qy-file-url';
+import { ImageCacheService } from './modules/cache/image-cache-service';
 
 let mainWindow: BrowserWindow | null = null;
 const player = new PlayerCore();
@@ -244,6 +245,8 @@ app.whenReady().then(() => {
   //   URL 解析抽在 platform/qy-file-url（QYP3-062，win 形态防御性归一）
   {
     const coversRoot = resolve(app.getPath('userData'), 'covers');
+    const imageCacheRoot = resolve(app.getPath('userData'), 'image-cache');
+    const imageCacheService = new ImageCacheService({ cacheDir: imageCacheRoot });
     const sep = require('node:path').sep;
     protocol.registerFileProtocol('qy-file', (request, callback) => {
       try {
@@ -258,6 +261,22 @@ app.whenReady().then(() => {
           const name = resolveCoverFileName(parsed.name, isServed);
           if (!name) return callback({ error: -3 });
           return callback(resolve(coversRoot, name));
+        }
+        if (parsed?.kind === 'image-cache') {
+          // 在线媒体库静态图片缓存：已落盘直接服务，未落盘异步拉取落盘后服务
+          imageCacheService
+            .ensureImage(parsed.key, parsed.remoteUrl)
+            .then((filePath) => {
+              if (filePath) {
+                callback(filePath);
+              } else {
+                callback({ error: -6 });
+              }
+            })
+            .catch(() => {
+              callback({ error: -6 });
+            });
+          return;
         }
         if (parsed?.kind === 'audio') {
           const target = resolveAudioUrlSource(parsed.sourceId, parsed.relPath);

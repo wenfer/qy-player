@@ -42,6 +42,7 @@ const entry = (id: number, name: string, purpose: SourceListEntry['purpose']): S
   capabilities: { canSeek: true, canDelete: true, supportsEtag: false, supportsRange: true },
   hasCredential: false,
   purpose,
+  enabled: true,
 });
 
 const MIXED = [entry(1, '音乐盘', 'music'), entry(2, '影片盘', 'video')];

@@ -3,11 +3,12 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Loader2, Film, AlertCircle, Play, Search, Tv, Clapperboard, Wand2 } from 'lucide-react';
 import PosterCard from '../../components/PosterCard';
 import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
-import { getServerMap, buildImageUrl } from '../../utils/server-images';
+import { getServerMap, buildItemImageUrl } from '../../utils/server-images';
 import { useToastStore } from '../../stores/toast-store';
 import { usePlayItem } from '../../hooks/use-play-item';
 import type { MediaItem } from '../../components/HorizontalRow';
 import type { CatalogItemSummary, CatalogItemDetail } from '../../../shared/types/catalog';
+import { getCachedLibraryItems, setCachedLibraryItems } from '../../utils/media-cache';
 
 const PAGE_SIZE = 60;
 
@@ -17,7 +18,9 @@ interface RawItem {
   Type: string;
   ProductionYear?: number;
   CommunityRating?: number;
-  ImageTags?: { Primary?: string };
+  ImageTags?: { Primary?: string; Thumb?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
 }
 
 // Renderer consumes the shared resolution contract (QYP2-015/016).
@@ -389,17 +392,24 @@ export default function LibraryBrowse() {
   const libraryName = (location.state as { name?: string } | null)?.name || '媒体库';
   const sourceName = (location.state as { name?: string } | null)?.name;
 
-  const [items, setItems] = useState<MediaItem[]>([]);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const cachedItems = !isCatalog && serverId && viewId ? getCachedLibraryItems(Number(serverId), viewId) : null;
+  const [items, setItems] = useState<MediaItem[]>(cachedItems || []);
+  const [initialLoading, setInitialLoading] = useState(!cachedItems?.length);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [searching, setSearching] = useState(false);
   const [batchScraping, setBatchScraping] = useState(false);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const startIndexRef = useRef(0);
   const catalogPageRef = useRef(1);
   const serverMapRef = useRef<Map<number, import('../../utils/server-images').ServerEntry>>(new Map());
+
+  const collectionTypeRef = useRef<string | undefined>(
+    (location.state as { collectionType?: string } | null)?.collectionType
+  );
 
   const mapItem = useCallback(
     (item: RawItem): MediaItem => {
@@ -408,13 +418,12 @@ export default function LibraryBrowse() {
       return {
         id: item.Id,
         name: item.Name || '未知',
-        imageUrl: buildImageUrl(
+        imageUrl: buildItemImageUrl(
           serverMapRef.current,
           Number(serverId),
           serverType,
-          item.Id,
-          'Primary',
-          item.ImageTags?.Primary
+          item,
+          'Primary'
         ),
         year: item.ProductionYear,
         rating: item.CommunityRating,
@@ -430,7 +439,7 @@ export default function LibraryBrowse() {
     async (replace: boolean) => {
       if (!serverId || !viewId) return;
       if (replace) {
-        setInitialLoading(true);
+        if (!itemsRef.current.length) setInitialLoading(true);
         startIndexRef.current = 0;
       } else {
         setLoadingMore(true);
@@ -438,16 +447,46 @@ export default function LibraryBrowse() {
       setError(null);
       try {
         serverMapRef.current = await getServerMap();
-        const data = await window.electronAPI.getItems(viewId, {
-          sortBy: 'SortName',
-          sortOrder: 'Ascending',
-          limit: PAGE_SIZE,
-          startIndex: startIndexRef.current,
-        });
+        if (!collectionTypeRef.current) {
+          try {
+            const libs = (await window.electronAPI.getLibraries()) as Array<{
+              serverId: number;
+              views: Array<{ Id: string; CollectionType?: string }>;
+            }>;
+            const targetView = libs
+              .find((l) => l.serverId === Number(serverId))
+              ?.views.find((v) => String(v.Id) === String(viewId));
+            if (targetView?.CollectionType) {
+              collectionTypeRef.current = targetView.CollectionType;
+            }
+          } catch {
+            // ignore
+          }
+        }
+        const colType = collectionTypeRef.current;
+        const data = await window.electronAPI.getItems(
+          viewId,
+          {
+            sortBy: 'SortName',
+            sortOrder: 'Ascending',
+            limit: PAGE_SIZE,
+            startIndex: startIndexRef.current,
+            recursive: true,
+            ...(colType === 'movies'
+              ? { includeItemTypes: 'Movie' }
+              : colType === 'tvshows'
+              ? { includeItemTypes: 'Series' }
+              : {}),
+          },
+          Number(serverId)
+        );
         const page = (data as RawItem[]).map(mapItem);
         setItems((prev) => (replace ? page : [...prev, ...page]));
         setHasMore(page.length === PAGE_SIZE);
         startIndexRef.current += page.length;
+        if (replace && page.length > 0) {
+          setCachedLibraryItems(Number(serverId), viewId, page);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '未知错误';
         setError(msg);
@@ -586,10 +625,14 @@ export default function LibraryBrowse() {
   useEffect(() => {
     if (isCatalog) {
       if (catalogItemId === null) loadCatalogPage(true);
-    } else {
+    }
+  }, [isCatalog, catalogItemId, loadCatalogPage]);
+
+  useEffect(() => {
+    if (!isCatalog) {
       loadPage(true);
     }
-  }, [isCatalog, catalogItemId, loadCatalogPage, loadPage]);
+  }, [isCatalog, loadPage]);
 
   const handleCatalogItemClick = useCallback(
     (item: MediaItem) => {

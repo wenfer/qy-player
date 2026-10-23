@@ -54,7 +54,7 @@ export default function PosterCard({
 
   return (
     <article
-      className="group relative rounded-lg overflow-hidden cursor-pointer bg-card border border-border transition-all duration-200 hover:border-primary/30 card-lift"
+      className="group relative rounded-lg overflow-hidden cursor-pointer bg-card border border-border transition-colors duration-150 hover:border-primary/30 card-lift"
       onClick={onClick}
       tabIndex={0}
       role="button"

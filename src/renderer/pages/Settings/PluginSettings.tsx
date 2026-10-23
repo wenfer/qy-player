@@ -27,11 +27,11 @@ interface PluginHealth {
   checkedAt: number;
 }
 
-const HEALTH_BADGE: Record<PluginHealth['status'], { label: string; cls: string }> = {
-  ready: { label: '就绪', cls: 'bg-emerald-500/10 text-emerald-500' },
-  'auth-required': { label: '需要配置', cls: 'bg-amber-500/10 text-amber-500' },
-  disabled: { label: '已停用', cls: 'bg-muted text-muted-foreground' },
-  error: { label: '探测失败', cls: 'bg-destructive/10 text-destructive' },
+const HEALTH_BADGE: Record<PluginHealth['status'], { label: string; dot: string }> = {
+  ready: { label: '就绪', dot: 'bg-emerald-400' },
+  'auth-required': { label: '需要配置', dot: 'bg-amber-400' },
+  disabled: { label: '已停用', dot: 'bg-muted-foreground' },
+  error: { label: '探测失败', dot: 'bg-rose-400' },
 };
 
 const REQUIRED_SECRET_KEY = 'api-token';
@@ -215,10 +215,10 @@ export default function PluginSettings() {
           const healthState = health[plugin.id];
           const badge =
             healthState === 'loading'
-              ? { label: '检查中…', cls: 'bg-muted text-muted-foreground' }
+              ? { label: '检查中…', dot: 'bg-muted-foreground' }
               : healthState
                 ? HEALTH_BADGE[healthState.status]
-                : { label: '未检查', cls: 'bg-muted text-muted-foreground' };
+                : { label: '未检查', dot: 'bg-muted-foreground' };
           const hasSecret = plugin.secrets.some((s) => s.set);
           return (
             <div key={plugin.id} className="p-4 bg-card border border-border rounded-xl">
@@ -229,8 +229,12 @@ export default function PluginSettings() {
                     <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground text-[10px] font-medium">
                       v{plugin.version}
                     </span>
-                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${badge.cls}`}>
-                      {healthState === 'loading' && <Loader2 size={10} className="animate-spin" />}
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-secondary border border-border text-foreground text-[10px] font-medium">
+                      {healthState === 'loading' ? (
+                        <Loader2 size={10} className="animate-spin text-muted-foreground" />
+                      ) : (
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                      )}
                       {badge.label}
                     </span>
                   </div>
@@ -305,14 +309,14 @@ export default function PluginSettings() {
                   测试连接
                 </button>
                 {hasSecret && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-500">
-                    <CheckCircle2 size={10} />
+                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
+                    <CheckCircle2 size={12} />
                     已设置
                   </span>
                 )}
                 {!hasSecret && healthState && healthState !== 'loading' && healthState.status === 'auth-required' && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-amber-500">
-                    <XCircle size={10} />
+                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 font-medium">
+                    <XCircle size={12} />
                     未配置密钥
                   </span>
                 )}

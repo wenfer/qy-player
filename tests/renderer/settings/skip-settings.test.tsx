@@ -10,12 +10,16 @@ const getAutoNextEnabled = vi.fn();
 const setAutoNextEnabled = vi.fn();
 const getSkipSettings = vi.fn();
 const setSkipSetting = vi.fn();
+const getSettings = vi.fn();
+const setSettings = vi.fn();
 
 vi.stubGlobal('electronAPI', {
   getAutoNextEnabled,
   setAutoNextEnabled,
   getSkipSettings,
   setSkipSetting,
+  getSettings,
+  setSettings,
 });
 
 const addToast = vi.fn();
@@ -28,6 +32,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAutoNextEnabled.mockResolvedValue({ ok: true, data: { enabled: true } });
   getSkipSettings.mockResolvedValue({ ok: true, data: { skipIntro: true, skipOutro: false } });
+  getSettings.mockResolvedValue('no');
+  setSettings.mockResolvedValue({ ok: true });
 });
 
 describe('PlaybackSettings 跳过片头/片尾开关', () => {
@@ -62,5 +68,18 @@ describe('PlaybackSettings 跳过片头/片尾开关', () => {
       expect((screen.getByLabelText(/自动跳过片头（剧集）/) as HTMLInputElement).checked).toBe(true);
     });
     expect(addToast).toHaveBeenCalledWith('设置保存失败，请重试', 'error');
+  });
+
+  it('renders hwdec selection and updates setting on change (QYP3-070)', async () => {
+    getSettings.mockResolvedValue('auto-safe');
+    render(<PlaybackSettings />);
+    await waitFor(() => expect(screen.getByText('硬件加速解码 (GPU)')).toBeTruthy());
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('auto-safe');
+
+    fireEvent.change(select, { target: { value: 'vaapi' } });
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith('playback.hwdec', 'vaapi'));
+    expect(select.value).toBe('vaapi');
+    expect(addToast).toHaveBeenCalledWith('已开启硬件加速解码', 'success');
   });
 });

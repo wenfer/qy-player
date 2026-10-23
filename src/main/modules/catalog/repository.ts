@@ -21,6 +21,8 @@ export interface SourceRow {
   options: string | null;
   /** 用途标记（QYP3-039，migration 009）：all=音乐+视频，music/video 只索引对应域。 */
   purpose: SourcePurpose;
+  /** 启用状态（migration 012）：1=启用，0=禁用。 */
+  enabled: number;
 }
 
 export interface CatalogItemRow {
@@ -79,6 +81,7 @@ export interface CreateSourceInput {
   options?: Record<string, string | number | boolean>;
   /** 用途标记（QYP3-039）；缺省 'all'（兼容存量语义）。 */
   purpose?: SourcePurpose;
+  enabled?: boolean;
 }
 
 /** QYP3-003/014：音乐条目 upsert。本地/WebDAV 用 sourceId+sourceKey；
@@ -187,8 +190,8 @@ export function createCatalogRepository(db: Database.Database) {
     createSource(input: CreateSourceInput): number {
       const result = db
         .prepare(
-          `INSERT INTO library_sources (kind, name, root, secret_ref, read_only, options, purpose)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO library_sources (kind, name, root, secret_ref, read_only, options, purpose, enabled)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           input.kind,
@@ -197,7 +200,8 @@ export function createCatalogRepository(db: Database.Database) {
           input.secretRef ?? null,
           input.readOnly === false ? 0 : 1, // sources default to read-only (plan §14.2)
           input.options ? JSON.stringify(input.options) : null,
-          input.purpose ?? 'video'
+          input.purpose ?? 'video',
+          input.enabled === false ? 0 : 1
         );
       return Number(result.lastInsertRowid);
     },
@@ -220,6 +224,7 @@ export function createCatalogRepository(db: Database.Database) {
         name?: string;
         readOnly?: boolean;
         options?: Record<string, string | number | boolean> | null;
+        enabled?: boolean;
       }
     ): void {
       // Dynamic SET from constants only; values stay parameterized.
@@ -237,11 +242,25 @@ export function createCatalogRepository(db: Database.Database) {
         sets.push('options = ?');
         values.push(patch.options === null ? null : JSON.stringify(patch.options));
       }
+      if (patch.enabled !== undefined) {
+        sets.push('enabled = ?');
+        values.push(patch.enabled ? 1 : 0);
+      }
       if (sets.length === 0) return;
       sets.push('updated_at = unixepoch()');
       db
         .prepare(`UPDATE library_sources SET ${sets.join(', ')} WHERE id = ?`)
         .run(...values, id);
+    },
+
+    /**
+     * 启用/禁用来源（migration 012）。
+     * 禁用后不参与扫描、在首页/本地/音乐浏览中隐藏，但保留已扫描索引。
+     */
+    setSourceEnabled(id: number, enabled: boolean): void {
+      db.prepare(
+        'UPDATE library_sources SET enabled = ?, updated_at = unixepoch() WHERE id = ?'
+      ).run(enabled ? 1 : 0, id);
     },
 
     /**
@@ -260,15 +279,15 @@ export function createCatalogRepository(db: Database.Database) {
 
     /**
      * 音乐域的来源 id（QYP3-055）：音乐列表/专辑/歌手/收藏/搜索的唯一范围。
-     * 域与用途绑定——`purpose='music'` 的来源才算音乐库，其它来源（含拆域
-     * 遗留的 video 来源）扫出的音轨一律不进音乐界面，也不再可播。
+     * 域与用途绑定——`purpose='music'` 且 `enabled=1` 的来源才算有效音乐库，
+     * 其它来源扫出的音轨一律不进音乐界面，也不再可播。
      */
     listMusicSourceIds(): number[] {
       return (
         db
           .prepare(
             `SELECT id FROM library_sources
-              WHERE purpose = 'music' AND kind IN ('local', 'webdav')
+              WHERE purpose = 'music' AND enabled = 1 AND kind IN ('local', 'webdav')
               ORDER BY id`
           )
           .all() as Array<{ id: number }>

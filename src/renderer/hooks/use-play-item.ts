@@ -31,6 +31,7 @@ export function usePlayItem() {
 
   const playItem = useCallback(async (item: MediaItem, mode: 'direct' | 'transcode' = 'direct') => {
     try {
+      addToast('正在获取播放地址...', 'info');
       let result: ResolveResult;
       if (item.catalogRef) {
         result = (await window.electronAPI.resolvePlayback(item.catalogRef, { mode })) as ResolveResult;
@@ -60,7 +61,9 @@ export function usePlayItem() {
         resolved.streamSessionId
       );
       addToast(
-        mode === 'transcode' ? `开始播放（转码）: ${item.name}` : `开始播放: ${item.name}`,
+        mode === 'transcode'
+          ? `开始播放（转码）: ${item.name}`
+          : `已发起播放，正在缓冲: ${item.name}`,
         'success'
       );
     } catch (err) {

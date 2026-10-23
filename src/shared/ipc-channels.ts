@@ -171,6 +171,8 @@ export const IPC_CHANNELS = {
     SOURCE_REMOVE: 'catalog:source-remove',
     /** 来源转域（QYP3-055）：把已有来源改成音乐/影视来源（已索引内容不动）。 */
     SOURCE_SET_PURPOSE: 'catalog:source-set-purpose',
+    /** 来源启用/禁用状态切换。 */
+    SOURCE_SET_ENABLED: 'catalog:source-set-enabled',
     SOURCE_HEALTH: 'catalog:source-health',
     SCAN_START: 'catalog:scan-start',
     SCAN_CANCEL: 'catalog:scan-cancel',

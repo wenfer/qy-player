@@ -287,9 +287,9 @@ export default function ScrapeDialog({
 
         {(phase === 'rejected' || phase === 'failed') && (
           <div className="py-4">
-            <div className="flex items-start gap-2 text-sm text-amber-500">
-              <XCircle size={18} className="shrink-0 mt-0.5" />
-              <span>{message}</span>
+            <div className="flex items-start gap-2.5 text-sm">
+              <XCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+              <span className="text-foreground leading-relaxed">{message}</span>
             </div>
           </div>
         )}

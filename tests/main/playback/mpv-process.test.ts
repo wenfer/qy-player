@@ -39,5 +39,15 @@ describe('MpvProcessManager (QYP3-032)', () => {
     expect(spawnArgs).toBeDefined();
     expect(spawnArgs).toContain('--force-window=no');
     expect(spawnArgs).not.toContain('--force-window=immediate');
+    expect(spawnArgs).toContain('--hwdec=no');
+  });
+
+  it('respects configured hwdec mode (QYP3-070)', async () => {
+    const mgr = new MpvProcessManager();
+    await mgr.start({ hwdec: 'auto-safe' });
+    const lastCall = h.spawnMock.mock.calls[h.spawnMock.mock.calls.length - 1];
+    const spawnArgs = lastCall?.[1] as string[] | undefined;
+    expect(spawnArgs).toContain('--hwdec=auto-safe');
+    expect(spawnArgs).not.toContain('--hwdec=no');
   });
 });

@@ -15,6 +15,9 @@ export interface JellyfinLibrary {
   Id: string;
   Name: string;
   CollectionType: string;
+  ImageTags?: { Primary?: string; Backdrop?: string; Thumb?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
 }
 
 export interface JellyfinItem {
@@ -30,7 +33,9 @@ export interface JellyfinItem {
   OfficialRating?: string;
   CommunityRating?: number;
   PrimaryImageAspectRatio?: number;
-  ImageTags?: { Primary?: string; Backdrop?: string };
+  ImageTags?: { Primary?: string; Backdrop?: string; Thumb?: string };
+  PrimaryImageItemId?: string;
+  PrimaryImageTag?: string;
   BackdropImageTags?: string[];
   MediaSources?: Array<{
     Id: string;

@@ -173,6 +173,29 @@ export function useServers(addToast: AddToast) {
     [addToast, load]
   );
 
+  /** 启用/停用服务器。 */
+  const toggleActive = useCallback(
+    async (server: SavedServer) => {
+      const nextActive = server.is_active !== 1;
+      try {
+        await window.electronAPI.saveServer({
+          id: server.id,
+          type: server.type as 'jellyfin' | 'emby',
+          name: server.name,
+          baseUrl: server.base_url,
+          username: server.username || undefined,
+          userId: server.user_id,
+          isActive: nextActive,
+        });
+        void load();
+        addToast(nextActive ? `已启用「${server.name}」` : `已停用「${server.name}」`, 'success');
+      } catch {
+        addToast(`${nextActive ? '启用' : '停用'}失败`, 'error');
+      }
+    },
+    [addToast, load]
+  );
+
   return {
     servers,
     editing,
@@ -185,6 +208,7 @@ export function useServers(addToast: AddToast) {
     load,
     edit,
     remove,
+    toggleActive,
     save,
     test,
     toggleForm,

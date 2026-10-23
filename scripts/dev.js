@@ -23,7 +23,7 @@ const url = vite.resolvedUrls.local[0];
 console.log(`[dev] Vite dev server running at ${url}`);
 
 // Step 3: Launch Electron
-const electron = spawn('npx', ['electron', '.'], {
+const electron = spawn('npx', ['electron', '.', '--remote-debugging-port=9222', '--no-sandbox'], {
   stdio: 'inherit',
   env: {
     ...process.env,

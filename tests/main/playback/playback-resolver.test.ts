@@ -195,6 +195,19 @@ describe('playback resolver: local catalog', () => {
       })
     ).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
   });
+
+  it('rejects items when the source is disabled', async () => {
+    const repo = createCatalogRepository(db);
+    const sourceId = repo.createSource({ kind: 'local', name: 'm', root: '/tmp/qy-root', enabled: false });
+    const itemId = repo.upsertItem({ sourceId, sourceKey: 'video:disabled', kind: 'video', title: 'Disabled Video' });
+    repo.upsertFile({ sourceId, itemId, relativePath: 'test.mkv', size: 1, mtime: 1 });
+    const calls: ClientCall[] = [];
+    await expect(
+      resolvePlayback(makeDeps(makeClientFactory({}, calls)), {
+        ref: { provider: 'catalog', sourceId, itemId: String(itemId) },
+      })
+    ).rejects.toMatchObject({ code: 'UNAVAILABLE', message: '媒体来源已禁用' });
+  });
 });
 
 describe('playback resolver: webdav stream', () => {
@@ -583,9 +596,38 @@ describe('playback resolver: webdav music → webaudio proxy (QYP3-037)', () => 
       })
     ).rejects.toMatchObject({ code: 'UNAVAILABLE' });
   });
+
+  it('rejects music tracks when the source is disabled', async () => {
+    const repo = createCatalogRepository(db);
+    const sourceId = repo.createSource({ kind: 'local', name: '音乐盘', root: '/music', purpose: 'music', enabled: false });
+    const trackId = repo.upsertMusicTrack({
+      sourceId,
+      sourceKey: 'disabled-track',
+      path: '/music/track.mp3',
+      title: '禁用曲目',
+      trackNo: 1,
+      duration: 200,
+      codec: 'mp3',
+      fingerprint: 'fp-dis',
+    });
+    await expect(
+      resolvePlayback(makeDeps(makeClientFactory({}, [])), {
+        ref: { provider: 'music', sourceId, itemId: String(trackId) },
+      })
+    ).rejects.toMatchObject({ code: 'UNAVAILABLE', message: '该音轨所属的媒体来源已禁用' });
+  });
 });
 
 describe('bindOnlineServer', () => {
+  it('rejects disabled/inactive server with UNAVAILABLE', () => {
+    servers = [{ id: 7, type: 'jellyfin', name: 'S', base_url: 'http://s:8096', user_id: 'u', is_active: 0 }];
+    secretStore.setSecret(MEDIA_SERVER_NAMESPACE, '7', 'tok');
+    const storage = { getServers: () => servers } as unknown as ReturnType<typeof createStorage>;
+    expect(() => bindOnlineServer(storage, secretStore, 'jellyfin', 7)).toThrowError(
+      expect.objectContaining({ code: 'UNAVAILABLE', message: '媒体服务器已禁用' })
+    );
+  });
+
   it('accepts only the exact server id', () => {
     servers = [{ id: 7, type: 'jellyfin', name: 'S', base_url: 'http://s:8096', user_id: 'u', is_active: 1 }];
     secretStore.setSecret(MEDIA_SERVER_NAMESPACE, '7', 'tok');

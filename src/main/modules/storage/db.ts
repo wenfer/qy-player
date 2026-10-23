@@ -393,6 +393,12 @@ const MIGRATIONS = [
            OR lower(substr(path, -3)) IN ('.wv', '.au', '.ra')
      );
   `,
+
+  // 012: 媒体来源启用/禁用状态（enabled，默认 1 启用）。
+  // 禁用后不参与扫描、在首页/本地/音乐浏览中隐藏，但保留已扫描索引。
+  `
+  ALTER TABLE library_sources ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 

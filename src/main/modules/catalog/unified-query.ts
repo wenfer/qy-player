@@ -149,6 +149,7 @@ export interface OnlineContinueInput {
   positionTicks?: number;
   runtimeTicks?: number;
   primaryTag?: string;
+  imageItemId?: string;
   updatedAt?: number;
   /** 剧集三件套——Emby/Jellyfin 分别叫 SeriesName / ParentIndexNumber / IndexNumber。 */
   seriesName?: string;
@@ -165,7 +166,11 @@ export function cardFromOnlineContinue(input: OnlineContinueInput): UnifiedCard 
     ...(input.rating != null ? { rating: input.rating } : {}),
     position: input.positionTicks ? input.positionTicks / 10000000 : 0,
     ...(input.runtimeTicks ? { duration: input.runtimeTicks / 10000000 } : {}),
-    poster: { serverId: input.serverId, itemId: input.itemId, ...(input.primaryTag ? { tag: input.primaryTag } : {}) },
+    poster: {
+      serverId: input.serverId,
+      itemId: input.imageItemId || input.itemId,
+      ...(input.primaryTag ? { tag: input.primaryTag } : {}),
+    },
     ...(input.updatedAt != null ? { updatedAt: input.updatedAt } : {}),
     ...(input.seriesName ? { seriesName: input.seriesName } : {}),
     ...(input.seasonNumber != null ? { seasonNumber: input.seasonNumber } : {}),
@@ -199,7 +204,7 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
          FROM catalog_items ci
          JOIN catalog_user_state us ON us.item_id = ci.id
          JOIN library_sources ls ON ls.id = ci.source_id
-         WHERE us.is_finished = 0 AND us.position >= 30
+         WHERE us.is_finished = 0 AND us.position >= 30 AND ls.enabled = 1
          ORDER BY us.updated_at DESC
          LIMIT 200`
       )
@@ -212,7 +217,8 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
       .prepare(
         `SELECT ci.id AS item_id, ci.source_id, ci.title, ci.kind, ci.year, ci.created_at
          FROM catalog_items ci
-         WHERE ci.kind IN ('movie', 'series') AND ci.availability = 'online'
+         JOIN library_sources ls ON ls.id = ci.source_id
+         WHERE ci.kind IN ('movie', 'series') AND ci.availability = 'online' AND ls.enabled = 1
          ORDER BY ci.created_at DESC
          LIMIT ?`
       )
@@ -234,8 +240,10 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
         `SELECT ci.id AS item_id, ci.source_id, ci.title, ci.kind, ci.year,
                 (SELECT ms.value FROM catalog_metadata_sources ms WHERE ms.item_id = ci.id AND ms.field = 'rating' LIMIT 1) AS rating_json
          FROM catalog_items ci
+         JOIN library_sources ls ON ls.id = ci.source_id
          WHERE ci.kind IN ('movie', 'series', 'video')
            AND ci.availability = 'online'
+           AND ls.enabled = 1
            AND ci.title LIKE '%' || ? || '%' ESCAPE '\\'
          ORDER BY ci.title
          LIMIT ?`
@@ -265,12 +273,12 @@ export function createUnifiedQueryService(deps: UnifiedQueryDeps) {
    * 失败由 isolateSource 兜底——音乐无结果不阻塞其它来源。
    */
   const musicSearch = (query: string, limit: number): UnifiedCard[] => {
-    // QYP3-055：与音乐列表同范围——只搜音乐域来源（purpose='music'）
+    // QYP3-055：与音乐列表同范围——只搜音乐域来源（purpose='music' 且已启用）
     const sourceIds = (
       db
         .prepare(
           `SELECT id FROM library_sources
-            WHERE purpose = 'music' AND kind IN ('local', 'webdav')`
+            WHERE purpose = 'music' AND enabled = 1 AND kind IN ('local', 'webdav')`
         )
         .all() as Array<{ id: number }>
     ).map((r) => r.id);

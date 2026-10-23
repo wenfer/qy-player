@@ -9,6 +9,7 @@ const listSources = vi.fn();
 const saveSource = vi.fn();
 const testSource = vi.fn();
 const removeSource = vi.fn();
+const setSourceEnabled = vi.fn();
 const startScan = vi.fn();
 const cancelScan = vi.fn();
 const pickDirectory = vi.fn();
@@ -36,6 +37,7 @@ vi.stubGlobal('electronAPI', {
   saveSource,
   testSource,
   removeSource,
+  setSourceEnabled,
   sourceHealth: vi.fn(),
   startScan,
   cancelScan,
@@ -200,5 +202,60 @@ describe('MediaSources page sources section', () => {
     fireEvent.click(screen.getByRole('button', { name: /移除 旧库（不删除文件）/ }));
     await waitFor(() => expect(removeSource).toHaveBeenCalledWith(4));
     expect((confirm as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('不会删除磁盘上的媒体文件');
+  });
+
+  it('toggles source enabled state and disables scanning when disabled', async () => {
+    setSourceEnabled.mockResolvedValue({ ok: true });
+    listSources.mockResolvedValue([
+      {
+        id: 5,
+        kind: 'local',
+        name: '动画库',
+        root: '/data/anime',
+        readOnly: true,
+        capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
+        hasCredential: false,
+        purpose: 'video',
+        enabled: true,
+      },
+    ]);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('动画库')).toBeTruthy());
+
+    const toggle = screen.getByRole('switch', { name: '停用 动画库' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByText('已停用')).toBeNull();
+
+    const scanBtn = screen.getByRole('button', { name: '扫描 动画库' }) as HTMLButtonElement;
+    expect(scanBtn.disabled).toBe(false);
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(setSourceEnabled).toHaveBeenCalledWith(5, false));
+
+    // When source is disabled
+    listSources.mockResolvedValue([
+      {
+        id: 5,
+        kind: 'local',
+        name: '动画库',
+        root: '/data/anime',
+        readOnly: true,
+        capabilities: { canSeek: true, canDelete: false, supportsEtag: false, supportsRange: true },
+        hasCredential: false,
+        purpose: 'video',
+        enabled: false,
+      },
+    ]);
+    render(<MemoryRouter><MediaSources /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('已停用')).toBeTruthy());
+
+    const disabledToggle = screen.getByRole('switch', { name: '启用 动画库' });
+    expect(disabledToggle.getAttribute('aria-checked')).toBe('false');
+
+    const disabledScanBtn = screen.getByTitle('来源已禁用') as HTMLButtonElement;
+    expect(disabledScanBtn.disabled).toBe(true);
+
+    fireEvent.click(disabledToggle);
+    await waitFor(() => expect(setSourceEnabled).toHaveBeenCalledWith(5, true));
   });
 });

@@ -135,7 +135,8 @@ Cflags: -I/usr/include
 make -j12 && make install
 ```
 
-`--disable-autodetect` 很重要：否则会探测一堆缺失的外部库报错。无 TLS 库 → https 不可用（局域网 http 无影响）。
+`--disable-autodetect` 很重要：否则会探测一堆缺失的外部库报错。
+**注意网络流协议支持**：上述最小化配置没有 TLS 库，`https://` 协议流媒体不可用（播放远程 HTTPS Emby/Jellyfin 时 mpv 会报 `[ffmpeg] https protocol not found`）。如果需要远程 HTTPS 播放，编译前需提供 OpenSSL 头与库并追加 `--enable-openssl --enable-nonfree`（或者 `--enable-gnutls`）；如果仅局域网 HTTP 或本地文件则无影响。
 
 ### 8. mpv 0.32（waf 构建的 waf 获取是最大坑）
 

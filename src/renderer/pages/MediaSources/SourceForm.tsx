@@ -135,7 +135,7 @@ export default function SourceForm({
           role="tab"
           aria-selected={mode === 'local'}
           onClick={() => setMode('local')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-all focus-ring ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors duration-150 focus-ring ${
             mode === 'local'
               ? 'bg-background text-foreground'
               : 'text-muted-foreground hover:text-foreground'
@@ -149,7 +149,7 @@ export default function SourceForm({
           role="tab"
           aria-selected={mode === 'webdav'}
           onClick={() => setMode('webdav')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-all focus-ring ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors duration-150 focus-ring ${
             mode === 'webdav'
               ? 'bg-background text-foreground'
               : 'text-muted-foreground hover:text-foreground'
@@ -217,13 +217,13 @@ export default function SourceForm({
       {testResult && (
         <p
           role="status"
-          className={`flex items-start gap-1.5 text-xs px-3 py-2 rounded-lg ${
-            testResult.ok
-              ? 'bg-emerald-500/10 text-emerald-500'
-              : 'bg-destructive/10 text-destructive'
-          }`}
+          className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground"
         >
-          {testResult.ok ? <CheckCircle2 size={14} className="flex-shrink-0 mt-0.5" /> : <XCircle size={14} className="flex-shrink-0 mt-0.5" />}
+          {testResult.ok ? (
+            <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+          ) : (
+            <XCircle size={15} className="text-rose-400 flex-shrink-0 mt-0.5" />
+          )}
           <span>
             {testResult.ok
               ? `连接成功${testResult.capabilities ? `（${capsText(testResult.capabilities)}）` : ''}`
@@ -245,7 +245,7 @@ export default function SourceForm({
           type="button"
           onClick={handleSave}
           disabled={!canSubmit || saving}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all focus-ring disabled:opacity-50 disabled:active:scale-100"
+          className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors duration-150 focus-ring disabled:opacity-50"
         >
           {saving ? <Loader2 size={15} className="animate-spin" /> : null}
           添加来源

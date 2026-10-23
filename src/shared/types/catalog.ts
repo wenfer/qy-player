@@ -118,6 +118,7 @@ export interface SourceSummary {
   /** True when a usable credential exists in the SecretStore. */
   hasCredential: boolean;
   purpose: SourcePurpose;
+  enabled?: boolean;
 }
 
 export type SourceHealth = 'ok' | 'degraded' | 'offline' | 'auth-required' | 'unscanned';

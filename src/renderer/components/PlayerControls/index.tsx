@@ -171,7 +171,7 @@ export default function PlayerControls() {
         aria-label="播放进度（左右方向键快退快进，Home/End 到头尾）"
       >
         <div
-          className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-75"
+          className="absolute inset-y-0 left-0 bg-primary rounded-full transition-[width] duration-75"
           style={{ width: `${progress * 100}%` }}
         />
         <div

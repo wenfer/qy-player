@@ -12,12 +12,29 @@
 export type QyFileRequest =
   | { kind: 'covers'; name: string }
   | { kind: 'audio'; sourceId: number; relPath: string }
+  | { kind: 'image-cache'; key: string; remoteUrl: string }
   | null;
 
 export function parseQyFileUrl(url: string): QyFileRequest {
   let raw = url.replace(/^qy-file:\/\//, '');
   // standard scheme 规范化可能引入前导斜杠（空 host / 盘符场景）
   raw = raw.replace(/^\/+/, '');
+
+  // 在线媒体库静态图片缓存：image-cache/<key>?src=<remoteUrl>
+  const imgCacheMatch = raw.match(/^image-cache\/([\w.-]+)(?:\?src=(.+))?$/);
+  if (imgCacheMatch) {
+    const key = imgCacheMatch[1];
+    let remoteUrl = '';
+    if (imgCacheMatch[2]) {
+      try {
+        remoteUrl = decodeURIComponent(imgCacheMatch[2]);
+      } catch {
+        remoteUrl = imgCacheMatch[2];
+      }
+    }
+    return { kind: 'image-cache', key, remoteUrl };
+  }
+
   // fetch/规范化残留的 query 与 hash 不属于资源路径
   const cut = raw.search(/[?#]/);
   if (cut >= 0) raw = raw.slice(0, cut);

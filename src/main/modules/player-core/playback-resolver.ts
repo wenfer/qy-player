@@ -211,6 +211,9 @@ export function bindOnlineServer(
   if (server.type !== provider) {
     throw new ResolverError('SERVER_NOT_FOUND', '服务器类型不匹配');
   }
+  if (!server.is_active) {
+    throw new ResolverError('UNAVAILABLE', '媒体服务器已禁用');
+  }
   const apiKey = resolveServerApiKey(server, secretStore);
   if (!apiKey) {
     throw new ResolverError('NO_CREDENTIAL', '服务器未登录，请先在媒体库中完成登录');
@@ -318,11 +321,14 @@ export async function resolvePlayback(
       | undefined;
     if (!track) throw new ResolverError('ITEM_NOT_FOUND', '音轨不存在或已删除');
     const source = deps.db
-      .prepare('SELECT kind, purpose FROM library_sources WHERE id = ?')
+      .prepare('SELECT kind, purpose, enabled FROM library_sources WHERE id = ?')
       .get(sourceId) as
-      | { kind: 'local' | 'webdav'; purpose: string }
+      | { kind: 'local' | 'webdav'; purpose: string; enabled: number }
       | undefined;
     if (!source) throw new ResolverError('UNAVAILABLE', '来源不存在或已删除');
+    if (source.enabled === 0) {
+      throw new ResolverError('UNAVAILABLE', '该音轨所属的媒体来源已禁用');
+    }
     // QYP3-055：域与用途绑定。影视来源（含 QYP3-041 拆域遗留）的音轨已退出
     // 音乐界面，同样不再可播——歌单里残留的旧引用会得到明确报错而不是静音
     if (source.purpose !== 'music') {
@@ -446,6 +452,12 @@ export async function resolvePlayback(
     const itemId = Number(ref.itemId);
     if (!Number.isInteger(itemId) || itemId <= 0) {
       throw new ResolverError('ITEM_NOT_FOUND', '条目不存在');
+    }
+    const sourceRow = deps.db
+      .prepare('SELECT enabled FROM library_sources WHERE id = ?')
+      .get(sourceId) as { enabled: number } | undefined;
+    if (sourceRow && sourceRow.enabled === 0) {
+      throw new ResolverError('UNAVAILABLE', '媒体来源已禁用');
     }
     let intent: PlaybackIntent | null;
     let adapter;

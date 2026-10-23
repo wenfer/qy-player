@@ -32,10 +32,10 @@ afterAll(() => {
  * 停在 009 的库），这里只管应用层读写与白名单。
  */
 describe('source purpose (QYP3-039/041)', () => {
-  it('reaches schema version 11 on a fresh database', () => {
+  it('reaches schema version 12 on a fresh database', () => {
     const db = openDatabaseAtPath(makeDbPath());
     const version = (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number }).version;
-    expect(version).toBe(11);
+    expect(version).toBe(12);
     db.close();
   });
 
@@ -62,5 +62,24 @@ describe('source purpose (QYP3-039/041)', () => {
     expect(isSourcePurpose('')).toBe(false);
     expect(isSourcePurpose(null)).toBe(false);
     expect(isSourcePurpose(1)).toBe(false);
+  });
+
+  it('createSource persists enabled, defaults to 1, and supports setSourceEnabled', () => {
+    const db = openDatabaseAtPath(makeDbPath());
+    const repo = createCatalogRepository(db);
+    const id1 = repo.createSource({ kind: 'local', name: '默认启用', root: '/s1' });
+    const id2 = repo.createSource({ kind: 'local', name: '显式禁用', root: '/s2', enabled: false });
+    expect(repo.getSource(id1)?.enabled).toBe(1);
+    expect(repo.getSource(id2)?.enabled).toBe(0);
+
+    repo.setSourceEnabled(id1, false);
+    expect(repo.getSource(id1)?.enabled).toBe(0);
+
+    repo.setSourceEnabled(id1, true);
+    expect(repo.getSource(id1)?.enabled).toBe(1);
+
+    repo.updateSource(id1, { enabled: false });
+    expect(repo.getSource(id1)?.enabled).toBe(0);
+    db.close();
   });
 });

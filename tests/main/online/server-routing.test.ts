@@ -70,16 +70,20 @@ describe('strict online server routing', () => {
     expect(home.apiKey).not.toBe(work.apiKey);
   });
 
-  it('routes by id even when one server is inactive', () => {
+  it('routes by id and rejects inactive server', () => {
     servers = [
-      { id: 1, type: 'jellyfin', name: 'A', base_url: 'http://a:8096', user_id: 'u1', is_active: 0 },
-      { id: 2, type: 'jellyfin', name: 'B', base_url: 'http://b:8096', user_id: 'u2', is_active: 1 },
+      { id: 1, type: 'jellyfin', name: 'A', base_url: 'http://a:8096', user_id: 'u1', is_active: 1 },
+      { id: 2, type: 'jellyfin', name: 'B', base_url: 'http://b:8096', user_id: 'u2', is_active: 0 },
     ];
     secretStore.setSecret(MEDIA_SERVER_NAMESPACE, '1', 'a-token');
+    secretStore.setSecret(MEDIA_SERVER_NAMESPACE, '2', 'b-token');
     const storage = storageOf();
     // Explicit id lookup, not "first active" — a saved ref always resolves
     // to its own server record.
     expect(bindOnlineServer(storage, secretStore, 'jellyfin', 1).apiKey).toBe('a-token');
+    expect(() => bindOnlineServer(storage, secretStore, 'jellyfin', 2)).toThrowError(
+      expect.objectContaining({ code: 'UNAVAILABLE' })
+    );
     expect(() => bindOnlineServer(storage, secretStore, 'jellyfin', 99)).toThrowError(
       expect.objectContaining({ code: 'SERVER_NOT_FOUND' })
     );

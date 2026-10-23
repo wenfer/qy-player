@@ -109,6 +109,32 @@ describe('MediaSources page: 媒体服务器 section', () => {
     );
   });
 
+  it('toggles server between active and inactive states', async () => {
+    renderPage();
+    await screen.findByText('家庭 NAS');
+    const toggleActive = screen.getByRole('switch', { name: '停用 家庭 NAS' });
+    expect(toggleActive.getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByText('已停用')).toBeNull();
+
+    fireEvent.click(toggleActive);
+    await waitFor(() =>
+      expect(saveServer).toHaveBeenCalledWith(expect.objectContaining({ id: 1, isActive: false }))
+    );
+
+    // When server is inactive (is_active: 0)
+    getServers.mockResolvedValue([{ ...SERVER, is_active: 0 }]);
+    renderPage();
+    await screen.findByText('家庭 NAS');
+    expect(screen.getByText('已停用')).toBeTruthy();
+    const toggleInactive = screen.getByRole('switch', { name: '启用 家庭 NAS' });
+    expect(toggleInactive.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(toggleInactive);
+    await waitFor(() =>
+      expect(saveServer).toHaveBeenCalledWith(expect.objectContaining({ id: 1, isActive: true }))
+    );
+  });
+
   it('edit prefills the form without echoing a stored password', async () => {
     renderPage();
     await screen.findByText('家庭 NAS');

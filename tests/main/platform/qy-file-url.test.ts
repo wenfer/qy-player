@@ -50,4 +50,13 @@ describe('parseQyFileUrl (QYP3-062)', () => {
     expect(parseQyFileUrl('qy-file://audio/abc/x.mp3')).toBeNull();
     expect(parseQyFileUrl('qy-file://audio/1/')).toBeNull();
   });
+
+  it('parses image-cache URLs with remoteUrl encoded in query', () => {
+    const raw = 'qy-file://image-cache/s1-item100-Primary-tag1-500.jpg?src=http%3A%2F%2F192.168.1.10%3A8096%2Femby%2FItems%2F100%2FImages%2FPrimary';
+    expect(parseQyFileUrl(raw)).toEqual({
+      kind: 'image-cache',
+      key: 's1-item100-Primary-tag1-500.jpg',
+      remoteUrl: 'http://192.168.1.10:8096/emby/Items/100/Images/Primary',
+    });
+  });
 });

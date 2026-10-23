@@ -39,7 +39,7 @@ function SectionHeader({
       </div>
       <button
         onClick={onAction}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all text-sm font-medium focus-ring"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors duration-150 text-sm font-medium focus-ring"
       >
         <Plus size={14} />
         {actionOpen ? '取消' : actionLabel}
@@ -78,6 +78,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
     test: handleServerTest,
     toggleForm: handleServerToggleForm,
     closeForm: handleServerCloseForm,
+    toggleActive: handleServerToggleActive,
   } = useServers(addToast);
 
   useEffect(() => {
@@ -264,6 +265,26 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
     [scanningIds, addToast, loadSources]
   );
 
+  const handleSourceToggleEnabled = useCallback(
+    async (source: SourceListEntry, enabled: boolean) => {
+      try {
+        const res = (await window.electronAPI.setSourceEnabled(source.id, enabled)) as {
+          ok: boolean;
+          error?: { message: string };
+        };
+        if (res.ok) {
+          addToast(enabled ? `已启用「${source.name}」` : `已停用「${source.name}」`, 'success');
+          await loadSources();
+        } else {
+          addToast(res.error?.message ?? (enabled ? '启用失败' : '停用失败'), 'error');
+        }
+      } catch {
+        addToast(enabled ? '启用失败' : '停用失败', 'error');
+      }
+    },
+    [addToast, loadSources]
+  );
+
   /** Shared empty state: icon circle + text + CTA (a11y: role=status). */
   const EmptyState = ({ icon, text }: { icon: React.ReactNode; text: string }) => (
     <div role="status" className="text-center py-12">
@@ -330,65 +351,104 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
         )}
 
         <div className="space-y-2">
-          {servers.map((server) => (
-            <div
-              key={server.id}
-              className={`flex items-center gap-3 p-4 bg-card border rounded-xl transition-colors ${
-                editingServer?.id === server.id
-                  ? 'border-primary/50'
-                  : 'border-border hover:border-primary/30'
-              }`}
-            >
-              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary text-xs font-bold flex-shrink-0">
-                {server.type.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm">{server.name}</span>
-                  {server.hasCredential ? (
-                    <span
-                      className="flex items-center gap-0.5 text-[10px] text-emerald-500"
-                      title="已登录"
-                    >
-                      <CheckCircle2 size={12} />
-                      已登录
-                    </span>
-                  ) : (
-                    <span
-                      className="flex items-center gap-0.5 text-[10px] text-muted-foreground"
-                      title="未登录，点击编辑以配置账号"
-                    >
-                      <XCircle size={12} />
-                      未登录
-                    </span>
-                  )}
+          {servers.map((server) => {
+            const isServerActive = server.is_active === 1;
+            return (
+              <div
+                key={server.id}
+                className={`flex items-center gap-3 p-4 bg-card border rounded-xl transition-colors ${
+                  !isServerActive
+                    ? 'opacity-60 border-border'
+                    : editingServer?.id === server.id
+                      ? 'border-primary/50'
+                      : 'border-border hover:border-primary/30'
+                }`}
+              >
+                <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary text-xs font-bold flex-shrink-0">
+                  {server.type.slice(0, 2).toUpperCase()}
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground text-[10px] font-medium mr-2">
-                    {server.type.toUpperCase()}
-                  </span>
-                  {server.base_url}
-                  {server.username && ` · ${server.username}`}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm">{server.name}</span>
+                    {!isServerActive && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-medium">
+                        已停用
+                      </span>
+                    )}
+                    {server.hasCredential ? (
+                      <span
+                        className="flex items-center gap-0.5 text-[10px] text-emerald-500"
+                        title="已登录"
+                      >
+                        <CheckCircle2 size={12} />
+                        已登录
+                      </span>
+                    ) : (
+                      <span
+                        className="flex items-center gap-0.5 text-[10px] text-muted-foreground"
+                        title="未登录，点击编辑以配置账号"
+                      >
+                        <XCircle size={12} />
+                        未登录
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground text-[10px] font-medium mr-2">
+                      {server.type.toUpperCase()}
+                    </span>
+                    {server.base_url}
+                    {server.username && ` · ${server.username}`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isServerActive}
+                      aria-label={`${isServerActive ? '停用' : '启用'} ${server.name}`}
+                      title={isServerActive ? '点击停用' : '点击启用'}
+                      onClick={() => void handleServerToggleActive(server)}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-ring ${
+                        isServerActive ? 'bg-primary' : 'bg-muted-foreground/30 hover:bg-muted-foreground/40'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          isServerActive ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs text-muted-foreground select-none min-w-[24px]">
+                      {isServerActive ? '启用' : '关闭'}
+                    </span>
+                  </div>
+
+                  <div className="w-px h-4 bg-border/80 flex-shrink-0" />
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleServerEdit(server)}
+                      className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
+                      aria-label={`编辑 ${server.name}`}
+                      title="编辑"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => void handleServerRemove(server)}
+                      className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
+                      aria-label={`删除 ${server.name}`}
+                      title="删除"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => handleServerEdit(server)}
-                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
-                  aria-label={`编辑 ${server.name}`}
-                >
-                  <Pencil size={15} />
-                </button>
-                <button
-                  onClick={() => void handleServerRemove(server)}
-                  className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
-                  aria-label={`删除 ${server.name}`}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {servers.length === 0 && !showServerForm && (
             <EmptyState
               icon={<ServerIcon size={20} />}
@@ -438,6 +498,7 @@ export default function MediaSourcesPage({ mode }: { mode: 'video' | 'music' }) 
           liveProgress={liveProgress}
           onScanToggle={handleScanToggle}
           onRemove={handleSourceRemove}
+          onToggleEnabled={handleSourceToggleEnabled}
         />
         {visibleSources.length === 0 && !showSourceForm && (
           <EmptyState

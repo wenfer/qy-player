@@ -9,6 +9,7 @@ export interface SourceListProps {
   liveProgress: Record<number, { state: string; processed?: number; total?: number; message?: string }>;
   onScanToggle: (source: SourceListEntry) => void;
   onRemove: (source: SourceListEntry) => void;
+  onToggleEnabled?: (source: SourceListEntry, enabled: boolean) => void;
 }
 
 const NON_TERMINAL = new Set(['queued', 'discovering', 'indexing', 'enriching']);
@@ -20,23 +21,24 @@ const HEALTH_LABEL: Record<string, string> = {
   'auth-required': '需要认证',
 };
 
-/** Small tinted badge (keeps texts the tests assert on). */
+/** Refined status badge with non-pulsing status dot. */
 function Badge({ tone, children }: { tone: 'neutral' | 'warn' | 'ok'; children: React.ReactNode }) {
-  const cls =
+  const dotColor =
     tone === 'warn'
-      ? 'bg-amber-500/10 text-amber-500'
+      ? 'bg-amber-400'
       : tone === 'ok'
-        ? 'bg-emerald-500/10 text-emerald-500'
-        : 'bg-secondary text-secondary-foreground';
+        ? 'bg-emerald-400'
+        : 'bg-muted-foreground';
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${cls}`}>
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-secondary border border-border text-foreground">
+      <span className={`w-1.5 h-1.5 rounded-full ${dotColor} flex-shrink-0`} />
       {children}
     </span>
   );
 }
 
 /** Source rows for 本地 + WebDAV sources (plan §7/§8, QYP2-008/013). */
-export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove }: SourceListProps) {
+export default function SourceList({ sources, scanningIds, liveProgress, onScanToggle, onRemove, onToggleEnabled }: SourceListProps) {
   return (
     <div className="space-y-2">
       {sources.map((source) => {
@@ -46,6 +48,7 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
           : source.lastRun;
         const scanning = scanningIds.has(source.id) || (progress?.status !== undefined && NON_TERMINAL.has(progress.status));
         const isWebdav = source.kind === 'webdav';
+        const isEnabled = source.enabled !== false;
         const percent =
           progress?.total && progress.total > 0
             ? Math.min(100, Math.round(((progress.processed ?? 0) / progress.total) * 100))
@@ -54,7 +57,7 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
           <div
             key={source.id}
             className={`flex items-start gap-3 p-4 bg-card border border-border rounded-xl transition-colors ${
-              scanning ? 'border-primary/40' : 'hover:border-primary/30'
+              !isEnabled ? 'opacity-60 border-border' : scanning ? 'border-primary/40' : 'hover:border-primary/30'
             }`}
           >
             {/* Kind icon tile */}
@@ -65,6 +68,11 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-sm">{source.name}</span>
+                {!isEnabled && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-medium">
+                    已停用
+                  </span>
+                )}
                 <Badge tone="neutral">
                   {isWebdav ? <Globe size={10} /> : null}
                   {isWebdav ? 'WebDAV' : '本地'}
@@ -83,18 +91,18 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
                   </span>
                 )}
                 {source.health && (
-                  <span
-                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+                  <Badge
+                    tone={
                       source.health === 'ok'
-                        ? 'bg-emerald-500/10 text-emerald-500'
+                        ? 'ok'
                         : source.health === 'auth-required' || source.health === 'offline'
-                          ? 'bg-amber-500/10 text-amber-500'
-                          : 'bg-muted text-muted-foreground'
-                    }`}
+                          ? 'warn'
+                          : 'neutral'
+                    }
                   >
-                    <HeartPulse size={10} />
+                    <HeartPulse size={11} className="flex-shrink-0" />
                     {HEALTH_LABEL[source.health] ?? source.health}
-                  </span>
+                  </Badge>
                 )}
               </div>
               <div className="text-xs text-muted-foreground mt-1 truncate font-mono" title={source.root}>
@@ -143,23 +151,55 @@ export default function SourceList({ sources, scanningIds, liveProgress, onScanT
               )}
             </div>
 
-            <div className="flex items-center gap-1 flex-shrink-0 self-center">
-              <button
-                onClick={() => onScanToggle(source)}
-                className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors focus-ring"
-                aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
-                title={scanning ? '取消扫描' : '扫描'}
-              >
-                {scanning ? <X size={15} /> : <RefreshCw size={15} />}
-              </button>
-              <button
-                onClick={() => onRemove(source)}
-                className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
-                aria-label={`移除 ${source.name}（不删除文件）`}
-                title="移除（不删除文件）"
-              >
-                <Trash2 size={15} />
-              </button>
+            <div className="flex items-center gap-3 flex-shrink-0 self-center ml-4">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isEnabled}
+                  aria-label={`${isEnabled ? '停用' : '启用'} ${source.name}`}
+                  title={isEnabled ? '点击停用' : '点击启用'}
+                  onClick={() => onToggleEnabled?.(source, !isEnabled)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-ring ${
+                    isEnabled ? 'bg-primary' : 'bg-muted-foreground/30 hover:bg-muted-foreground/40'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                      isEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+                <span className="text-xs text-muted-foreground select-none min-w-[24px]">
+                  {isEnabled ? '启用' : '关闭'}
+                </span>
+              </div>
+
+              <div className="w-px h-4 bg-border/80 flex-shrink-0" />
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onScanToggle(source)}
+                  disabled={!isEnabled}
+                  className={`p-1.5 rounded-lg transition-colors focus-ring ${
+                    !isEnabled
+                      ? 'text-muted-foreground/30 cursor-not-allowed'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                  aria-label={scanning ? `取消扫描 ${source.name}` : `扫描 ${source.name}`}
+                  title={!isEnabled ? '来源已禁用' : scanning ? '取消扫描' : '扫描'}
+                >
+                  {scanning ? <X size={15} /> : <RefreshCw size={15} />}
+                </button>
+                <button
+                  onClick={() => onRemove(source)}
+                  className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors focus-ring"
+                  aria-label={`移除 ${source.name}（不删除文件）`}
+                  title="移除（不删除文件）"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             </div>
           </div>
         );
