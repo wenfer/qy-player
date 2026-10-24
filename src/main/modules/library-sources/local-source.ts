@@ -84,9 +84,22 @@ export class LocalSourceAdapter implements SourceAdapter {
     if (normalized !== effectiveRoot && !normalized.startsWith(prefixBase)) {
       throw new Error(`路径越界: ${this.insideLabel(relativePath)}`);
     }
+    let realRoot = effectiveRoot;
+    try {
+      realRoot = realpathSync.native(effectiveRoot);
+    } catch (_err) {
+      // ignore
+    }
+    const realPrefixBase = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+
     try {
       const real = realpathSync.native(normalized);
-      if (real !== effectiveRoot && !real.startsWith(prefixBase)) {
+      if (
+        real !== effectiveRoot &&
+        real !== realRoot &&
+        !real.startsWith(prefixBase) &&
+        !real.startsWith(realPrefixBase)
+      ) {
         throw new Error(`路径越界（symlink 重定向）: ${this.insideLabel(relativePath)}`);
       }
       return real;

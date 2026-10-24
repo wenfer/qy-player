@@ -40,10 +40,9 @@ export class MpvProcessManager extends EventEmitter {
     this.endpoint.cleanup();
     this.crashed = false;
 
-    // Modern UI: uosc 2.17 (replacement for the built-in osc). Verified
-    // compatible with mpv 0.32 (no osd-overlay dependency). Requires
-    // --osc=no so the two UIs don't fight. Falls back to the built-in
-    // bottom-bar OSC when the script is missing.
+    // Modern UI: uosc 5.x (replacement for the built-in osc).
+    // Provides customizable bottom controls, seekbar with buffering indicator,
+    // and live download speed.
     // The input conf layers volume-wheel/double-click-fullscreen on top of
     // mpv defaults; only included when the file exists (dev + packaged).
     // Prefer the generated conf (user-customized bindings); fall back to
@@ -51,9 +50,19 @@ export class MpvProcessManager extends EventEmitter {
     const bundledInputConf = join(__dirname, '..', 'resources', 'mpv-input.conf');
     const generatedConf = getGeneratedConfPath();
     const inputConfPath = existsSync(generatedConf) ? generatedConf : bundledInputConf;
-    const uoscPath = join(__dirname, '..', 'resources', 'uosc.lua');
+    const uoscDir = join(__dirname, '..', 'resources', 'uosc');
+    const uoscLua = join(__dirname, '..', 'resources', 'uosc.lua');
+    const uoscPath = existsSync(join(uoscDir, 'main.lua'))
+      ? uoscDir
+      : existsSync(uoscLua)
+        ? uoscLua
+        : '';
     const configDir = join(__dirname, '..', 'resources', 'mpv-config');
-    const hasUosc = existsSync(uoscPath);
+    const fontsDir = join(configDir, 'fonts');
+    const scriptsDir = join(configDir, 'scripts');
+    const thumbfastPath = join(scriptsDir, 'thumbfast.lua');
+    const reloadPath = join(scriptsDir, 'reload.lua');
+    const hasUosc = Boolean(uoscPath);
     const scriptOpts = [
       'osc-layout=bottombar',
       'osc-seekbarstyle=bar',
@@ -96,8 +105,11 @@ export class MpvProcessManager extends EventEmitter {
       '--cache-secs=30',
       '--demuxer-readahead-secs=30',
       ...(existsSync(configDir) ? [`--config-dir=${configDir}`] : []),
+      ...(existsSync(fontsDir) ? [`--sub-fonts-dir=${fontsDir}`] : []),
       hasUosc ? '--osc=no' : '--osc',
       ...(hasUosc ? [`--script=${uoscPath}`] : [`--script-opts=${scriptOpts}`]),
+      ...(existsSync(thumbfastPath) ? [`--script=${thumbfastPath}`] : []),
+      ...(existsSync(reloadPath) ? [`--script=${reloadPath}`] : []),
       '--osd-font-size=28',
       '--osd-duration=1800',
       '--osd-color=#E6FFFFFF',
@@ -105,6 +117,17 @@ export class MpvProcessManager extends EventEmitter {
       '--osd-shadow-color=#80101010',
       '--title=${media-title}',
       '--osd-playing-msg=${media-title}',
+      // macOS 平台全屏与 Dock 适配：
+      // 1. 强制启用原生 Spaces 全屏机制，由 WindowServer 保证系统 Dock 与菜单栏彻底隐藏
+      // 2. 赋予 mpv regular 前台应用激活策略，确保获取全屏系统 presentation 控制权
+      // 3. 将全屏切换平移动画设为 0，避免系统原生 500ms 滑动画布延迟
+      ...(process.platform === 'darwin'
+        ? [
+            '--native-fs=yes',
+            '--macos-app-activation-policy=regular',
+            '--macos-fs-animation-duration=0',
+          ]
+        : []),
       ...(existsSync(inputConfPath) ? [`--input-conf=${inputConfPath}`] : []),
       ...(options?.extraArgs || []),
     ];

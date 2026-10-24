@@ -10,7 +10,7 @@
 
 ## 硬性约束（违反 = 回归）
 
-1. **Electron 锁定 21.4.4，禁止升级**。22+ 要求更新的 glibc，老系统装不上。
+1. **Electron 锁定 28.3.3**。官方预编译 Linux 二进制依赖最高仅 GLIBC 2.17，原生完全兼容 Deepin 20.9 / Debian 10 (glibc 2.28)；CI 打包 Linux 端必须在 `node:18-buster` 容器中编译原生模块（`better-sqlite3`），禁止在现代 Ubuntu 宿主机上裸编译以避免 glibc 污染。
 2. **MPV 只能用软件解码**：`--hwdec=no`（见 `mpv-process.ts`）。老机器的 VA-API/VDPAU 播放在线流会在 ~30 秒后冻结，这是实测结论，不要改回 `auto`。
 3. **mpv 子进程的 stdout/stderr 必须被 drain**。spawn 默认管道 64KB 写满后 mpv 会阻塞卡死。当前做法是挂空的 `data` 监听（`mpv-process.ts`）。不要删除，也不要把 mpv 日志转发到主进程控制台（用户明确要求静默）。
 4. **mpv 卸载文件时会补发 `time-pos: null`**。`PlayerCore` 收到 null 必须保留最后一次真实值，绝不能归零——否则退出时的最终保存会用 0 覆盖整场播放进度（已修复过的 bug，见 `player-core/index.ts`）。

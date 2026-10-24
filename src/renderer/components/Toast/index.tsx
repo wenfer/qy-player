@@ -2,10 +2,10 @@ import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { useToastStore } from '../../stores/toast-store';
 
 const typeStyles = {
-  info: 'text-sky-400',
-  success: 'text-emerald-400',
-  warning: 'text-amber-400',
-  error: 'text-rose-400',
+  info: 'text-muted-foreground',
+  success: 'text-primary',
+  warning: 'text-primary',
+  error: 'text-destructive',
 };
 
 const typeIcons = {
@@ -29,13 +29,13 @@ export default function ToastContainer() {
           <div
             key={toast.id}
             role="alert"
-            className="bg-card/95 border border-border text-foreground px-4 py-3 rounded-xl shadow-xl backdrop-blur-md flex items-start gap-3 animate-in slide-in-from-right fade-in duration-200"
+            className="bg-card border border-border text-foreground px-4 py-3 rounded-lg shadow-md flex items-start gap-3 animate-in slide-in-from-right fade-in duration-200"
           >
             <Icon size={18} className={`flex-shrink-0 mt-0.5 ${typeStyles[toast.type]}`} />
             <p className="text-sm leading-snug flex-1 font-medium">{toast.message}</p>
             <button
               onClick={() => removeToast(toast.id)}
-              className="flex-shrink-0 p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors focus-ring"
+              className="flex-shrink-0 p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-md transition-colors focus-ring"
               aria-label="关闭通知"
             >
               <X size={14} />

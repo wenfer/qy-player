@@ -196,7 +196,7 @@ export default function ScrapeDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="刮削元数据">
-      <div className="bg-card border border-border rounded-xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto">
+      <div className="bg-card border border-border rounded-lg w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center gap-2 mb-4">
           <Wand2 size={18} className="text-primary" />
           <h2 className="text-base font-semibold">刮削元数据</h2>
@@ -270,7 +270,7 @@ export default function ScrapeDialog({
                   type="button"
                   disabled={applying}
                   onClick={() => void applyCandidate(candidate.id)}
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border border-border rounded-lg hover:border-primary/40 hover:bg-accent/50 transition-colors text-left focus-ring disabled:opacity-50"
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border border-border rounded-md hover:border-primary/40 hover:bg-accent/50 transition-colors text-left focus-ring disabled:opacity-50"
                 >
                   <span className="text-sm">{candidate.title}</span>
                   <span className="text-xs px-1.5 py-0.5 bg-muted rounded text-muted-foreground">
@@ -288,7 +288,7 @@ export default function ScrapeDialog({
         {(phase === 'rejected' || phase === 'failed') && (
           <div className="py-4">
             <div className="flex items-start gap-2.5 text-sm">
-              <XCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+              <XCircle size={18} className="text-destructive shrink-0 mt-0.5" />
               <span className="text-foreground leading-relaxed">{message}</span>
             </div>
           </div>
@@ -299,7 +299,7 @@ export default function ScrapeDialog({
             <button
               type="button"
               onClick={() => void start()}
-              className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-xs focus-ring"
+              className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-xs focus-ring"
             >
               <RefreshCw size={13} />
               重试

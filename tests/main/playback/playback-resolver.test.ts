@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -148,7 +148,7 @@ afterEach(() => {
 
 describe('playback resolver: local catalog', () => {
   it('resolves a movie to an absolute path with media context', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'qy-media-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'qy-media-')));
     mkdirSync(join(root, 'Movies'));
     writeFileSync(join(root, 'Movies', 'a.mkv'), 'x');
     const repo = createCatalogRepository(db);

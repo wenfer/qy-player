@@ -149,9 +149,15 @@ describe('desk lyrics window (QYP3-022)', () => {
   });
 
   it('is unsupported on Wayland sessions', () => {
-    process.env.XDG_SESSION_TYPE = 'wayland';
-    expect(isDesktopLyricsSupported()).toBe(false);
-    delete process.env.XDG_SESSION_TYPE;
-    expect(isDesktopLyricsSupported()).toBe(true);
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    try {
+      process.env.XDG_SESSION_TYPE = 'wayland';
+      expect(isDesktopLyricsSupported()).toBe(false);
+      delete process.env.XDG_SESSION_TYPE;
+      expect(isDesktopLyricsSupported()).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
   });
 });

@@ -281,7 +281,7 @@ export default function MetadataEditor({ itemId, open, onClose }: MetadataEditor
         role="dialog"
         aria-modal="true"
         aria-label="编辑元数据"
-        className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-border rounded-xl p-5"
+        className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-border rounded-lg p-5"
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold">编辑元数据</h2>
@@ -297,7 +297,7 @@ export default function MetadataEditor({ itemId, open, onClose }: MetadataEditor
               type="button"
               onClick={requestClose}
               aria-label="关闭元数据编辑器"
-              className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg focus-ring"
+              className="p-1.5 text-muted-foreground hover:text-foreground rounded-md focus-ring"
             >
               <X size={16} />
             </button>

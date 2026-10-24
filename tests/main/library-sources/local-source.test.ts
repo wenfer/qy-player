@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +28,7 @@ let root: string;
 let baseDir: string;
 
 beforeEach(() => {
-  baseDir = mkdtempSync(join(tmpdir(), 'qy-local-'));
+  baseDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'qy-local-')));
   tmpRoots.push(baseDir);
   root = join(baseDir, 'library');
   mkdirSync(root, { recursive: true });
@@ -44,7 +44,7 @@ function write(relPath: string, content = 'x'): void {
 
 describe('root canonicalization (plan §7)', () => {
   it('canonicalizes a symlinked selection to the real path', () => {
-    const target = mkdtempSync(join(tmpdir(), 'qy-real-'));
+    const target = realpathSync.native(mkdtempSync(join(tmpdir(), 'qy-real-')));
     tmpRoots.push(target);
     const linkPath = join(baseDir, 'link-to-library');
     symlinkSync(target, linkPath);
@@ -194,8 +194,20 @@ describe('root containment', () => {
 
   it('keeps containment working for a root of /', () => {
     const adapter = LocalSourceAdapter.fromSource(1, '/');
-    expect(adapter.resolveInside('etc/hostname')).toBe('/etc/hostname');
-    expect(adapter.resolveInside('../../etc/passwd')).toBe('/etc/passwd');
+    let realHostname = '/etc/hostname';
+    try {
+      realHostname = realpathSync.native('/etc/hostname');
+    } catch (_err) {
+      realHostname = '/etc/hostname';
+    }
+    let realPasswd = '/etc/passwd';
+    try {
+      realPasswd = realpathSync.native('/etc/passwd');
+    } catch (_err) {
+      realPasswd = '/etc/passwd';
+    }
+    expect(adapter.resolveInside('etc/hostname')).toBe(realHostname);
+    expect(adapter.resolveInside('../../etc/passwd')).toBe(realPasswd);
   });
 
   it('accepts legal dot-segment paths that normalize inside the root', async () => {

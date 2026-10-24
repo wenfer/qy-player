@@ -46,7 +46,7 @@ describe('resolveMpvBinary (QYP3-061)', () => {
       exists: (p) => p === local,
     });
     expect(r.path).toBe(local);
-    expect(r.path).toBe(resolveMpvBinary({ platform: 'win32', env, exists: ALWAYS }).path);
+    expect(r.path).toBe(resolveMpvBinary({ platform: 'win32', env, resourcesPath: '', exists: ALWAYS }).path);
     // 什么都没装 → PATH 上的 mpv.exe
     expect(resolveMpvBinary({ platform: 'win32', env, exists: NEVER }).path).toBe('mpv.exe');
   });
@@ -98,9 +98,13 @@ describe('resolveMpvBinary (QYP3-061)', () => {
   });
 
   it('打包内置：当 deps 未指定 resourcesPath 时，默认从 process.resourcesPath 查找', () => {
-    const originalResourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+    const originalDesc = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
     try {
-      (process as { resourcesPath?: string }).resourcesPath = '/Applications/QY Player.app/Contents/Resources';
+      Object.defineProperty(process, 'resourcesPath', {
+        value: '/Applications/QY Player.app/Contents/Resources',
+        configurable: true,
+        writable: true,
+      });
       const r = resolveMpvBinary({
         platform: 'darwin',
         env: {},
@@ -108,7 +112,11 @@ describe('resolveMpvBinary (QYP3-061)', () => {
       });
       expect(r.path).toBe('/Applications/QY Player.app/Contents/Resources/mpv/mpv');
     } finally {
-      (process as { resourcesPath?: string }).resourcesPath = originalResourcesPath;
+      if (originalDesc) {
+        Object.defineProperty(process, 'resourcesPath', originalDesc);
+      } else {
+        delete (process as { resourcesPath?: string }).resourcesPath;
+      }
     }
   });
 });

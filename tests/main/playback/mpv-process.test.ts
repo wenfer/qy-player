@@ -50,4 +50,20 @@ describe('MpvProcessManager (QYP3-032)', () => {
     expect(spawnArgs).toContain('--hwdec=auto-safe');
     expect(spawnArgs).not.toContain('--hwdec=no');
   });
+
+  it('injects macOS-specific fullscreen and activation policy flags on darwin', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    try {
+      const mgr = new MpvProcessManager();
+      await mgr.start();
+      const lastCall = h.spawnMock.mock.calls[h.spawnMock.mock.calls.length - 1];
+      const spawnArgs = lastCall?.[1] as string[] | undefined;
+      expect(spawnArgs).toContain('--native-fs=yes');
+      expect(spawnArgs).toContain('--macos-app-activation-policy=regular');
+      expect(spawnArgs).toContain('--macos-fs-animation-duration=0');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
+  });
 });

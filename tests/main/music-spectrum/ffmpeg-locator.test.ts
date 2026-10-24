@@ -14,10 +14,11 @@ describe('ffmpeg locator (QYP3-050)', () => {
     const probe = vi.fn(() => Promise.resolve(true));
     const locator = createFfmpegLocator({
       homeDir: '/home/u',
+      platform: 'linux',
       exists: () => true,
       probe,
     });
-    expect(ffmpegCandidates('/home/u')[0]).toBe('/home/u/.local/bin/ffmpeg');
+    expect(ffmpegCandidates('/home/u', { platform: 'linux' })[0]).toBe('/home/u/.local/bin/ffmpeg');
     await expect(locator.detect()).resolves.toBe('/home/u/.local/bin/ffmpeg');
     expect(probe).toHaveBeenCalledTimes(1);
     expect(locator.known()).toBe('/home/u/.local/bin/ffmpeg');
@@ -25,7 +26,7 @@ describe('ffmpeg locator (QYP3-050)', () => {
 
   it('falls back to PATH when the self-built one is missing or broken', async () => {
     const probe = vi.fn((bin: string) => Promise.resolve(bin === 'ffmpeg'));
-    const locator = createFfmpegLocator({ homeDir: '/home/u', exists: () => true, probe });
+    const locator = createFfmpegLocator({ homeDir: '/home/u', platform: 'linux', exists: () => true, probe });
     await expect(locator.detect()).resolves.toBe('ffmpeg');
     expect(probe).toHaveBeenNthCalledWith(1, '/home/u/.local/bin/ffmpeg');
     expect(probe).toHaveBeenNthCalledWith(2, 'ffmpeg');
@@ -33,7 +34,7 @@ describe('ffmpeg locator (QYP3-050)', () => {
 
   it('skips a non-existent self-built path without probing it', async () => {
     const probe = vi.fn(() => Promise.resolve(false));
-    const locator = createFfmpegLocator({ homeDir: '/home/u', exists: () => false, probe });
+    const locator = createFfmpegLocator({ homeDir: '/home/u', platform: 'linux', exists: () => false, probe });
     await expect(locator.detect()).resolves.toBeNull();
     expect(probe).toHaveBeenCalledTimes(1);
     expect(probe).toHaveBeenCalledWith('ffmpeg');
@@ -41,7 +42,7 @@ describe('ffmpeg locator (QYP3-050)', () => {
 
   it('caches both positive and negative results for the session', async () => {
     const probe = vi.fn(() => Promise.resolve(false));
-    const locator = createFfmpegLocator({ homeDir: '/home/u', exists: () => true, probe });
+    const locator = createFfmpegLocator({ homeDir: '/home/u', platform: 'linux', exists: () => true, probe });
     await locator.detect();
     await locator.detect();
     expect(probe).toHaveBeenCalledTimes(2); // 每个候选只探一次

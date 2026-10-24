@@ -13,7 +13,7 @@ Deepin 20.9、Debian 10 (buster) 这类老系统的 glibc 只有 **2.28**：
 
 | 组件 | 版本 | 原因 |
 |---|---|---|
-| Electron | **21.4.4** | 最后一个支持 glibc 2.28 的版本 |
+| Electron | **28.3.3** | 官方 Linux x64 二进制最高仅依赖 GLIBC 2.17，原生完全兼容 glibc 2.28 |
 | mpv | 0.29（系统）或 **0.32**（自编译，推荐） | 0.32 是老 gcc 8.3 / glibc 2.28 下可自行编译的最近版本，见 [docs/BUILD-MPV.md](docs/BUILD-MPV.md) |
 | Node 构建 | 任意（仅开发机需要） | 打包产物不依赖开发机的 glibc |
 
@@ -142,7 +142,7 @@ npm run typecheck  # 类型检查
 npm run dist:all   # 打包全部 Linux 格式
 ```
 
-技术栈：Electron 21 + React 18 + TypeScript + Vite + Tailwind CSS + Zustand + better-sqlite3，MPV 通过 JSON IPC（Unix Socket）通信。
+技术栈：Electron 28 + React 18 + TypeScript + Vite + Tailwind CSS + Zustand + better-sqlite3，MPV 通过 JSON IPC（Unix Socket）通信。
 
 ```
 src/

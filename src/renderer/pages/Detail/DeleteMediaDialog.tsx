@@ -163,7 +163,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         aria-modal="true"
         aria-label="删除媒体"
         tabIndex={-1}
-        className="w-full max-w-lg bg-card border border-border rounded-xl p-5 focus:outline-none"
+        className="w-full max-w-lg bg-card border border-border rounded-lg p-5 focus:outline-none"
       >
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold flex items-center gap-1.5">
@@ -175,7 +175,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
             onClick={requestClose}
             disabled={executing}
             aria-label="关闭删除对话框"
-            className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg focus-ring disabled:opacity-40"
+            className="p-1.5 text-muted-foreground hover:text-foreground rounded-md focus-ring disabled:opacity-40"
           >
             <X size={16} />
           </button>
@@ -189,7 +189,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         ) : !preview ? (
           <div>
             {error && (
-              <div className="flex items-start gap-2 p-3 bg-destructive/10 text-destructive rounded-lg text-sm" role="alert">
+              <div className="flex items-start gap-2 p-3 bg-destructive/10 text-destructive rounded-md text-sm" role="alert">
                 <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
                 <div>
                   <p>{error}</p>
@@ -235,7 +235,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
             </dl>
 
             {preview.method === 'webdav-delete' && (
-              <div className="mb-4 p-3 bg-destructive/10 rounded-lg">
+              <div className="mb-4 p-3 bg-destructive/10 rounded-md">
                 <p className="text-xs text-destructive mb-2 flex items-start gap-1.5">
                   <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
                   WebDAV 删除不可恢复。请输入媒体标题「{preview.itemTitle}」以确认。
@@ -246,13 +246,13 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
                   onChange={(e) => setConfirmText(e.target.value)}
                   placeholder={preview.itemTitle}
                   aria-label="输入媒体标题以确认永久删除"
-                  className="w-full px-3 py-2 bg-secondary border border-border rounded-lg text-sm focus:outline-none focus:border-destructive/60"
+                  className="w-full px-3 py-2 bg-secondary border border-border rounded-md text-sm focus:outline-none focus:border-destructive/60"
                 />
               </div>
             )}
 
             {error && (
-              <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-lg text-sm" role="alert">
+              <div className="mb-4 p-3 bg-destructive/10 text-destructive rounded-md text-sm" role="alert">
                 {error}
               </div>
             )}
@@ -271,7 +271,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
                 onClick={handleExecute}
                 disabled={executing || !titleConfirmed}
                 title={!titleConfirmed ? '请先输入标题确认' : undefined}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors focus-ring disabled:opacity-50"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 transition-colors focus-ring disabled:opacity-50"
               >
                 {executing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                 {executing ? '正在删除…' : preview.method === 'local-trash' ? '移入回收站' : '永久删除'}
