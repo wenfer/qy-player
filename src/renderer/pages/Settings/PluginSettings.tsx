@@ -309,13 +309,13 @@ export default function PluginSettings() {
                   测试连接
                 </button>
                 {hasSecret && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-primary font-medium">
                     <CheckCircle2 size={12} />
                     已设置
                   </span>
                 )}
                 {!hasSecret && healthState && healthState !== 'loading' && healthState.status === 'auth-required' && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 font-medium">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-destructive font-medium">
                     <XCircle size={12} />
                     未配置密钥
                   </span>

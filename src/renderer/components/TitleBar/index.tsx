@@ -29,9 +29,9 @@ const BTN =
 const BTN_SMALL =
   'h-full w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-ring';
 const CLOSE_BTN =
-  'h-full w-10 flex items-center justify-center text-muted-foreground hover:text-white hover:bg-red-500 transition-colors focus-ring';
+  'h-full w-10 flex items-center justify-center text-muted-foreground hover:text-destructive-foreground hover:bg-destructive transition-colors focus-ring';
 const CLOSE_BTN_SMALL =
-  'h-full w-8 flex items-center justify-center text-muted-foreground hover:text-white hover:bg-red-500 transition-colors focus-ring';
+  'h-full w-8 flex items-center justify-center text-muted-foreground hover:text-destructive-foreground hover:bg-destructive transition-colors focus-ring';
 
 export default function TitleBar({ compact = false }: { compact?: boolean }) {
   const [maximized, setMaximized] = useState(false);

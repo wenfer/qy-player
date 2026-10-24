@@ -442,7 +442,7 @@ export default function Detail() {
         <div className="flex gap-8">
           {/* Poster */}
           <div className="flex-shrink-0 w-[200px] md:w-[240px]">
-            <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-card border border-border">
+            <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-card border border-border">
               {typeBadge && (
                 <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 bg-black/70 text-white text-[10px] font-medium rounded-md backdrop-blur-sm">
                   {typeBadge.icon}

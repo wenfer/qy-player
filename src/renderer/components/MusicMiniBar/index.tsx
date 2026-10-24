@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { Activity, Heart, Mic2, Minimize2, Moon, Music2, SkipBack, SkipForward, X } from 'lucide-react';
+import { Activity, Heart, Mic2, Minimize2, Moon, Music2, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
 import {
   attachMusicMpvBridge,
   useMusicPlaybackStore,
@@ -259,7 +259,7 @@ export default function MusicMiniBar() {
         className={`fixed z-40 bg-card border-border px-4 py-3 flex flex-col gap-2 ${
           docked
             ? 'bottom-0 left-0 right-0 border-t'
-            : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-xl shadow-lg'
+            : 'bottom-4 left-1/2 -translate-x-1/2 w-[min(560px,calc(100vw-2rem))] border rounded-lg shadow-md'
         }`}
       >
         {/* 频谱：常驻一行（暂停时冻结最后一帧，不再退化成进度条——进度有自己的一行） */}
@@ -331,7 +331,7 @@ export default function MusicMiniBar() {
                 aria-label="暂停音乐"
                 className={PLAY_BTN}
               >
-                <span aria-hidden className="text-sm leading-none">⏸</span>
+                <Pause size={16} fill="currentColor" />
               </button>
             ) : (
               <button
@@ -344,7 +344,7 @@ export default function MusicMiniBar() {
                 aria-label="继续播放音乐"
                 className={PLAY_BTN}
               >
-                <span aria-hidden className="text-sm leading-none ml-0.5">▶</span>
+                <Play size={16} fill="currentColor" className="ml-0.5" />
               </button>
             )}
             <button

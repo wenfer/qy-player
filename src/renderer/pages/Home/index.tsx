@@ -126,7 +126,7 @@ function LibraryCard({
   return (
     <button
       onClick={onClick}
-      className="group relative aspect-[16/9] rounded-xl overflow-hidden bg-card border border-border transition-colors duration-150 hover:border-primary/40 card-lift focus-ring text-left"
+      className="group relative aspect-[16/9] rounded-lg overflow-hidden bg-card border border-border transition-colors duration-150 hover:border-primary/40 card-lift focus-ring text-left"
       aria-label={`打开媒体库 ${title}${count ? `，共 ${count} 部影片` : ''}`}
     >
       {bg ? (
@@ -475,9 +475,9 @@ export default function Home() {
           {libraryErrors.map((e, i) => (
             <div
               key={i}
-              className="flex items-center gap-2.5 p-3 bg-card border border-border text-foreground rounded-xl text-sm"
+              className="flex items-center gap-2.5 p-3 bg-card border border-border text-foreground rounded-lg text-sm"
             >
-              <AlertCircle size={16} className="text-amber-400 flex-shrink-0" />
+              <AlertCircle size={16} className="text-destructive flex-shrink-0" />
               <span className="flex-1">{e}</span>
               <button
                 onClick={() => navigate('/media-sources')}

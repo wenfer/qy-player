@@ -203,7 +203,7 @@ export default function ScrapeJobs() {
                 </div>
               )}
               {job.status === 'failed' && job.items.some((entry) => entry.errorCode === 'UPSTREAM_CHANGED') && (
-                <p className="text-[11px] text-amber-400 mt-2 font-medium">
+                <p className="text-[11px] text-destructive mt-2 font-medium">
                   上游页面结构变化，任务已自动暂停。待插件适配后可恢复剩余条目。
                 </p>
               )}

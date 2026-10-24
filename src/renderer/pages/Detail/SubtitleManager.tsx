@@ -161,7 +161,7 @@ export default function SubtitleManager({ itemId }: { itemId: number }) {
                 {row.origin === 'imported' ? '已导入' : '外挂'}
               </span>
               {row.status !== 'ok' && (
-                <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-500">
+                <span className="inline-flex items-center gap-0.5 text-[10px] text-destructive">
                   <AlertTriangle size={10} />
                   {row.status === 'missing' ? '缺失' : '损坏'}
                 </span>

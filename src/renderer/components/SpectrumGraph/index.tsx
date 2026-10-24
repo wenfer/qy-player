@@ -108,7 +108,7 @@ export default function SpectrumGraph({
   }, [hasData, isPlaying, getSpectrum, frameMs]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border bg-card/60 overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-border bg-card/60 overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border flex-shrink-0">
         <Activity size={14} className="text-muted-foreground flex-shrink-0" />
         <div className="min-w-0 flex-1">

@@ -222,7 +222,7 @@ export default function MetadataField({
 
       {conflict && (
         <div className="mt-2 p-2.5 bg-secondary/60 border border-border rounded-lg text-xs" role="alert">
-          <p className="text-amber-400 font-medium mb-1">
+          <p className="text-destructive font-medium mb-1">
             保存时该字段已被其他修改更新（版本冲突）
           </p>
           <p className="text-muted-foreground">

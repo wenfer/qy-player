@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Loader2, Film, AlertCircle, Play, Search, Tv, Clapperboard, Wand2 } from 'lucide-react';
+import { ChevronLeft, Loader2, Film, AlertCircle, Play, Search, Star, Tv, Clapperboard, Wand2 } from 'lucide-react';
 import PosterCard from '../../components/PosterCard';
 import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
 import { getServerMap, buildItemImageUrl } from '../../utils/server-images';
@@ -235,7 +235,12 @@ function CatalogItemDetailView({
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-sm text-muted-foreground">
             {item.year && <span>{item.year}</span>}
-            {item.rating !== undefined && <span className="text-yellow-500">★ {item.rating.toFixed(1)}</span>}
+            {item.rating !== undefined && (
+              <span className="inline-flex items-center gap-1 text-primary">
+                <Star size={12} fill="currentColor" />
+                {item.rating.toFixed(1)}
+              </span>
+            )}
             {metadata.runtime && <span>{metadata.runtime} 分钟</span>}
             {metadata.contentRating && <span className="px-1.5 border border-border rounded text-xs">{metadata.contentRating}</span>}
           </div>

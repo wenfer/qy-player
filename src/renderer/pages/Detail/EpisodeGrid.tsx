@@ -44,7 +44,7 @@ export default function EpisodeGrid({
         return (
           <div
             key={ep.Id}
-            className="group relative rounded-xl overflow-hidden bg-card border border-border hover:border-primary/30 transition-colors text-left"
+            className="group relative rounded-lg overflow-hidden bg-card border border-border hover:border-primary/30 transition-colors text-left"
           >
             <button
               type="button"

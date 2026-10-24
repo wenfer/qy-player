@@ -7,8 +7,8 @@ export default function DetailSkeleton() {
         <div className="flex gap-8">
           {/* Poster */}
           <div className="flex-shrink-0 w-[200px] md:w-[260px]">
-            <div className="aspect-[2/3] bg-muted rounded-xl animate-pulse" />
-            <div className="mt-4 h-12 bg-muted rounded-xl animate-pulse" />
+            <div className="aspect-[2/3] bg-muted rounded-lg animate-pulse" />
+            <div className="mt-4 h-12 bg-muted rounded-lg animate-pulse" />
           </div>
           {/* Info */}
           <div className="flex-1 space-y-4 pt-8">

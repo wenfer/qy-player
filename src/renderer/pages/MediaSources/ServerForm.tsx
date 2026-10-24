@@ -41,14 +41,14 @@ export default function ServerForm({
   const [showPassword, setShowPassword] = useState(false);
 
   return (
-    <div className="bg-card border border-border rounded-xl p-5 mb-5 space-y-4">
+    <div className="bg-card border border-border rounded-lg p-5 mb-5 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">{isEditing ? '编辑服务器' : '添加服务器'}</h3>
         {isEditing && (
           hasCredential ? (
             <span className="text-xs text-muted-foreground">留空密码则保留原有登录凭证</span>
           ) : (
-            <span className="text-xs text-amber-500 font-medium">未登录，请输入密码以完成登录</span>
+            <span className="text-xs text-destructive font-medium">未登录，请输入密码以完成登录</span>
           )
         )}
       </div>

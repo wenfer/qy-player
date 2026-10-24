@@ -127,7 +127,7 @@ export default function NextEpisodeCountdown({ onPlayNext }: { onPlayNext: (choi
 
   return (
     <div
-      className="fixed bottom-6 right-6 z-50 bg-card border border-border rounded-xl shadow-lg p-4 w-72"
+      className="fixed bottom-6 right-6 z-50 bg-card border border-border rounded-lg shadow-md p-4 w-72"
       role="alertdialog"
       aria-label="自动播放下一集"
     >

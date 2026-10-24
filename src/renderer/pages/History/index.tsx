@@ -201,7 +201,7 @@ export default function HistoryPage() {
       ) : loading ? (
         <div className="space-y-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-card border border-border animate-pulse">
+            <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-card border border-border animate-pulse">
               <div className="w-16 h-10 rounded bg-muted flex-shrink-0" />
               <div className="flex-1 space-y-2">
                 <div className="h-4 bg-muted rounded w-1/3" />

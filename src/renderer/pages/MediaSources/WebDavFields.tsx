@@ -66,8 +66,8 @@ export default function WebDavFields({
         </p>
       )}
       {isHttp && (
-        <div className="flex items-start gap-2.5 p-3 bg-secondary/60 border border-border rounded-xl" role="alert">
-          <AlertTriangle size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2.5 p-3 bg-secondary/60 border border-border rounded-lg" role="alert">
+          <AlertTriangle size={15} className="text-destructive flex-shrink-0 mt-0.5" />
           <div className="min-w-0">
             <p className="text-xs text-foreground font-medium">该地址使用 http 明文传输，密码可能被网络中间人截获。</p>
             <label className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
