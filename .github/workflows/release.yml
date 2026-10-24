@@ -32,7 +32,6 @@ jobs:
           ln -sf /opt/python/bin/python3 /usr/local/bin/python3
           ln -sf /opt/python/bin/python3 /usr/local/bin/python
           echo "PYTHON=/usr/local/bin/python3" >> $GITHUB_ENV
-          npm config set python /usr/local/bin/python3 --location=global
           python3 --version
 
       - name: Install dependencies
