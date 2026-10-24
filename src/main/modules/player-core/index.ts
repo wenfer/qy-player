@@ -177,6 +177,16 @@ export class PlayerCore extends EventEmitter {
       }
     });
 
+    this.ipc.on('event', (msg: { event?: string; args?: string[] }) => {
+      if (msg.event === 'client-message' && Array.isArray(msg.args)) {
+        if (msg.args[0] === 'qy-prev-episode') {
+          this.emit('prev-episode');
+        } else if (msg.args[0] === 'qy-next-episode') {
+          this.emit('next-episode');
+        }
+      }
+    });
+
     this.ipc.on('disconnect', () => {
       this.ipc = null;
       this.state.isPlaying = false;

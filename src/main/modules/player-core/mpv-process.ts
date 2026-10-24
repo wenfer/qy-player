@@ -5,6 +5,7 @@ import { join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { getGeneratedConfPath } from '../ui-shell/mpv-bindings';
 import { resolveMpvBinary } from '../platform/binary-locator';
+import { resolveResourcePath } from '../platform/resource-path';
 import { createIpcEndpoint, type IpcEndpoint } from '../platform/ipc-endpoint';
 
 export interface MpvOptions {
@@ -47,17 +48,17 @@ export class MpvProcessManager extends EventEmitter {
     // mpv defaults; only included when the file exists (dev + packaged).
     // Prefer the generated conf (user-customized bindings); fall back to
     // the bundled defaults when it has never been written.
-    const bundledInputConf = join(__dirname, '..', 'resources', 'mpv-input.conf');
+    const bundledInputConf = resolveResourcePath('mpv-input.conf');
     const generatedConf = getGeneratedConfPath();
     const inputConfPath = existsSync(generatedConf) ? generatedConf : bundledInputConf;
-    const uoscDir = join(__dirname, '..', 'resources', 'uosc');
-    const uoscLua = join(__dirname, '..', 'resources', 'uosc.lua');
+    const uoscDir = resolveResourcePath('uosc');
+    const uoscLua = resolveResourcePath('uosc.lua');
     const uoscPath = existsSync(join(uoscDir, 'main.lua'))
       ? uoscDir
       : existsSync(uoscLua)
         ? uoscLua
         : '';
-    const configDir = join(__dirname, '..', 'resources', 'mpv-config');
+    const configDir = resolveResourcePath('mpv-config');
     const fontsDir = join(configDir, 'fonts');
     const scriptsDir = join(configDir, 'scripts');
     const thumbfastPath = join(scriptsDir, 'thumbfast.lua');

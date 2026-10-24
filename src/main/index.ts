@@ -140,6 +140,18 @@ function createWindow(): BrowserWindow {
     sendPlayerState({ isPlaying: false, eof: true });
   });
 
+  player.on('prev-episode', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, 'prev');
+    }
+  });
+
+  player.on('next-episode', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.AUTO_NEXT.ON_COMMAND, 'next');
+    }
+  });
+
   // Load renderer
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
