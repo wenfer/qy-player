@@ -20,9 +20,12 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          apt-get update
+          echo 'deb [trusted=yes] http://archive.debian.org/debian buster main' > /etc/apt/sources.list
+          echo 'deb [trusted=yes] http://archive.debian.org/debian-security buster/updates main' >> /etc/apt/sources.list
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+          apt-get update -o Acquire::Check-Valid-Until=false
           # rpm: needed for the rpm target; libarchive-tools: provides bsdtar for the pacman target
-          apt-get install -y rpm libarchive-tools python3 make g++
+          apt-get install -y --allow-unauthenticated rpm libarchive-tools python3 make g++
 
       - name: Install dependencies
         run: npm ci
