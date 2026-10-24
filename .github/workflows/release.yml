@@ -32,6 +32,25 @@ jobs:
           ln -sf /opt/python/bin/python3 /usr/local/bin/python3
           ln -sf /opt/python/bin/python3 /usr/local/bin/python
           echo "PYTHON=/usr/local/bin/python3" >> $GITHUB_ENV
+          # GCC 8.3 on Debian Buster supports C++20 draft under -std=c++2a.
+          # Wrap g++ to map -std=c++20/-std=gnu++20 to -std=c++2a/-std=gnu++2a for better-sqlite3.
+          cat << 'EOF' > /usr/local/bin/g++
+#!/usr/bin/env bash
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    -std=c++20) args+=("-std=c++2a") ;;
+    -std=gnu++20) args+=("-std=gnu++2a") ;;
+    *) args+=("$arg") ;;
+  esac
+done
+exec /usr/bin/g++ "${args[@]}"
+EOF
+          chmod +x /usr/local/bin/g++
+          ln -sf /usr/local/bin/g++ /usr/local/bin/c++
+          ln -sf /usr/local/bin/g++ /usr/local/bin/x86_64-linux-gnu-g++
+          echo "CXX=/usr/local/bin/g++" >> $GITHUB_ENV
+          echo "npm_config_cxx=/usr/local/bin/g++" >> $GITHUB_ENV
           python3 --version
 
       - name: Install dependencies
