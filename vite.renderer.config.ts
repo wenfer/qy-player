@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'out/renderer'),
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: process.env.NODE_ENV !== 'production' ? true : false,
     rollupOptions: {
       input: {
         index: resolve(__dirname, 'src/renderer/index.html'),

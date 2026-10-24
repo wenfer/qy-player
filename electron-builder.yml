@@ -1,15 +1,20 @@
 appId: com.qyplayer.app
 productName: QY Player
 copyright: Copyright © 2025 QY Player Team
+compression: maximum
+electronLanguages:
+  - zh-CN
+  - zh-TW
+  - en-US
+  - en
 directories:
   output: dist
   buildResources: build
 files:
   - out/**/*
   - resources/**/*
-extraResources:
-  - from: out
-    to: out
+  - "!**/*.map"
+  - "!resources/uosc/bin/ziggy-*"
 # Electron 二进制来源：
 # - Linux 本地打包脚本用 -c.electronDist=node_modules/electron/dist 指向本地已装
 #   Electron，避免联网下载（国内环境经常卡死）
@@ -27,6 +32,8 @@ linux:
   synopsis: MPV-based media player with Jellyfin/Emby support
   executableName: qy-player
   icon: build/icons
+  files:
+    - resources/uosc/bin/ziggy-linux
   target:
     - target: AppImage
       arch:
@@ -111,6 +118,8 @@ win:
   # 未签名（无证书）：SmartScreen 会提示，由发布说明告知用户
   # 注：electron-builder 26 把 signingHashAlgorithms 挪进了 signtoolOptions，
   # 且它只在真的签名时才有意义——本项目不签名，故整条删掉而不是搬家
+  files:
+    - resources/uosc/bin/ziggy-windows.exe
   extraResources:
     # scripts/fetch-mpv-win.js 产出的 mpv.exe（+ d3dcompiler_47.dll）
     - from: build/mpv-win
@@ -139,6 +148,8 @@ mac:
   icon: build/icon.png
   # 未签名（无开发者证书）：首次打开需右键 → 打开 绕过 Gatekeeper
   identity: null
+  files:
+    - resources/uosc/bin/ziggy-darwin
   extraResources:
     # scripts/collect-mpv-mac.sh 产出的 mpv + lib/（dylib 闭包）
     - from: build/mpv-mac
