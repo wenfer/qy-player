@@ -40,6 +40,10 @@ describe('MpvProcessManager (QYP3-032)', () => {
     expect(spawnArgs).toContain('--force-window=no');
     expect(spawnArgs).not.toContain('--force-window=immediate');
     expect(spawnArgs).toContain('--hwdec=no');
+    expect(spawnArgs).toContain('--geometry=50%:50%');
+    expect(spawnArgs).toContain('--autofit=1280x720');
+    expect(spawnArgs).toContain('--autofit-larger=70%x70%');
+    expect(spawnArgs).toContain('--autofit-smaller=854x480');
   });
 
   it('respects configured hwdec mode (QYP3-070)', async () => {

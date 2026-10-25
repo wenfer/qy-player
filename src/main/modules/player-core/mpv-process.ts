@@ -97,6 +97,15 @@ export class MpvProcessManager extends EventEmitter {
       // 音乐（QYP3-012）：曲间无爆音衔接；对视频无副作用（仅音频轨道过渡）
       '--gapless-audio=weak',
       '--fs=no',
+      // 默认窗口化播放尺寸与居中对齐（参考主流播放器 IINA / PotPlayer / VLC 规范）：
+      // 1. geometry=50%:50% 居中在屏幕中央显示
+      // 2. autofit=1280x720 以标准 16:9 高清比例（1280x720）为基准窗口化尺寸
+      // 3. autofit-larger=70%x70% 在较小屏幕（如 1366x768 / 矮屏）上不超过屏幕 70%，留出桌面操作空间
+      // 4. autofit-smaller=854x480 防止低分辨率老视频（如 360p/480p）窗口过于微小
+      '--geometry=50%:50%',
+      '--autofit=1280x720',
+      '--autofit-larger=70%x70%',
+      '--autofit-smaller=854x480',
       // Hardware decoding (QYP3-070): defaults to 'no' for strict legacy Linux
       // driver compatibility (Rule 2 in AGENTS.md); configurable in Settings
       // to allow modern GPUs (Intel QuickSync/VA-API/NVDEC) to decode 4K/H.265 smoothly.
