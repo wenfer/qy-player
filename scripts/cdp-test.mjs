@@ -17,6 +17,8 @@ const SCREENSHOT_DIR = (() => {
 })();
 
 import { readdirSync, statSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createConnection } from 'net';
 import { execSync } from 'child_process';
 
@@ -33,9 +35,10 @@ function isMpvRunning() {
 
 function findMpvSocket() {
   try {
-    return readdirSync('/tmp/qy-player')
+    const dir = join(tmpdir(), 'qy-player');
+    return readdirSync(dir)
       .filter((f) => f.endsWith('.sock'))
-      .map((f) => ({ path: `/tmp/qy-player/${f}`, mtime: statSync(`/tmp/qy-player/${f}`).mtimeMs }))
+      .map((f) => ({ path: join(dir, f), mtime: statSync(join(dir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime)[0]?.path;
   } catch {
     return null;
@@ -337,10 +340,10 @@ async function main() {
     }
   });
 
-  group('设置页');
-  await runCase('打开设置页', async () => {
-    await navigate(cdp, '#/settings', `window.__qy.text().includes('设置')`, '设置页');
-    check('设置页可见', true);
+  group('媒体来源页');
+  await runCase('打开媒体来源页', async () => {
+    await navigate(cdp, '#/media-sources', `window.__qy.text().includes('媒体来源') || !!window.__qy.buttonByText('添加')`, '媒体来源页');
+    check('媒体来源页可见', true);
   });
 
   await runCase('服务器列表/添加表单', async () => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import { createServer } from 'vite';
 import { build } from 'vite';
 
@@ -23,10 +24,14 @@ const url = vite.resolvedUrls.local[0];
 console.log(`[dev] Vite dev server running at ${url}`);
 
 // Step 3: Launch Electron
+const macAppMpv = '/Applications/QY Player.app/Contents/Resources/mpv/mpv';
+const devMpvPath = process.env.MPV_PATH || (process.platform === 'darwin' && existsSync(macAppMpv) ? macAppMpv : undefined);
+
 const electron = spawn('npx', ['electron', '.', '--remote-debugging-port=9222', '--no-sandbox'], {
   stdio: 'inherit',
   env: {
     ...process.env,
+    ...(devMpvPath ? { MPV_PATH: devMpvPath } : {}),
     NODE_ENV: 'development',
     VITE_DEV_SERVER_URL: url,
   },
