@@ -8,10 +8,25 @@ local buttons = {
 	subscribers = {},
 }
 
+local default_buttons = {
+	['prev-episode'] = {
+		icon = 'skip_previous',
+		tooltip = '上一集',
+		command = 'script-message qy-prev-episode',
+		hide = true,
+	},
+	['next-episode'] = {
+		icon = 'skip_next',
+		tooltip = '下一集',
+		command = 'script-message qy-next-episode',
+		hide = true,
+	},
+}
+
 ---@param name string
 ---@return ButtonData
 function buttons:get(name)
-	return self.data[name] or {icon = 'help_center', tooltip = 'Uninitialized button "' .. name .. '"'}
+	return self.data[name] or default_buttons[name] or {icon = 'help_center', tooltip = 'Uninitialized button "' .. name .. '"'}
 end
 
 ---@param name string

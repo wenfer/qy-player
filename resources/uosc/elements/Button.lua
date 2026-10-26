@@ -36,10 +36,12 @@ end
 function Button:render()
 	local visibility = self:get_visibility()
 	if visibility <= 0 then return end
-	cursor:zone('primary_click', self, function() self:handle_cursor_click() end)
+	local is_clickable = self.is_clickable and self.on_click ~= nil
+	if is_clickable then
+		cursor:zone('primary_click', self, function() self:handle_cursor_click() end)
+	end
 
 	local ass = assdraw.ass_new()
-	local is_clickable = self.is_clickable and self.on_click ~= nil
 	local is_hover = self.proximity_raw <= 0
 	local foreground = self.active and self.background or self.foreground
 	local background = self.active and self.foreground or self.background
@@ -48,7 +50,7 @@ function Button:render()
 	if is_hover and is_clickable and background_opacity < 0.3 then background_opacity = 0.3 end
 
 	-- Background
-	if background_opacity > 0 then
+	if background_opacity > 0 and (is_clickable or self.active) then
 		ass:rect(self.ax, self.ay, self.bx, self.by, {
 			color = (self.active or not is_hover) and background or foreground,
 			radius = state.radius,
@@ -84,13 +86,15 @@ function Button:render()
 		icon_clip = '\\iclip(' .. clip_path.scale .. ', ' .. clip_path.text .. ')'
 	end
 
-	-- Icon
+	-- Icon (灰度/低透明度展示不可用状态)
 	local x, y = round(self.ax + (self.bx - self.ax) / 2), round(self.ay + (self.by - self.ay) / 2)
+	local icon_color = is_clickable and foreground or '888888'
+	local icon_opacity = visibility * (is_clickable and 1 or 0.3)
 	ass:icon(x, y, self.font_size, self.icon, {
-		color = foreground,
-		border = self.active and 0 or options.text_border * state.scale,
+		color = icon_color,
+		border = (self.active or not is_clickable) and 0 or options.text_border * state.scale,
 		border_color = background,
-		opacity = visibility,
+		opacity = icon_opacity,
 		clip = icon_clip,
 	})
 

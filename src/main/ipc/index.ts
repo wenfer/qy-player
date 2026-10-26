@@ -1502,8 +1502,14 @@ export function registerIpcHandlers(
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
 
+      const isEpisode = mediaContext?.mediaType === 'episode' || Boolean(mediaContext?.seriesName && mediaContext?.episodeNumber !== undefined);
+      const episodeNav = {
+        isEpisode,
+        hasPrev: (mediaContext as any)?.hasPrev,
+        hasNext: (mediaContext as any)?.hasNext,
+      };
       const mediaTitle = formatMediaTitle(mediaContext, path);
-      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle);
+      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle, episodeNav);
       // Auto-next dedupe anchor only after the load actually succeeded
       // (a failed loadfile must not re-point the eof gate).
       autoNext.markLoaded({ mediaType: 'local', mediaId: path });
@@ -1572,8 +1578,14 @@ export function registerIpcHandlers(
       const finalPosition = startPosition !== undefined
         ? (startPosition > 0 ? startPosition : 0)
         : (resumePosition > 0 ? resumePosition : undefined);
+      const isEpisode = mediaContext?.mediaType === 'episode' || Boolean(mediaContext?.seriesName && mediaContext?.episodeNumber !== undefined);
+      const episodeNav = {
+        isEpisode,
+        hasPrev: (mediaContext as any)?.hasPrev,
+        hasNext: (mediaContext as any)?.hasNext,
+      };
       const mediaTitle = formatMediaTitle(mediaContext, path);
-      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle);
+      await player.loadFile(path, finalPosition, effectiveHeaders, mediaTitle, episodeNav);
       // Auto-next anchor after successful load (same rule as local).
       autoNext.markLoaded({
         mediaType,
@@ -1848,6 +1860,15 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.PLAYER.GET_MEDIA_CONTEXT, () => {
     return ok(playbackStateManager?.getMediaSnapshot() ?? null);
   });
+
+  // 更新切集导航状态（mpv 控制条上一集/下一集可用/置灰/隐藏）
+  ipcMain.handle(
+    IPC_CHANNELS.PLAYER.SET_EPISODE_NAV,
+    async (_event, nav: { isEpisode: boolean; hasPrev?: boolean; hasNext?: boolean }) => {
+      await player.updateEpisodeButtons(nav);
+      return ok(true);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.PLAYER.GET_TRACKS, async () => {
     if (!player.isReady()) return [];

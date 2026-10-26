@@ -9,6 +9,8 @@ export const IPC_CHANNELS = {
     ON_STATE_CHANGE: 'player:on-state-change',
     /** 当前播放的媒体快照（QYP3-068q）：手动上一集/下一集据此定位当前集。 */
     GET_MEDIA_CONTEXT: 'player:get-media-context',
+    /** 更新切集导航状态（上一集/下一集是否可用/隐藏）。 */
+    SET_EPISODE_NAV: 'player:set-episode-nav',
   },
   LIBRARY: {
     OPEN_FILE: 'library:open-file',

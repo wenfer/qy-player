@@ -55,6 +55,9 @@ const electronAPI = {
   playerGetTracks: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.GET_TRACKS),
   // 当前播放的媒体快照（QYP3-068q）：手动上一集/下一集定位当前集用
   getMediaContext: () => ipcRenderer.invoke(IPC_CHANNELS.PLAYER.GET_MEDIA_CONTEXT),
+  // 联动更新 mpv 控制条切集状态（首集/尾集置灰，非剧集隐藏）
+  setEpisodeNav: (nav: { isEpisode: boolean; hasPrev?: boolean; hasNext?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLAYER.SET_EPISODE_NAV, nav),
   onPlayerStateChange: (callback: (state: unknown) => void) => {
     const handler = (_event: unknown, state: unknown) => callback(state);
     ipcRenderer.on(IPC_CHANNELS.PLAYER.ON_STATE_CHANGE, handler);

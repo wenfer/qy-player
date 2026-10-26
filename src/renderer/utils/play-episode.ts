@@ -82,5 +82,38 @@ export async function playAdjacentEpisode(direction: EpisodeDirection): Promise<
     return false;
   }
   await playEpisodeChoice(choice);
+  void syncEpisodeNav({
+    mediaType: 'episode',
+    mediaId: String(choice.itemId),
+    seasonNumber: choice.seasonNumber,
+    episodeNumber: choice.episodeNumber,
+  });
   return true;
+}
+
+/**
+ * 同步 MPV 播放器中的上一集/下一集可用状态：
+ * 探测是否有上一集与下一集，通知主进程将首集/末集按钮置灰禁用，或非剧集隐藏。
+ */
+export async function syncEpisodeNav(
+  current: import('../stores/auto-next-store').EpisodeQuery
+): Promise<void> {
+  const provider = useAutoNextStore.getState().provider;
+  if (!provider || current.mediaType !== 'episode') {
+    await window.electronAPI.setEpisodeNav?.({ isEpisode: false });
+    return;
+  }
+  try {
+    const [prevChoice, nextChoice] = await Promise.all([
+      provider(current, 'prev'),
+      provider(current, 'next'),
+    ]);
+    await window.electronAPI.setEpisodeNav?.({
+      isEpisode: true,
+      hasPrev: Boolean(prevChoice),
+      hasNext: Boolean(nextChoice),
+    });
+  } catch {
+    // Best-effort
+  }
 }

@@ -242,11 +242,51 @@ export class PlayerCore extends EventEmitter {
     await this.ipc.setProperty('hwdec', hwdec || 'no').catch(() => {});
   }
 
+  /**
+   * 联动更新 mpv 控制条中的上一集/下一集状态（支持隐藏、可用及灰色禁用态）。
+   * 非剧集媒体（如电影/音乐/单文件）直接隐藏切集按钮；剧集媒体在第一集/最后一集时展示灰色不可用状态。
+   */
+  async updateEpisodeButtons(nav: { isEpisode: boolean; hasPrev?: boolean; hasNext?: boolean }): Promise<void> {
+    if (!this.ipc) return;
+    try {
+      if (!nav.isEpisode) {
+        await this.ipc.command('script-message', 'set-button', 'prev-episode', JSON.stringify({
+          icon: 'skip_previous',
+          tooltip: '上一集',
+          hide: true,
+        })).catch(() => {});
+        await this.ipc.command('script-message', 'set-button', 'next-episode', JSON.stringify({
+          icon: 'skip_next',
+          tooltip: '下一集',
+          hide: true,
+        })).catch(() => {});
+      } else {
+        const hasPrev = Boolean(nav.hasPrev);
+        const hasNext = Boolean(nav.hasNext);
+        await this.ipc.command('script-message', 'set-button', 'prev-episode', JSON.stringify({
+          icon: 'skip_previous',
+          tooltip: hasPrev ? '上一集' : '已经是第一集',
+          command: hasPrev ? 'script-message qy-prev-episode' : undefined,
+          hide: false,
+        })).catch(() => {});
+        await this.ipc.command('script-message', 'set-button', 'next-episode', JSON.stringify({
+          icon: 'skip_next',
+          tooltip: hasNext ? '下一集' : '已经是最后一集',
+          command: hasNext ? 'script-message qy-next-episode' : undefined,
+          hide: false,
+        })).catch(() => {});
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
   async loadFile(
     path: string,
     startPosition?: number,
     httpHeaders?: string,
-    title?: string
+    title?: string,
+    episodeNav?: { isEpisode: boolean; hasPrev?: boolean; hasNext?: boolean }
   ): Promise<void> {
     if (!this.ipc) throw new Error('Player not started');
     // Streaming (transcode HLS) endpoints need auth on EVERY request -
@@ -258,6 +298,10 @@ export class PlayerCore extends EventEmitter {
 
     if (title) {
       await this.setTitle(title);
+    }
+
+    if (episodeNav) {
+      void this.updateEpisodeButtons(episodeNav);
     }
 
     if (startPosition !== undefined && startPosition > 0) {

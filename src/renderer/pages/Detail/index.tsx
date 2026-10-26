@@ -6,6 +6,7 @@ import EpisodeSwitchButtons from './EpisodeSwitchButtons';
 import EpisodeGrid from './EpisodeGrid';
 import type { ResumeEpisodeInput, ResumeTarget } from '../../../shared/types/playback';
 import { useAutoNextStore, type NextEpisodeChoice } from '../../stores/auto-next-store';
+import { syncEpisodeNav } from '../../utils/play-episode';
 import DetailSkeleton from '../../components/Skeleton/DetailSkeleton';
 import MediaInfoPanel, { type ProbePhase } from './MediaInfoPanel';
 import SkipOverrideDialog, { SkipOverrideTrigger } from './SkipOverrideDialog';
@@ -256,6 +257,12 @@ export default function Detail() {
         resolved.mediaContext,
         resolved.streamSessionId
       );
+      void syncEpisodeNav({
+        mediaType: resolved.mediaContext.mediaType,
+        mediaId: resolved.mediaContext.mediaId,
+        seasonNumber: resolved.mediaContext.seasonNumber ?? null,
+        episodeNumber: resolved.mediaContext.episodeNumber ?? null,
+      });
       addToast(
         playMode === 'transcode'
           ? '开始播放（服务端转码）'
@@ -317,7 +324,10 @@ export default function Detail() {
         return null;
       }
     });
-    return () => setAutoNextProvider(null);
+    return () => {
+      setAutoNextProvider(null);
+      void window.electronAPI.setEpisodeNav?.({ isEpisode: false });
+    };
   }, [details, serverId, serverType, setAutoNextProvider]);
 
   // QYP2-034: series primary-button target. The episode snapshots come
