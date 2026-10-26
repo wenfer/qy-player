@@ -284,7 +284,7 @@ export default function MetadataEditor({ itemId, open, onClose }: MetadataEditor
         className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-border rounded-lg p-5"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold">编辑元数据</h2>
+          <h2 className="text-base font-semibold">编辑元数据</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"

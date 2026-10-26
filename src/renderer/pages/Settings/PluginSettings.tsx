@@ -204,7 +204,7 @@ export default function PluginSettings() {
         <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 text-primary">
           <Plug size={17} />
         </div>
-        <h2 className="text-sm font-semibold">插件</h2>
+        <h2 className="text-base font-semibold">插件</h2>
         <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground text-[10px] font-medium">
           {plugins.length}
         </span>

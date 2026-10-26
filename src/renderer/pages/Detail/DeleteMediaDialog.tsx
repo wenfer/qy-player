@@ -166,7 +166,7 @@ export default function DeleteMediaDialog({ sourceId, itemId, open, onClose, onD
         className="w-full max-w-lg bg-card border border-border rounded-lg p-5 focus:outline-none"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold flex items-center gap-1.5">
+          <h2 className="text-base font-semibold flex items-center gap-1.5">
             <Trash2 size={15} className="text-destructive" />
             删除媒体
           </h2>

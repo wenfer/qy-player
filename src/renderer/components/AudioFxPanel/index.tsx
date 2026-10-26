@@ -255,7 +255,7 @@ export default function AudioFxPanel({ onClose }: Props) {
       onKeyDown={handleKeyDown}
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
-        <h2 className="text-sm font-semibold">音效</h2>
+        <h2 className="text-base font-semibold">音效</h2>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">{saved ? '已保存' : ''}</span>
           <button type="button" className={ICON_BTN} onClick={requestClose} aria-label="关闭音效面板" title="关闭">

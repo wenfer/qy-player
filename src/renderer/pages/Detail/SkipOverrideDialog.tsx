@@ -170,7 +170,7 @@ export default function SkipOverrideDialog({
         className="w-full max-w-md bg-card border border-border rounded-lg p-5 focus:outline-none"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold flex items-center gap-1.5">
+          <h2 className="text-base font-semibold flex items-center gap-1.5">
             <Timer size={15} className="text-muted-foreground" />
             片头/片尾设定
           </h2>
