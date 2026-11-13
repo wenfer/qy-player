@@ -90,16 +90,6 @@ import {
   mapDeletePreviewResult,
   SafeDeleteService,
 } from '../modules/media-operations/delete-service';
-import { PluginConfigService, REQUIRED_SECRET_KEYS } from '../modules/plugin-runtime/config-service';
-import {
-  getPlugin,
-  getPluginContext,
-  listPlugins,
-  registerPlugin,
-} from '../modules/plugin-runtime/registry';
-import { buildTmdbPlugin } from '../plugins/tmdb';
-import { ScrapeJobService } from '../modules/plugin-runtime/job-service';
-import { PluginError } from '../../shared/types/plugins';
 import {
   clearNowPlaying,
   parseNowPlaying,
@@ -264,56 +254,6 @@ export function registerIpcHandlers(
   // Failure must never block app startup: the legacy column stays as-is and
   // the next launch retries. The log must not contain the token itself.
   const secretStore = createSecretStore(db);
-  // Plugin config (QYP2-027): secrets write-only through the IPC surface.
-  const pluginConfigService = new PluginConfigService({
-    store: secretStore,
-    getConfig: (key) => storage.getConfig(key),
-    setConfig: (key, value) => storage.setConfig(key, value),
-    probe: async (pluginId, secret) => {
-      if (pluginId === 'tmdb') {
-        if (!secret) return { ok: false, retryable: false, message: '未配置 API Token' };
-        const ctx = getPluginContext('tmdb');
-        if (!ctx) return { ok: false, retryable: false, message: 'TMDB 插件未就绪' };
-        const isV3Key = /^[0-9a-fA-F]{32}$/.test(secret);
-        const headers: Record<string, string> = { accept: 'application/json' };
-        const query: Record<string, string> = {};
-        if (isV3Key) {
-          query.api_key = secret;
-        } else {
-          headers.Authorization = `Bearer ${secret}`;
-        }
-        const rawBaseUrl = typeof ctx.settings?.apiBaseUrl === 'string' ? ctx.settings.apiBaseUrl.trim() : '';
-        const baseUrl = rawBaseUrl && (rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://'))
-          ? rawBaseUrl.replace(/\/+$/, '')
-          : 'https://api.themoviedb.org/3';
-        try {
-          const parsed = new URL(baseUrl);
-          ctx.http.allowHosts([parsed.hostname]);
-          const res = await ctx.http.request({
-            url: `${baseUrl}/configuration`,
-            method: 'GET',
-            headers,
-            query,
-            timeoutMs: 6000,
-          });
-          if (res.status === 200) {
-            return { ok: true, retryable: false, message: '连接成功，API 响应正常' };
-          }
-          if (res.status === 401) {
-            return { ok: false, retryable: false, message: '认证失败（401）：Token 或 API Key 无效' };
-          }
-          if (res.status === 429) {
-            return { ok: false, retryable: true, message: 'TMDB 限流（429），请稍后重试' };
-          }
-          return { ok: false, retryable: true, message: `TMDB 返回 HTTP ${res.status}` };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { ok: false, retryable: true, message: `连接失败: ${msg}` };
-        }
-      }
-      return { ok: true, retryable: false, message: '已就绪' };
-    },
-  });
   try {
     migrateServerTokensToSecretStore(db, storage.getServers(), secretStore);
   } catch (err) {
@@ -328,50 +268,6 @@ export function registerIpcHandlers(
 
   // QYP3-019：歌词缓存目录（扫描期从标签透传落盘，人工可编辑 → 受保护）
   const lyricsDir = join(app.getPath('userData'), 'lyrics');
-
-  // Plugin registry (QYP2-029 挂账② / QYP2-032): tmdb is the ONLY
-  // registered metadata provider. Douban stays unregistered per the
-  // ADR-0006 gate (contract test enforces no other wiring references it).
-  const tmdbRegistration = registerPlugin(buildTmdbPlugin(), {
-    getSecret: (namespace, key) => secretStore.getSecret(namespace, key),
-    getSettings: () => pluginConfigService.getConfig('tmdb').settings,
-    appVersion: app.getVersion(),
-    locale: 'zh-CN',
-  });
-  if (!tmdbRegistration.ok) {
-    // Registration must never silently degrade into "plugin missing".
-    console.error('[PLUGINS] TMDB 注册失败:', tmdbRegistration.errors.join('; '));
-  }
-  const scrapeJobs = new ScrapeJobService({
-    repo: {
-      getItem: (id) => catalogRepo.getItem(id),
-      listMetadataSources: (itemId) => catalogRepo.listMetadataSources(itemId),
-      upsertMetadataSource: (itemId, field, provider, value) =>
-        catalogRepo.upsertMetadataSource(itemId, field, provider, value),
-    },
-    kv: {
-      get: (key) => storage.getConfig(key),
-      set: (key, value) => storage.setConfig(key, value),
-    },
-    cacheDir: join(app.getPath('userData'), 'scrape-cache'),
-    runSearch: async (pluginId, query) => {
-      const registered = getPlugin(pluginId);
-      const ctx = getPluginContext(pluginId);
-      if (!registered || !ctx) throw new PluginError('NOT_FOUND', '插件未注册');
-      return registered.plugin.search({
-        query: query.title,
-        ...(query.year !== undefined ? { year: query.year } : {}),
-        ...(query.kind !== undefined ? { kind: query.kind } : {}),
-      }, ctx);
-    },
-    runDetails: async (pluginId, id, input) => {
-      const registered = getPlugin(pluginId);
-      const ctx = getPluginContext(pluginId);
-      if (!registered || !ctx) throw new PluginError('NOT_FOUND', '插件未注册');
-      return registered.plugin.getDetails(id, input ?? {}, ctx);
-    },
-    concurrency: 2,
-  });
 
   // Initialize playback state manager. WebDAV progress keys bypass the
   // phase-1 tables (media_type CHECK) into catalog_user_state; the key
@@ -1149,16 +1045,6 @@ export function registerIpcHandlers(
   const cacheManager = new CacheManager();
   cacheManager.register(
     { id: 'probe', description: '技术信息探测缓存（内存 LRU+TTL）', rootDir: null, quota: { maxEntries: 256 }, sweepable: false },
-    []
-  );
-  cacheManager.register(
-    {
-      id: 'plugin-response',
-      description: '插件响应磁盘缓存（mtime-LRU，TTL 7 天）',
-      rootDir: join(app.getPath('userData'), 'scrape-cache'),
-      quota: { maxEntries: 4096 },
-      sweepable: true,
-    },
     []
   );
   cacheManager.register(
@@ -2256,7 +2142,7 @@ export function registerIpcHandlers(
     closeDatabase();
   });
 
-  registerCatalogHandlers(db, secretStore, catalogRepo, pluginConfigService, scrapeJobs);
+  registerCatalogHandlers(db, secretStore, catalogRepo);
 }
 
 // ---------------------------------------------------------------------------
@@ -2293,9 +2179,7 @@ function broadcastScanEvent(event: ScanProgressEvent): void {
 function registerCatalogHandlers(
   db: ReturnType<typeof getDatabase>,
   secretStore: SecretStore,
-  catalogRepo: ReturnType<typeof createCatalogRepository>,
-  pluginConfigService: PluginConfigService,
-  scrapeJobs: ScrapeJobService
+  catalogRepo: ReturnType<typeof createCatalogRepository>
 ): void {
   // Legacy tables (watch_history) live in the same database; the series
   // resume merge (RESUME.SERIES) needs them alongside the catalog repo.
@@ -2808,55 +2692,6 @@ function registerCatalogHandlers(
     }
   );
 
-  // ---- Scrape jobs (QYP2-032, plan §11.2) ----
-  const assertScrapePluginUsable = (pluginId: unknown): string | null => {
-    if (typeof pluginId !== 'string' || pluginId.length === 0) return '插件参数不合法';
-    if (!getPlugin(pluginId)) return '插件未注册';
-    if (!pluginConfigService.getConfig(pluginId).enabled) return '插件已停用';
-    return null;
-  };
-
-  ipcMain.handle(IPC_CHANNELS.SCRAPE.START, (_event, pluginId: unknown, itemIds: unknown, jobId: unknown) => {
-    const pluginProblem = assertScrapePluginUsable(pluginId);
-    if (pluginProblem) return err('VALIDATION_FAILED', pluginProblem);
-    if (!Array.isArray(itemIds) || itemIds.some((id) => !Number.isInteger(id) || id <= 0) || itemIds.length === 0) {
-      return err('VALIDATION_FAILED', '条目列表不合法');
-    }
-    if (itemIds.length > 500) return err('VALIDATION_FAILED', '单批最多 500 个条目');
-    if (jobId !== undefined && jobId !== null && typeof jobId !== 'string') {
-      return err('VALIDATION_FAILED', '任务 id 不合法');
-    }
-    return ok(scrapeJobs.startJob(pluginId as string, itemIds as number[], (jobId as string) ?? undefined));
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SCRAPE.JOBS, () => {
-    return ok(scrapeJobs.listJobs());
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SCRAPE.STATUS, (_event, jobId: unknown) => {
-    if (typeof jobId !== 'string' || jobId.length === 0) return err('VALIDATION_FAILED', '任务 id 不合法');
-    return ok(scrapeJobs.getJob(jobId));
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SCRAPE.CANCEL, (_event, jobId: unknown) => {
-    if (typeof jobId !== 'string' || jobId.length === 0) return err('VALIDATION_FAILED', '任务 id 不合法');
-    return ok({ cancelled: scrapeJobs.cancelJob(jobId) });
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.SCRAPE.APPLY,
-    async (_event, pluginId: unknown, itemId: unknown, candidateId: unknown) => {
-      const pluginProblem = assertScrapePluginUsable(pluginId);
-      if (pluginProblem) return err('VALIDATION_FAILED', pluginProblem);
-      if (!Number.isInteger(itemId) || (itemId as number) <= 0) return err('VALIDATION_FAILED', '条目 id 不合法');
-      if (typeof candidateId !== 'string' || candidateId.length === 0) return err('VALIDATION_FAILED', '候选 id 不合法');
-      const item = catalogRepo.getItem(itemId as number);
-      if (!item) return err('NOT_FOUND', '条目不存在');
-      const kind = item.kind === 'series' ? 'series' : 'movie';
-      return ok(await scrapeJobs.applyCandidate(pluginId as string, itemId as number, candidateId as string, kind));
-    }
-  );
-
   // ---- Series resume resolution (QYP2-034, plan §12.2) ----
   // The renderer never copies the algorithm: it collects the series'
   // episode snapshots (server UserData preferred, §12.1) and the pure
@@ -2926,87 +2761,6 @@ function registerCatalogHandlers(
         ? pickPreviousEpisode(clean, season, episode)
         : pickNextEpisode(clean, season, episode);
     return ok(picked);
-  });
-
-  // ---- Plugin config (QYP2-027, plan §11.1/§11.3) ----
-  ipcMain.handle(IPC_CHANNELS.PLUGINS.LIST, () => {
-    return ok(
-      listPlugins().map(({ manifest }) => {
-        const config = pluginConfigService.getConfig(manifest.id);
-        const secretKeys = [...REQUIRED_SECRET_KEYS].filter((key) =>
-          pluginConfigService.hasSecret(manifest.id, key)
-        );
-        return {
-          id: manifest.id,
-          name: manifest.name,
-          version: manifest.version,
-          apiVersion: manifest.apiVersion,
-          capability: manifest.capability,
-          enabled: config.enabled,
-          priority: config.priority,
-          settings: config.settings,
-          /** Fingerprints only - secret values never cross the boundary. */
-          secrets: secretKeys.map((key) => ({ key, set: true })),
-        };
-      })
-    );
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.PLUGINS.SET_CONFIG,
-    (_event, pluginId: unknown, patch: { enabled?: boolean; priority?: number; settings?: Record<string, string | number | boolean> }) => {
-      if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
-        return err('VALIDATION_FAILED', '插件 ID 无效');
-      }
-      if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
-        return err('NOT_FOUND', '插件未注册');
-      }
-      try {
-        return ok({ config: pluginConfigService.setConfig(pluginId, patch ?? {}) });
-      } catch (e) {
-        return err('VALIDATION_FAILED', e instanceof Error ? e.message : '配置无效');
-      }
-    }
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.PLUGINS.SET_SECRET,
-    (_event, pluginId: unknown, key: unknown, value: unknown) => {
-      if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
-        return err('VALIDATION_FAILED', '插件 ID 无效');
-      }
-      if (typeof key !== 'string' || typeof value !== 'string') {
-        return err('VALIDATION_FAILED', 'secret 参数无效');
-      }
-      try {
-        const { fingerprint } = pluginConfigService.setSecret(pluginId, key, value);
-        return ok({ fingerprint }); // never the secret itself
-      } catch (e) {
-        return err('VALIDATION_FAILED', e instanceof Error ? e.message : 'secret 无效');
-      }
-    }
-  );
-
-  ipcMain.handle(IPC_CHANNELS.PLUGINS.DELETE_SECRET, (_event, pluginId: unknown, key: unknown) => {
-    if (typeof pluginId !== 'string' || typeof key !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
-      return err('VALIDATION_FAILED', '参数无效');
-    }
-    if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
-      return err('NOT_FOUND', '插件未注册');
-    }
-    pluginConfigService.deleteSecret(pluginId, key);
-    return ok({ deleted: true });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.PLUGINS.TEST, async (_event, pluginId: unknown) => {
-    if (typeof pluginId !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(pluginId)) {
-      return err('VALIDATION_FAILED', '插件 ID 无效');
-    }
-    if (!listPlugins().some(({ manifest }) => manifest.id === pluginId)) {
-      return err('NOT_FOUND', '插件未注册');
-    }
-    const health = await pluginConfigService.checkHealth(pluginId);
-    return ok(health);
   });
 
   // ---- Safe delete (QYP2-024, plan §14.2) ----

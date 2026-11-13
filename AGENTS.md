@@ -40,7 +40,6 @@
 │     music-spectrum/            离线频谱：ffmpeg 解码 → 自研 FFT → 12fps×48 频带落盘（QYP3-050，并发 1）
 │     media-operations/          字幕导入 / 两阶段安全删除
 │     metadata/                  NFO 解析 / 字段合并 / 元数据编辑器
-│     plugin-runtime/            插件 registry/配置/刮削任务/匹配器/缓存（§11）
 │     cache/ cache-manager        §16.4 预算常量单源 + 缓存分区清扫（字幕受保护）
 │     diagnostics/               脱敏诊断摘要（可分享，无秘密/私有 URL/绝对路径）
 │     library-scanner/ library-sources/  本地/WebDAV 扫描与来源适配（ADR-0001）
@@ -59,7 +58,7 @@
 - **当前播放的音乐**（QYP3-053）：`playback-state/now-playing.ts` 在 `app_config` 里存**一条**记录（曲目 + 进度，本地按 `(sourceId, trackId)`、服务器按 `(serverId, itemId)` 定位，不存 path/绝对路径）。渲染层经 `MUSIC.SET_NOW_PLAYING`（节流 5s，暂停/跳曲/停止立即）写入，启动时 `MUSIC.GET_NOW_PLAYING` 读回 → `NowPlayingHost` 恢复播放条（**engine 保持 null，不自动出声**）。**只在上次退出时是音乐模式才恢复**（QYP3-068p）：`GET_NOW_PLAYING` 读 `window.memory.music`，不是音乐模式就作废记录并返回 null——影视界面不该挂着一条不属于它的播放条。恢复态**不算音乐会话**（否则会误触自动精简、抢走全局媒体键），点播放走 `resumeRestored()` 从上次位置起播，并按「全部曲目」**重建完整队列**（本地/WebDAV，恢复曲落在曲库原位；曲库读取失败或服务器曲目退回单曲队列，QYP3-068d）
 - **自动连播**：`playback-state/auto-next.ts`——仅自然 EOF；控制器注册在 eof 保存**之后**（保存先于倒计时）；disconnect/crashed 立即取消
 - **手动切集**（QYP3-068q）：剧集详情页左栏的「上一集/下一集」按钮（`pages/Detail/EpisodeSwitchButtons`）与全局快捷键（Ctrl+Shift+←/→，`components/EpisodeShortcutHost`）走同一条路——`utils/play-episode.ts` 读主进程的媒体快照（`PLAYER.GET_MEDIA_CONTEXT`：只有主进程知道"正在播哪一集"）→ 问 Detail 注册的 provider（`auto-next-store`，它手上是整部戏的剧集列表）→ `resolvePlayback` + `loadFile`（**显式 0**）。方向由调用方给，排序算法只在主进程（`pickNextEpisode`/`pickPreviousEpisode`）。**没有 provider（不在剧集页）快捷键静默**；电影详情页不注册 provider 也不渲染按钮。**别把按钮放 `PlayerControls`**：影视播放走独立 mpv 窗口，主窗口那条自绘控制条的 `player-store.isVisible` 无人置位、从不显示（QYP3-068q 实测）
-- **刮削**：`plugin-runtime/job-service`（并发 2、置信度 0.92/0.75、UPSTREAM_CHANGED 暂停整批）；插件 payload 必过 `validateMetadataPayload`；TMDB Token 仅 Bearer 头
+- **元数据**：以本地/WebDAV NFO 标签解析为准（`metadata/nfo-parser.ts`，支持 movie/tvshow/season/episode），用户可在详情页元数据编辑器手动修改覆盖（锁定后扫描不覆盖）
 - **统一查询**：`catalog/unified-query.ts`——去重只按完整 MediaRef（provider+owner+itemId）；分页 ≤200；来源局部失败不阻塞
 - **音乐**：`playback-engine/engine-selector.ts` 是引擎判定的唯一来源（转码/CUE/兼容性优先/非直解格式 → mpv；spectrum-first 且直连格式 → renderer 引擎——QYP3-037 起服务器/WebDAV 音频经 `qy-stream://` 认证流代理也走 renderer 引擎，`sourceKind` 不再强制 mpv）；renderer 侧 `stores/music-playback-store` 单点归一（webaudio 驱动 / mpv 走 playerLoadFile，direct 失败回退 mpv 一次；引擎队列**按需懒解析**单曲 URL，服务器整队预解析是 N 次网络请求）
 - **服务器音乐**：音乐页「来源」切换见 `utils/server-music.ts`（纯映射，只认 `CollectionType=music`）+ `Music/ServerMusicBrowser`；服务器曲目**不落本地库**，播放走 `MusicTrackInput{serverId,provider,itemId}` → `refOfTrack` 严格按 serverId 路由；mpv 引擎的上下曲靠 store 的 `serverQueue/serverIndex`（队尾 stop，不回卷）；**本地 mpv 音源**（APE/兼容性优先/兜底）靠 `mpvQueue/mpvQueueIndex` 走播放时的列表（恢复态=全部曲目，QYP3-068f），fallbackToMpvNow 会把 webaudio 的 queueSnapshot 带进 mpvQueue。**服务器歌单**（P2 只读）复用同一套映射与队列（`pages/Playlists/ServerPlaylists`），条目走 `/Playlists/{id}/Items`，歌单 id 只在其服务器上有意义 → IPC 强制 serverId

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import PluginSettings from './PluginSettings';
 import PlaybackSettings from './PlaybackSettings';
 import MusicSettings from './MusicSettings';
 import { ShortcutsContent } from '../Shortcuts';
@@ -9,16 +8,15 @@ import { useAppModeStore, type AppMode } from '../../stores/app-mode-store';
  * 设置页：按板块分页签（QYP3-029），页签集合随顶层模式变化（QYP3-040）。
  *
  * 影视与音乐是两套独立配置域（各自的播放引擎、音量链路、曲目/剧集语义），
- * 模式隔离后视频模式只见 播放/插件/快捷键，音乐模式只见 音乐/快捷键。
+ * 模式隔离后视频模式只见 播放/快捷键，音乐模式只见 音乐/快捷键。
  * 快捷键是应用级配置（全局键 + MPV 键），两种模式共用同一份内容。
  */
 
-type Tab = 'playback' | 'music' | 'plugins' | 'shortcuts';
+type Tab = 'playback' | 'music' | 'shortcuts';
 
 const TABS_BY_MODE: Record<AppMode, Array<{ id: Tab; label: string }>> = {
   video: [
     { id: 'playback', label: '播放' },
-    { id: 'plugins', label: '插件' },
     { id: 'shortcuts', label: '快捷键' },
   ],
   music: [
@@ -80,7 +78,6 @@ export default function Settings() {
       >
         {activeTab === 'playback' && <PlaybackSettings />}
         {activeTab === 'music' && <MusicSettings />}
-        {activeTab === 'plugins' && <PluginSettings />}
         {activeTab === 'shortcuts' && <ShortcutsContent />}
       </div>
     </div>

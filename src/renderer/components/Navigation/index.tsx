@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import {
-  Home, FolderOpen, Library, Search, Settings, History, Wand2,
+  Home, FolderOpen, Library, Search, Settings, History,
   Music, ListMusic, Clapperboard,
 } from 'lucide-react';
 import { useAppModeStore, MODE_HOME, type AppMode } from '../../stores/app-mode-store';
@@ -18,7 +18,6 @@ const VIDEO_NAV: NavItem[] = [
   { path: '/local', label: '本地', icon: FolderOpen },
   { path: '/search', label: '搜索', icon: Search },
   { path: '/history', label: '历史', icon: History },
-  { path: '/scrape-jobs', label: '刮削任务', icon: Wand2 },
   { path: '/media-sources', label: '媒体库', icon: Library },
   { path: '/settings', label: '设置', icon: Settings },
 ];

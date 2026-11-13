@@ -3,7 +3,6 @@ import { useEffect, useRef } from 'react';
 import Home from './pages/Home';
 import Detail from './pages/Detail';
 import Settings from './pages/Settings';
-import Libraries from './pages/Libraries';
 import MediaSources from './pages/MediaSources';
 import MediaSourcesPage from './pages/MediaSources/MediaSourcesPage';
 import Search from './pages/Search';
@@ -188,7 +187,6 @@ function Shell() {
             <Route path="/media-sources" element={<MediaSources />} />
             {/* 音乐模式媒体库（QYP3-040/041）：只显示音乐来源 */}
             <Route path="/music-sources" element={<MediaSourcesPage mode="music" />} />
-            <Route path="/scrape-jobs" element={<Libraries />} />
             <Route path="/search" element={<Search />} />
             <Route path="/local" element={<Local />} />
             <Route path="/music" element={<MusicPage />} />

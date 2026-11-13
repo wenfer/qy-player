@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Loader2, Film, AlertCircle, Play, Search, Star, Tv, Clapperboard, Wand2 } from 'lucide-react';
+import { ChevronLeft, Loader2, Film, AlertCircle, Play, Search, Star, Tv, Clapperboard } from 'lucide-react';
 import PosterCard from '../../components/PosterCard';
 import PosterSkeleton from '../../components/Skeleton/PosterSkeleton';
 import { getServerMap, buildItemImageUrl } from '../../utils/server-images';
@@ -28,7 +28,6 @@ import type { PlaybackResolution } from '../../../shared/types/catalog';
 import SubtitleManager from '../Detail/SubtitleManager';
 import MetadataEditor from '../Detail/MetadataEditor';
 import MediaActions from '../Detail/MediaActions';
-import ScrapeDialog from '../Detail/ScrapeDialog';
 
 interface ResolvedPlayback {
   ok: boolean;
@@ -97,7 +96,6 @@ function CatalogItemDetailView({
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [scrapeOpen, setScrapeOpen] = useState(false);
   const editButtonRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
@@ -293,28 +291,6 @@ function CatalogItemDetailView({
         }}
       />
 
-      {/* QYP2-032: single-item scrape (auto/confirm/reject handled main-side). */}
-      {(item.kind === 'movie' || item.kind === 'series' || item.kind === 'video') && (
-        <>
-          <button
-            type="button"
-            onClick={() => setScrapeOpen(true)}
-            className="w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-2 border border-border rounded-lg hover:bg-accent transition-colors focus-ring text-xs text-muted-foreground hover:text-foreground"
-          >
-            <Wand2 size={13} />
-            刮削元数据
-          </button>
-          <ScrapeDialog
-            itemId={Number(item.ref.itemId)}
-            open={scrapeOpen}
-            onClose={() => {
-              setScrapeOpen(false);
-              load();
-            }}
-          />
-        </>
-      )}
-
       {(item.kind === 'movie' || item.kind === 'series' || item.kind === 'video') && (
         <MediaActions
           sourceId={sourceId}
@@ -405,7 +381,6 @@ export default function LibraryBrowse() {
   const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [searching, setSearching] = useState(false);
-  const [batchScraping, setBatchScraping] = useState(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const startIndexRef = useRef(0);
@@ -592,41 +567,6 @@ export default function LibraryBrowse() {
     [isCatalog, catalogSourceId]
   );
 
-  // QYP2-032: batch scrape over the loaded catalog items (movie/series
-  // only — seasons/episodes/videos have no standalone metadata to scrape).
-  const batchScrape = useCallback(async () => {
-    const targets = items
-      .filter((entry) => entry.type === 'Movie' || entry.type === 'Series')
-      .map((entry) => Number(entry.catalogRef?.itemId ?? entry.id))
-      .filter((id) => Number.isInteger(id) && id > 0);
-    if (targets.length === 0) {
-      addToast('当前列表没有可刮削的电影/剧集', 'error');
-      return;
-    }
-    setBatchScraping(true);
-    try {
-      const res = (await window.electronAPI.scrapeStart('tmdb', targets)) as {
-        ok: boolean;
-        error?: { message: string };
-      };
-      if (!res.ok) {
-        const msg = res.error?.message ?? '任务启动失败';
-        if (msg.includes('插件已停用') || msg.includes('未注册')) {
-          addToast('TMDB 刮削插件未启用，请前往“设置 → 插件”开启', 'error');
-        } else {
-          addToast(msg, 'error');
-        }
-        return;
-      }
-      addToast(`批量刮削已开始（${targets.length} 项）`, 'success');
-      navigate('/scrape-jobs');
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : '任务启动失败', 'error');
-    } finally {
-      setBatchScraping(false);
-    }
-  }, [items, addToast, navigate]);
-
   useEffect(() => {
     if (isCatalog) {
       if (catalogItemId === null) loadCatalogPage(true);
@@ -751,17 +691,6 @@ export default function LibraryBrowse() {
             >
               {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
               搜索
-            </button>
-            <button
-              type="button"
-              onClick={() => void batchScrape()}
-              disabled={batchScraping}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg hover:bg-accent transition-colors text-sm focus-ring disabled:opacity-50"
-              aria-label="批量刮削"
-              title="对当前列表的电影/剧集批量刮削元数据"
-            >
-              {batchScraping ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
-              批量刮削
             </button>
           </form>
         )}

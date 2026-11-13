@@ -202,13 +202,6 @@ export const IPC_CHANNELS = {
     DELETE_PREVIEW: 'media:delete-preview',
     DELETE_EXECUTE: 'media:delete-execute',
   },
-  PLUGINS: {
-    LIST: 'plugins:list',
-    SET_CONFIG: 'plugins:set-config',
-    SET_SECRET: 'plugins:set-secret',
-    DELETE_SECRET: 'plugins:delete-secret',
-    TEST: 'plugins:test',
-  },
   RESUME: {
     SERIES: 'resume:series',
     NEXT: 'resume:next',
@@ -229,12 +222,5 @@ export const IPC_CHANNELS = {
     SET_SETTING: 'skip-segments:set-setting',
     GET_OVERRIDE: 'skip-segments:get-override',
     SET_OVERRIDE: 'skip-segments:set-override',
-  },
-  SCRAPE: {
-    START: 'scrape:start',
-    JOBS: 'scrape:jobs',
-    STATUS: 'scrape:status',
-    CANCEL: 'scrape:cancel',
-    APPLY: 'scrape:apply',
   },
 } as const;

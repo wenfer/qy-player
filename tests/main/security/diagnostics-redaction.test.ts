@@ -13,7 +13,6 @@ import {
   maskUrl,
   redactValue,
 } from '../../../src/main/modules/diagnostics';
-import { ScrapeCache } from '../../../src/main/modules/plugin-runtime/cache';
 import * as fsmod from 'node:fs';
 const fs = fsmod as typeof import('node:fs');
 
@@ -148,23 +147,5 @@ describe('诊断脱敏（验收：无秘密/完整私有 URL）', () => {
     });
     expect(JSON.stringify(summary)).not.toContain('abcd');
     expect(JSON.stringify(summary)).not.toContain('192.168.1.10');
-  });
-});
-
-describe('插件响应缓存配额与字幕安全共存', () => {
-  it('ScrapeCache 超配额驱逐最旧 mtime，不影响外部字幕目录', () => {
-    const dir = makeTempDir();
-    const clock = { n: Date.now() };
-    const cache2 = new ScrapeCache({ dir, maxEntries: 2, now: () => clock.n });
-    cache2.set('tmdb', 'ns', 'k1', { a: 1 });
-    clock.n += 10;
-    cache2.set('tmdb', 'ns', 'k2', { b: 2 });
-    clock.n += 10;
-    cache2.set('tmdb', 'ns', 'k3', { c: 3 });
-    // 最旧 mtime 被驱逐（真 LRU）；剩下最多 2 条（k1 与 k2 中最旧者出局）。
-    expect(cache2.get('tmdb', 'ns', 'k1')).toBeUndefined();
-    expect(cache2.size).toBeLessThanOrEqual(2);
-    expect(cache2.get('tmdb', 'ns', 'k2')).toEqual({ b: 2 });
-    expect(cache2.get('tmdb', 'ns', 'k3')).toEqual({ c: 3 });
   });
 });

@@ -149,16 +149,6 @@ const electronAPI = {
   pickImageFile: () => ipcRenderer.invoke(IPC_CHANNELS.METADATA.PICK_IMAGE),
   importImages: (itemId: number, inputs: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.METADATA.IMPORT_IMAGES, itemId, inputs),
-  // Safe delete (QYP2-024): preview/execute two-phase
-  // Plugin config (QYP2-027)
-  listPlugins: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.LIST),
-  setPluginConfig: (pluginId: string, patch: unknown) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.SET_CONFIG, pluginId, patch),
-  setPluginSecret: (pluginId: string, key: string, value: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.SET_SECRET, pluginId, key, value),
-  deletePluginSecret: (pluginId: string, key: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.DELETE_SECRET, pluginId, key),
-  testPlugin: (pluginId: string) => ipcRenderer.invoke(IPC_CHANNELS.PLUGINS.TEST, pluginId),
   diagnosticsSummary: () => ipcRenderer.invoke(IPC_CHANNELS.DIAGNOSTICS.SUMMARY),
   // Unified cross-source queries (QYP2-036)
   unifiedContinueWatching: (limit?: number) =>
@@ -329,14 +319,6 @@ const electronAPI = {
     /** QYP3-068q：手动「上一集」传 'prev'（省略 = 下一集）。 */
     direction?: 'next' | 'prev';
   }) => ipcRenderer.invoke(IPC_CHANNELS.RESUME.NEXT, input),
-  // Scrape jobs (QYP2-032)
-  scrapeStart: (pluginId: string, itemIds: number[], jobId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.START, pluginId, itemIds, jobId),
-  scrapeJobs: () => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.JOBS),
-  scrapeStatus: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.STATUS, jobId),
-  scrapeCancel: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.CANCEL, jobId),
-  scrapeApply: (pluginId: string, itemId: number, candidateId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SCRAPE.APPLY, pluginId, itemId, candidateId),
   previewMediaDeletion: (ref: { sourceId: number; itemId: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEDIA.DELETE_PREVIEW, ref),
   executeMediaDeletion: (args: { token: string; confirmTitle?: string }) =>
